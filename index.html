@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="FRIDAY OS - Your Personal AI Assistant">
+  <title>FRIDAY OS</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Boot Screen -->
+  <div id="bootScreen" class="boot-screen">
+    <div class="boot-content">
+      <div class="boot-logo">
+        <div class="core-ring">
+          <div class="core-inner"></div>
+        </div>
+      </div>
+      <h1 class="boot-title">FRIDAY</h1>
+      <p class="boot-subtitle">Personal AI Operating System</p>
+      <div class="boot-progress">
+        <div class="boot-progress-bar"></div>
+      </div>
+      <p class="boot-status">Initializing systems...</p>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="app hidden">
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <div class="status-left">
+        <span class="status-time" id="statusTime">00:00</span>
+      </div>
+      <div class="status-center">
+        <span class="status-label">FRIDAY OS v1.0</span>
+      </div>
+      <div class="status-right">
+        <span class="status-indicator" id="aiStatus">
+          <span class="dot"></span> Online
+        </span>
+      </div>
+    </div>
+
+    <!-- AI Core Visualization -->
+    <div class="ai-core-section">
+      <canvas id="coreCanvas"></canvas>
+      <div class="voice-waveform" id="voiceWaveform">
+        <div class="wave-bar" style="--i:0"></div>
+        <div class="wave-bar" style="--i:1"></div>
+        <div class="wave-bar" style="--i:2"></div>
+        <div class="wave-bar" style="--i:3"></div>
+        <div class="wave-bar" style="--i:4"></div>
+        <div class="wave-bar" style="--i:5"></div>
+        <div class="wave-bar" style="--i:6"></div>
+        <div class="wave-bar" style="--i:7"></div>
+        <div class="wave-bar" style="--i:8"></div>
+        <div class="wave-bar" style="--i:9"></div>
+        <div class="wave-bar" style="--i:10"></div>
+        <div class="wave-bar" style="--i:11"></div>
+        <div class="wave-bar" style="--i:12"></div>
+        <div class="wave-bar" style="--i:13"></div>
+        <div class="wave-bar" style="--i:14"></div>
+        <div class="wave-bar" style="--i:15"></div>
+        <div class="wave-bar" style="--i:16"></div>
+        <div class="wave-bar" style="--i:17"></div>
+        <div class="wave-bar" style="--i:18"></div>
+        <div class="wave-bar" style="--i:19"></div>
+      </div>
+      <p class="listening-text" id="listeningText">Tap to speak</p>
+    </div>
+
+    <!-- Main Mic Button -->
+    <div class="mic-container">
+      <button class="mic-button" id="micButton" aria-label="Voice Input">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+      <div class="mic-pulse"></div>
+      <div class="mic-pulse delay"></div>
+    </div>
+
+    <!-- Chat Area -->
+    <div class="chat-area" id="chatArea">
+      <div class="chat-messages" id="chatMessages">
+        <!-- Messages will be added here -->
+      </div>
+    </div>
+
+    <!-- Text Input (fallback) -->
+    <div class="input-area">
+      <div class="input-wrapper">
+        <input type="text" id="textInput" placeholder="Type or tap mic to speak..." autocomplete="off">
+        <button class="send-button" id="sendButton" aria-label="Send">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-bar">
+      <button class="nav-btn active" data-panel="chat" aria-label="Chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span>Chat</span>
+      </button>
+      <button class="nav-btn" data-panel="memory" aria-label="Memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        <span>Memory</span>
+      </button>
+      <button class="nav-btn" data-panel="skills" aria-label="Skills">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+        <span>Skills</span>
+      </button>
+      <button class="nav-btn" data-panel="settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span>Settings</span>
+      </button>
+    </div>
+
+    <!-- Panels -->
+    <!-- Memory Panel -->
+    <div class="panel" id="memoryPanel">
+      <div class="panel-header">
+        <h2>🧠 Memory Bank</h2>
+        <button class="panel-close" data-close="memory">✕</button>
+      </div>
+      <div class="panel-content" id="memoryContent">
+        <div class="memory-search">
+          <input type="text" id="memorySearch" placeholder="Search memories...">
+        </div>
+        <div id="memoryList" class="memory-list">
+          <p class="empty-state">No memories stored yet. Start talking to FRIDAY!</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skills Panel -->
+    <div class="panel" id="skillsPanel">
+      <div class="panel-header">
+        <h2>⭐ Skills</h2>
+        <button class="panel-close" data-close="skills">✕</button>
+      </div>
+      <div class="panel-content">
+        <div class="skills-grid">
+          <div class="skill-card active-skill">
+            <div class="skill-icon">💬</div>
+            <div class="skill-name">AI Chat</div>
+            <div class="skill-status">Active</div>
+          </div>
+          <div class="skill-card active-skill">
+            <div class="skill-icon">🎤</div>
+            <div class="skill-name">Voice Input</div>
+            <div class="skill-status">Active</div>
+          </div>
+          <div class="skill-card active-skill">
+            <div class="skill-icon">🔊</div>
+            <div class="skill-name">Voice Output</div>
+            <div class="skill-status">Active</div>
+          </div>
+          <div class="skill-card active-skill">
+            <div class="skill-icon">🧠</div>
+            <div class="skill-name">Memory</div>
+            <div class="skill-status">Active</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">📷</div>
+            <div class="skill-name">Camera Vision</div>
+            <div class="skill-status">v2</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">📄</div>
+            <div class="skill-name">OCR</div>
+            <div class="skill-status">v2</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🌐</div>
+            <div class="skill-name">Web Search</div>
+            <div class="skill-status">v2</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">📱</div>
+            <div class="skill-name">Android</div>
+            <div class="skill-status">v3</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🔔</div>
+            <div class="skill-name">Reminders</div>
+            <div class="skill-status">v3</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">📁</div>
+            <div class="skill-name">Files</div>
+            <div class="skill-status">v3</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🤖</div>
+            <div class="skill-name">Agents</div>
+            <div class="skill-status">v4</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">💻</div>
+            <div class="skill-name">Coder</div>
+            <div class="skill-status">v4</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">📋</div>
+            <div class="skill-name">Planner</div>
+            <div class="skill-status">v4</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🔬</div>
+            <div class="skill-name">Research</div>
+            <div class="skill-status">v4</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🏠</div>
+            <div class="skill-name">Smart Home</div>
+            <div class="skill-status">v6</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">⌚</div>
+            <div class="skill-name">Wearables</div>
+            <div class="skill-status">v7</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🧬</div>
+            <div class="skill-name">Health</div>
+            <div class="skill-status">v9</div>
+          </div>
+          <div class="skill-card coming-soon">
+            <div class="skill-icon">🚀</div>
+            <div class="skill-name">FRIDAY Prime</div>
+            <div class="skill-status">v10</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="panel" id="settingsPanel">
+      <div class="panel-header">
+        <h2>⚙️ Settings</h2>
+        <button class="panel-close" data-close="settings">✕</button>
+      </div>
+      <div class="panel-content">
+        <div class="settings-group">
+          <h3>🤖 AI Configuration</h3>
+          <div class="setting-item">
+            <label>AI Provider</label>
+            <select id="aiProvider">
+              <option value="gemini">Google Gemini (Free)</option>
+              <option value="openai">OpenAI GPT</option>
+              <option value="local">Local / Offline</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>API Key</label>
+            <input type="password" id="apiKey" placeholder="Enter your API key...">
+          </div>
+          <div class="setting-item">
+            <label>AI Personality</label>
+            <select id="aiPersonality">
+              <option value="friday">FRIDAY (Helpful & Warm)</option>
+              <option value="jarvis">JARVIS (Formal & Precise)</option>
+              <option value="karen">KAREN (Sassy & Smart)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>🔊 Voice Settings</h3>
+          <div class="setting-item">
+            <label>Voice Output</label>
+            <div class="toggle-switch">
+              <input type="checkbox" id="voiceOutput" checked>
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label>Speech Rate</label>
+            <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1">
+            <span id="speechRateValue">1.0x</span>
+          </div>
+          <div class="setting-item">
+            <label>Voice Pitch</label>
+            <input type="range" id="speechPitch" min="0.5" max="2" step="0.1" value="1.1">
+            <span id="speechPitchValue">1.1</span>
+          </div>
+          <div class="setting-item">
+            <label>Voice Language</label>
+            <select id="voiceLang">
+              <option value="en-US">English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="en-IN">English (India)</option>
+              <option value="hi-IN">Hindi (India)</option>
+              <option value="es-ES">Spanish</option>
+              <option value="fr-FR">French</option>
+              <option value="de-DE">German</option>
+              <option value="ja-JP">Japanese</option>
+              <option value="ko-KR">Korean</option>
+              <option value="zh-CN">Chinese</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>🧠 Memory</h3>
+          <div class="setting-item">
+            <label>Save Conversations</label>
+            <div class="toggle-switch">
+              <input type="checkbox" id="saveMemory" checked>
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label>Memory Duration</label>
+            <select id="memoryDuration">
+              <option value="forever">Forever</option>
+              <option value="30">30 Days</option>
+              <option value="7">7 Days</option>
+              <option value="1">1 Day</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <button class="danger-btn" id="clearMemory">Clear All Memory</button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>📱 About</h3>
+          <div class="setting-item">
+            <label>Version</label>
+            <span class="setting-value">1.0.0</span>
+          </div>
+          <div class="setting-item">
+            <label>Build</label>
+            <span class="setting-value">FRIDAY-OS-V1-2025</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions (Voice Triggered) -->
+    <div class="quick-actions" id="quickActions">
+      <button class="quick-action" data-action="time">
+        <span class="qa-icon">🕐</span>
+        <span class="qa-label">Time</span>
+      </button>
+      <button class="quick-action" data-action="weather">
+        <span class="qa-icon">🌤️</span>
+        <span class="qa-label">Weather</span>
+      </button>
+      <button class="quick-action" data-action="note">
+        <span class="qa-icon">📝</span>
+        <span class="qa-label">Note</span>
+      </button>
+      <button class="quick-action" data-action="joke">
+        <span class="qa-icon">😄</span>
+        <span class="qa-label">Joke</span>
+      </button>
+      <button class="quick-action" data-action="calculate">
+        <span class="qa-icon">🔢</span>
+        <span class="qa-label">Math</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
