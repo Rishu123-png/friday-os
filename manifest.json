@@ -1,7 +1,7 @@
 {
   "name": "FRIDAY OS",
   "short_name": "FRIDAY",
-  "description": "Your Personal AI Assistant OS - Voice First",
+  "description": "FRIDAY OS v5 - Your Personal AI Assistant Operating System",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -22,6 +22,7 @@
     }
   ],
   "categories": ["utilities", "productivity"],
+  "screenshots": [],
   "shortcuts": [
     {
       "name": "Voice Chat",
@@ -29,8 +30,8 @@
       "icons": [{"src": "icons/icon-192.png", "sizes": "192x192"}]
     },
     {
-      "name": "Quick Note",
-      "url": "/?action=note",
+      "name": "Camera",
+      "url": "/?action=camera",
       "icons": [{"src": "icons/icon-192.png", "sizes": "192x192"}]
     }
   ]
