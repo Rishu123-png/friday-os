@@ -1,17 +1,20 @@
-/* FRIDAY OS — Service Worker v6
-   Resilient precache: one missing file never kills the whole cache. */
+/* FRIDAY OS — Service Worker v7.1
+   Resilient precache: one missing file never kills the whole cache.
+   CDN libraries (vision OCR/objects, future transformers.js) are cached
+   so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v8-0';
+const CACHE = 'friday-os-v7-1';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
   './js/app.js', './js/store.js', './js/brain.js', './js/nlp.js',
   './js/ai.js', './js/api.js', './js/device.js', './js/voice.js', './js/ui.js',
-  './js/vision.js', './js/templates.js', './js/memory.js', './js/proactive.js', './js/nlu.js', './js/automation.js', './js/native.js',
+  './js/vision.js', './js/templates.js', './js/memory.js', './js/proactive.js',
+  './js/nlu.js', './js/automation.js', './js/native.js', './js/coder.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
-// Never cache these (live data / auth)
+/* Never cache: live data / auth'd API calls */
 const NO_CACHE = [
   'api.groq.com',
   'api.open-meteo.com',
@@ -21,13 +24,16 @@ const NO_CACHE = [
   'open.er-api.com',
   'api.rss2json.com',
   'api.mymemory.translated.net',
-  'api.quotable.io'
+  'dummyjson.com',
+  'huggingface.co'
 ];
+
+/* Cross-origin hosts whose scripts SHOULD be cached (offline AI libs) */
+const CACHEABLE_CDN = ['cdn.jsdelivr.net'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    // add individually so a single 404 doesn't reject everything
     await Promise.all(ASSETS.map(url =>
       cache.add(new Request(url, { cache: 'reload' })).catch(err =>
         console.warn('[sw] skip', url, err.message))
@@ -52,7 +58,7 @@ self.addEventListener('fetch', e => {
   if (NO_CACHE.some(h => url.hostname.includes(h))) return;
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
-  // Navigation: network first, fall back to cached shell
+  // Navigation: network first, cached shell offline
   if (req.mode === 'navigate') {
     e.respondWith((async () => {
       try {
@@ -68,17 +74,23 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Static: cache first, revalidate in background
+  // Static + AI CDN: cache first, revalidate in background
   e.respondWith((async () => {
     const cached = await caches.match(req);
+    const cacheable = res => res && res.status === 200 &&
+      (res.type === 'basic' || CACHEABLE_CDN.some(h => url.hostname === h));
     const network = fetch(req).then(res => {
-      if (res && res.status === 200 && res.type === 'basic') {
+      if (cacheable(res)) {
         caches.open(CACHE).then(c => c.put(req, res.clone())).catch(() => {});
       }
       return res;
     }).catch(() => null);
 
-    return cached || (await network) ||
+    if (cached) {
+      network.catch(() => {}); // background refresh, ignore failures
+      return cached;
+    }
+    return (await network) ||
       new Response('Offline', { status: 503, statusText: 'Offline' });
   })());
 });
