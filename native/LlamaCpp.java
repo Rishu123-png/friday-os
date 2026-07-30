@@ -51,7 +51,7 @@ public class LlamaCpp extends Plugin {
                 call.resolve(new JSObject().put("ok", true));
             } catch (ClassNotFoundException e) {
                 call.reject("LLAMA_BINDING_MISSING - add the llama.cpp dependency (see native/llama_setup.md)");
-            } catch (Throwable t) {
+            } catch (Exception t) {
                 call.reject(t.getMessage(), t);
             }
         });
@@ -97,7 +97,7 @@ public class LlamaCpp extends Plugin {
                 call.resolve(new JSObject().put("text", text));
             } catch (ClassNotFoundException e) {
                 call.reject("LLAMA_BINDING_MISSING - add the llama.cpp dependency (see native/llama_setup.md)");
-            } catch (Throwable t) {
+            } catch (Exception t) {
                 call.reject(t.getMessage(), t);
             }
         });
