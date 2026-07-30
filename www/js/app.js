@@ -42,6 +42,7 @@ async function boot() {
   ];
   const bar = $('.boot-progress-bar'), status = $('.boot-status');
   for (const [txt, pct] of steps) {
+    window.__stage = 'boot:' + txt;
     if (status) status.textContent = txt + '...';
     if (bar) bar.style.width = pct + '%';
     await sleep(260 + Math.random() * 180);
@@ -52,7 +53,12 @@ async function boot() {
   await sleep(700);
   bs.style.display = 'none';
   $('#app').classList.remove('hidden');
-  init();
+  window.__stage = 'init';
+  Promise.resolve().then(init).then(() => { window.__booted = true; window.__stage = 'idle'; })
+    .catch(err => {
+      window.__stage = 'init-failed';
+      setTimeout(() => { throw new Error('init failed: ' + (err && err.message || err)); });
+    });
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1504,30 +1510,44 @@ async function runPortScan(host) {
 }
 
 async function initNative() {
+  try {
+  window.__stage = 'native:capabilities';
   nativeCaps = await NAT.capabilities();
   if (!nativeCaps.native) return;
 
   // keep FRIDAY alive in the background
   if (S.getSetting('backgroundService') !== false) {
-    NAT.startForegroundService({ wakeWord: S.getSetting('wakeWord') });
+    window.__stage = 'native:foreground-service';
+    NAT.startForegroundService({ wakeWord: S.getSetting('wakeWord') }).catch(() => {});
   }
   if (S.getSetting('bootStart')) NAT.setBootStart(true);
 
   // pull real contacts into the local store
-  if (nativeCaps.contacts) {
-    const list = await NAT.loadContacts();
-    if (list && list.length) {
-      S.saveList(KEYS.CONTACTS, list.slice(0, 500).map(c => ({
-        id: 'sys_' + c.id, name: c.name, phone: c.phone, created: Date.now()
-      })));
-      refresh('contacts');
+  try {
+    if (nativeCaps.contacts) {
+      window.__stage = 'native:contacts';
+      const list = await NAT.loadContacts();
+      if (list && list.length) {
+        S.saveList(KEYS.CONTACTS, list.slice(0, 500).map(c => ({
+          id: 'sys_' + c.id, name: c.name, phone: c.phone, created: Date.now()
+        })));
+        refresh('contacts');
+      }
     }
-  }
+  } catch (e) { /* contacts permission denied - not fatal */ }
 
   // notification listener
-  if (nativeCaps.notifications) {
-    NAT.startNotificationListener();
-    NAT.onNotification(handleNotification);
+  try {
+    if (nativeCaps.notifications) {
+      window.__stage = 'native:notifications';
+      NAT.startNotificationListener();
+      NAT.onNotification(handleNotification);
+    }
+  } catch (e) { /* listener not enabled - not fatal */ }
+  window.__stage = 'native:done';
+  } catch (e) {
+    window.__stage = 'native:failed';
+    console.warn('initNative failed:', e);
   }
 
   updateBrainBadge();
@@ -2399,7 +2419,11 @@ if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+/* Robust boot: module scripts normally run before DOMContentLoaded, but if
+   the WebView already fired it (cache race) we must not wait forever. */
+window.__stage = 'module-loaded';
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
 
 // expose for debugging
 window.FRIDAY = { state, handleInput, S, API, AI };
