@@ -3,7 +3,7 @@
 """Registers FRIDAY's custom plugins with Capacitor's MainActivity. Run by Codemagic."""
 import re, io, glob, sys
 
-PLUGINS = ['FridayNative', 'FridaySpeech', 'LlamaCpp']
+PLUGINS = ['FridayNative', 'FridaySpeech', 'FridayWakeWord', 'LlamaCpp']
 
 cands = glob.glob('android/app/src/main/java/**/MainActivity.java', recursive=True)
 if not cands:
@@ -24,7 +24,7 @@ if 'import android.os.Bundle;' not in s:
                   'import android.os.Bundle;\nimport com.getcapacitor.BridgeActivity;')
 
 # wipe any partial old registrations, then insert a single clean block
-s = re.sub(r'\s*registerPlugin\((FridayNative|FridaySpeech|LlamaCpp)\.class\);', '', s)
+s = re.sub(r'\s*registerPlugin\((FridayNative|FridaySpeech|FridayWakeWord|LlamaCpp)\.class\);', '', s)
 
 if 'onCreate' in s:
     s = re.sub(r'(public void onCreate\s*\(\s*Bundle\s+\w+\s*\)\s*\{\s*)',
