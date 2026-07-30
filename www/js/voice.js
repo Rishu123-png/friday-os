@@ -11,6 +11,13 @@
 */
 
 import { getSetting } from './store.js';
+import { applyPronunciations } from './memory.js';
+
+/* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
+const WP = () => {
+  const c = CAP();
+  return c && c.Plugins ? c.Plugins.FridayWakeWord : null;
+};
 
 /* ---------- platform detection ---------- */
 const CAP = () => (typeof window !== 'undefined' ? window.Capacitor : null);
@@ -76,27 +83,50 @@ export function initRecognition(cbs = {}) {
 
   if (useNative()) {
     const p = NP();
+    /* Porcupine wake listener is registered ONCE here — re-registering on
+       every start() would stack duplicate wake events. */
+    const wp = WP();
+    if (wp) {
+      try {
+        wp.addListener('wake', () => {
+          handlers.onWake && handlers.onWake();
+          setTimeout(() => listen(), 250);
+        });
+      } catch (_) {}
+    }
     p.addListener('sttStart', () => {
       listening = true;
       handlers.onStart && handlers.onStart();
     });
+    p.addListener('sttLevel', ev => {
+      // barge-in: strong user voice while FRIDAY speaks
+      if (bargeWatch && speaking && ev && typeof ev.rms === 'number' && ev.rms > 4.5) {
+        cancelSpeech();
+      }
+    });
     p.addListener('sttPartial', ev => {
+      if (bargeWatch && speaking && ev && ev.text && ev.text.trim().length > 1) {
+        cancelSpeech();   // user is clearly talking — stop and listen
+      }
       if (ev && ev.text) handlers.onInterim && handlers.onInterim(ev.text);
     });
     p.addListener('sttResult', ev => {
       listening = false;
+      const wasBarge = bargeWatch;
+      if (bargeWatch) disarmBargeIn();
       const txt = (ev && ev.text || '').trim();
       handlers.onEnd && handlers.onEnd();
       if (txt) {
         if (wakeArmed) { handleWakePhrase(txt); }
         else handlers.onFinal && handlers.onFinal(txt);
-      } else {
+      } else if (!wasBarge) {
         scheduleWakeRestart();
       }
     });
     p.addListener('sttError', ev => {
       listening = false;
       const err = ev && ev.error || 'unknown';
+      if (bargeWatch) { disarmBargeIn(); return; }   // silent — mic was only a barge sentinel
       handlers.onEnd && handlers.onEnd();
       // no-speech during wake listening is normal, just restart quietly
       if (wakeArmed && (err === 'no-speech' || err === 'busy' || err === 'client')) {
@@ -186,6 +216,14 @@ const WAKE_PATTERNS = [
 
 let wakeArmed = false;   // native: currently listening FOR the wake phrase
 
+/* Software fallback: SpeechRecognizer restart loop (no Porcupine key). */
+function startNativeWakeLoop() {
+  wakeArmed = true;
+  wakeActive = true;
+  NP().startListening({ lang: getSetting('voiceLang'), partial: false })
+    .catch(() => { wakeActive = false; });
+}
+
 function handleWakePhrase(txt) {
   const hit = WAKE_PATTERNS.some(p => p.test(txt));
   if (!hit) { scheduleWakeRestart(); return; }
@@ -214,10 +252,19 @@ export function startWakeWord() {
   if (listening || speaking) return false;
 
   if (useNative()) {
-    wakeArmed = true;
-    wakeActive = true;
-    NP().startListening({ lang: getSetting('voiceLang'), partial: false })
-      .catch(() => { wakeActive = false; });
+    // dedicated always-on hotword engine (Picovoice Porcupine) when configured
+    const wp = WP();
+    const key = (getSetting('porcupineKey') || '').trim();
+    if (wp && key) {
+      wp.start({ accessKey: key, keyword: getSetting('wakeKeyword') || 'jarvis' })
+        .then(r => {
+          if (r && r.ok) wakeActive = true;
+          else startNativeWakeLoop();   // engine missing / bad key -> software loop
+        })
+        .catch(() => startNativeWakeLoop());
+      return true;
+    }
+    startNativeWakeLoop();
     return true;
   }
 
@@ -272,6 +319,7 @@ export function stopWakeWord() {
   wakeArmed = false;
   if (useNative()) {
     wakeActive = false;
+    try { const wp = WP(); if (wp) wp.stop().catch(() => {}); } catch (_) {}
     NP().stopListening().catch(() => {});
     return;
   }
@@ -285,7 +333,7 @@ export function stopWakeWord() {
 let pendingEnd = null;
 
 function cleanForSpeech(text) {
-  return String(text)
+  let out = String(text)
     .replace(/```[\s\S]*?```/g, ' code block ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/[*_#>|]/g, '')
@@ -294,6 +342,9 @@ function cleanForSpeech(text) {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
+  // learned pronunciations ("Raghav" -> "raa-ghuv")
+  try { out = applyPronunciations(out); } catch (_) {}
+  return out;
 }
 
 export function speak(text, { onStart, onEnd } = {}) {
@@ -304,9 +355,9 @@ export function speak(text, { onStart, onEnd } = {}) {
 
   /* ---- native path ---- */
   if (useNative()) {
-    cancelSpeech();
+    stopCurrent();               // stop previous sentence WITHOUT touching feed epochs
     speaking = true;
-    pendingEnd = onEnd || null;
+    pendingEnd = () => { disarmBargeIn(); onEnd && onEnd(); };
     onStart && onStart();
     NP().speak({
       text: clean,
@@ -314,7 +365,9 @@ export function speak(text, { onStart, onEnd } = {}) {
       pitch: parseFloat(getSetting('speechPitch')) || 1.1,
       lang: getSetting('voiceLang') || 'en-US'
     }).then(r => {
-      if (!r || r.ok === false) {           // TTS unavailable
+      if (r && r.ok !== false) {
+        armBargeIn();                       // hot mic while talking
+      } else {                              // TTS unavailable
         speaking = false;
         pendingEnd = null;
         onEnd && onEnd();
@@ -327,7 +380,7 @@ export function speak(text, { onStart, onEnd } = {}) {
 
   /* ---- web path ---- */
   if (!synth) { onEnd && onEnd(); return false; }
-  cancelSpeech();
+  stopCurrent();
 
   const chunks = clean.match(/[^.!?]+[.!?]*/g) || [clean];
   const groups = [];
@@ -373,16 +426,104 @@ function pickVoice(lang) {
   return pref || pool.find(v => /google/i.test(v.name)) || pool[0];
 }
 
-export function cancelSpeech() {
+/* Speech "epoch": bumped whenever speech is INTERRUPTED from outside
+   (barge-in, mic tap, stop command). Streaming feeds created in an older
+   epoch drain their queues silently instead of speaking stockpiled
+   sentences over the thing you just interrupted it with. */
+let speechEpoch = 0;
+
+function stopCurrent({ bump = false } = {}) {
+  if (bump) speechEpoch++;
   if (useNative()) {
     speaking = false;
+    const release = pendingEnd;      // release any feed pump waiting on this sentence
     pendingEnd = null;
+    disarmBargeIn();
     NP().stopSpeaking().catch(() => {});
+    if (release) { try { release(); } catch (_) {} }
     return;
   }
   try { synth && synth.cancel(); } catch (_) {}
   speaking = false;
 }
+
+export function cancelSpeech() {
+  stopCurrent({ bump: true });
+}
+
+/* ================= STREAMING SPEECH FEED ================= */
+/* Speak sentences while the model is still generating (streaming TTS).
+   feed.push(sentence) as text arrives; feed.markDone() at the end.
+   cancelSpeech() clears the queue so barge-in stops everything.       */
+export function createSpeechFeed(hooks = {}) {
+  if (!getSetting('voiceOutput')) {
+    return { push() {}, markDone() { hooks.onDone && hooks.onDone(); }, cancel() {} };
+  }
+  const epoch = speechEpoch;
+  const stale = () => epoch !== speechEpoch;   // barge-in happened mid-feed
+  let queue = [], closed = false, active = false, cancelled = false;
+
+  const finish = () => {
+    queue.length = 0;
+    if (hooks.onEnd) hooks.onEnd();
+    hooks.onDone && hooks.onDone();
+  };
+
+  const pump = () => {
+    if (cancelled) return;
+    if (stale()) { active = false; return finish(); }   // talk-over: drop leftovers
+    if (active || !queue.length) return;
+    const sentence = queue.shift();
+    active = true;
+    speak(sentence, {
+      onStart: hooks.onStart,
+      onEnd: () => {
+        active = false;
+        if (cancelled) return;
+        if (stale()) return finish();
+        if (queue.length) pump();
+        else if (closed) finish();
+      }
+    });
+  };
+
+  return {
+    push(text) {
+      if (stale() || cancelled) return;
+      text = String(text || '').trim();
+      if (!text) return;
+      queue.push(text);
+      pump();
+    },
+    markDone() {
+      closed = true;
+      if (stale()) return finish();
+      if (!active && !queue.length && hooks.onDone) hooks.onDone();
+    },
+    cancel() { cancelled = true; queue.length = 0; }
+  };
+}
+
+/* ================= BARGE-IN (native) ================= */
+/* While FRIDAY speaks, keep a hot mic; strong user speech cancels TTS
+   and the captured sentence becomes the next command.                */
+let bargeWatch = false;
+
+function armBargeIn() {
+  if (!useNative()) return;
+  if (getSetting('bargeIn') === false) return;
+  bargeWatch = true;
+  NP().startListening({ lang: getSetting('voiceLang'), partial: true })
+    .catch(() => { bargeWatch = false; });
+}
+
+function disarmBargeIn() {
+  if (!bargeWatch) return;
+  bargeWatch = false;
+  try { NP().stopListening().catch(() => {}); } catch (_) {}
+}
+
+export function isBargeArmed() { return bargeWatch; }
 
 export function listVoices() {
   if (useNative()) return [];
