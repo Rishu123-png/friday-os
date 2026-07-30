@@ -923,4 +923,268 @@ public class FridayNative extends Plugin {
         call.resolve(done ? ok()
                 : fail(FridayAccessibility.isEnabled() ? "no_input_focused" : "accessibility_off"));
     }
+
+    /* ============ SECURITY GUARD ============ */
+    /** Called by FridaySecurityReceiver when a non-Play app appears. */
+    public static void emitSecurityAlert(String pkg, String label, String source) {
+        FridayNative p = activePlugin;
+        if (p == null) return;
+        try {
+            JSObject o = new JSObject();
+            o.put("pkg", pkg);
+            o.put("label", label);
+            o.put("source", source);
+            p.notifyListeners("securityAlert", o);
+        } catch (Exception ignored) {}
+    }
+
+    /** Full on-device security audit. No network, no root - just the facts
+        the OS already knows, explained in plain language by the JS layer. */
+    @PluginMethod
+    public void securityAudit(PluginCall call) {
+        Context ctx = getContext();
+        PackageManager pm = ctx.getPackageManager();
+        JSObject r = ok();
+        JSONArray sideloaded = new JSONArray();
+        JSONArray admins = new JSONArray();
+        try {
+            List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+            for (ApplicationInfo ai : apps) {
+                if (ai == null) continue;
+                if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0) continue;   // ROM apps skip
+                String installer = null;
+                try {
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        installer = pm.getInstallSourceInfo(ai.packageName).getInstallingPackageName();
+                    } else {
+                        installer = pm.getInstallerPackageName(ai.packageName);
+                    }
+                } catch (Exception ignored) {}
+                if (installer == null || !"com.android.vending".equals(installer)) {
+                    try {
+                        JSONObject o = new JSONObject();
+                        o.put("pkg", ai.packageName);
+                        o.put("name", String.valueOf(pm.getApplicationLabel(ai)));
+                        o.put("installer", installer == null ? "unknown/adb" : installer);
+                        sideloaded.put(o);
+                    } catch (Exception ignored) {}
+                }
+            }
+            android.app.admin.DevicePolicyManager dpm =
+                    (android.app.admin.DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            List<ComponentName> active = dpm.getActiveAdmins();
+            if (active != null) {
+                for (ComponentName c : active) {
+                    if (c != null) admins.put(c.getPackageName());
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String acc = Settings.Secure.getString(ctx.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            String nl = Settings.Secure.getString(ctx.getContentResolver(),
+                    "enabled_notification_listeners");
+            r.put("accessibilityServices", acc == null ? "" : acc);
+            r.put("notifListeners", nl == null ? "" : nl);
+            r.put("adbEnabled", Settings.Global.getInt(
+                    ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1);
+            r.put("devSettings", Settings.Global.getInt(
+                    ctx.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1);
+            android.app.KeyguardManager kg =
+                    (android.app.KeyguardManager) ctx.getSystemService(Context.KEYGUARD_SERVICE);
+            r.put("lockScreenSet", kg != null && kg.isDeviceSecure());
+        } catch (Exception ignored) {}
+        r.put("sideloaded", sideloaded);
+        r.put("deviceAdmins", admins);
+        call.resolve(r);
+    }
+
+    /* ============ NETWORK RECON (own network only) ============ */
+
+    /** WiFi security audit: SSID, encryption type, gateway, link quality. */
+    @PluginMethod
+    public void wifiAudit(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            WifiManager wm = (WifiManager) ctx.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiInfo info = wm.getConnectionInfo();
+            if (info == null || info.getNetworkId() == -1) { call.resolve(fail("not_connected")); return; }
+
+            JSObject r = ok();
+            String ssid = info.getSSID();
+            if (ssid != null && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                ssid = ssid.substring(1, ssid.length() - 1);
+            }
+            if (ssid == null || ssid.equals("<unknown ssid>")) ssid = "";
+            r.put("ssid", ssid);
+            r.put("bssid", info.getBSSID());
+            r.put("rssi", info.getRssi());
+
+            /* encryption type (API 31+ direct; older: capabilities string) */
+            String sec = "unknown";
+            if (Build.VERSION.SDK_INT >= 31) {
+                int st = info.getCurrentSecurityType();
+                sec = st == android.net.wifi.WifiInfo.SECURITY_TYPE_OPEN ? "open"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_WEP ? "wep"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_PSK ? "wpa/wpa2-personal"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_SAE ? "wpa3-personal"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_EAP ? "wpa-enterprise"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_EAP_WPA3_ENTERPRISE ? "wpa3-enterprise"
+                    : st == android.net.wifi.WifiInfo.SECURITY_TYPE_OWE ? "owe (enhanced open)"
+                    : "unknown";
+            } else {
+                sec = "check router (older Android)";
+            }
+            r.put("security", sec);
+
+            android.net.DhcpInfo dhcp = wm.getDhcpInfo();
+            if (dhcp != null) {
+                r.put("gateway", ipToString(dhcp.gateway));
+                r.put("ip", ipToString(dhcp.ipAddress));
+                r.put("dns1", ipToString(dhcp.dns1));
+                r.put("dns2", ipToString(dhcp.dns2));
+            }
+            call.resolve(r);
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    private String ipToString(int ip) {
+        return (ip & 0xff) + "." + ((ip >> 8) & 0xff) + "." + ((ip >> 16) & 0xff) + "." + ((ip >> 24) & 0xff);
+    }
+
+    /** LAN sweep: /proc/net/arp first, then ping the subnet. Read-only, own
+        network only. Resolves {ok, gateway, self, hosts:[{ip,mac}]}. */
+    @PluginMethod
+    public void lanScan(PluginCall call) {
+        new Thread(() -> {
+            try {
+                Context ctx = getContext();
+                WifiManager wm = (WifiManager) ctx.getApplicationContext()
+                        .getSystemService(Context.WIFI_SERVICE);
+                android.net.DhcpInfo dhcp = wm.getDhcpInfo();
+                if (dhcp == null || dhcp.ipAddress == 0) { call.resolve(fail("not_connected")); return; }
+
+                String self = ipToString(dhcp.ipAddress);
+                String gateway = ipToString(dhcp.gateway);
+
+                /* subnet guessed from own IP (/24) */
+                String prefix = self.substring(0, self.lastIndexOf('.') + 1);
+
+                java.util.Map<String, String> hosts = new java.util.LinkedHashMap<>();
+
+                /* 1) ARP cache (instant, silent) */
+                try {
+                    java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.FileReader("/proc/net/arp"));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String[] parts = line.split("\\s+");
+                        if (parts.length >= 4 && parts[0].startsWith(prefix)
+                                && !"00:00:00:00:00:00".equals(parts[3])) {
+                            hosts.put(parts[0], parts[3]);
+                        }
+                    }
+                    br.close();
+                } catch (Exception ignored) {}
+
+                /* 2) ping sweep of the /24 (icmp where allowed, else TCP:80/443/1900/8080 touch) */
+                List<String> order = new ArrayList<>();
+                for (int i = 1; i < 255; i++) order.add(prefix + i);
+                final List<Object[]> found = java.util.Collections.synchronizedList(new ArrayList<>());
+                java.util.concurrent.ExecutorService pool =
+                        java.util.concurrent.Executors.newFixedThreadPool(24);
+                final java.util.concurrent.CountDownLatch done =
+                        new java.util.concurrent.CountDownLatch(order.size());
+                for (final String ip : order) {
+                    pool.execute(() -> {
+                        try {
+                            boolean up = java.net.InetAddress.getByName(ip).isReachable(400);
+                            if (!up) {
+                                String[] tryPorts = {"80", "443", "1900", "8080", "53", "445"};
+                                for (String p : tryPorts) {
+                                    try (java.net.Socket s = new java.net.Socket()) {
+                                        s.connect(new java.net.InetSocketAddress(ip, Integer.parseInt(p)), 220);
+                                        up = true;
+                                        break;
+                                    } catch (Exception ignored) {}
+                                    if (up) break;
+                                }
+                            }
+                            if (up && !hosts.containsKey(ip)) found.add(new Object[]{ip, null});
+                        } catch (Exception ignored) {
+                        } finally {
+                            done.countDown();
+                        }
+                    });
+                }
+                done.await(20, java.util.concurrent.TimeUnit.SECONDS);
+                pool.shutdown();
+                for (Object[] f : found) hosts.put((String) f[0], "");
+
+                /* merge: self + gateway always */
+                if (!hosts.containsKey(self)) hosts.put(self, "");
+                if (gateway != null && !gateway.isEmpty() && !hosts.containsKey(gateway)) {
+                    hosts.put(gateway, "");
+                }
+
+                JSArray arr = new JSArray();
+                int n = 0;
+                for (java.util.Map.Entry<String, String> e : hosts.entrySet()) {
+                    if (n++ > 60) break;
+                    JSObject o = new JSObject();
+                    o.put("ip", e.getKey());
+                    o.put("mac", e.getValue());
+                    o.put("isSelf", e.getKey().equals(self));
+                    o.put("isGateway", e.getKey().equals(gateway));
+                    arr.put(o);
+                }
+                JSObject r = ok();
+                r.put("gateway", gateway);
+                r.put("self", self);
+                r.put("hosts", arr);
+                call.resolve(r);
+            } catch (Exception e) {
+                call.resolve(fail(e.getMessage()));
+            }
+        }).start();
+    }
+
+    /** TCP connect scan of one host on the ports that actually matter.
+        {ok, host, open:[23,80,...]} */
+    @PluginMethod
+    public void portScan(PluginCall call) {
+        final String host = call.getString("host", "");
+        if (host.isEmpty()) { call.resolve(fail("no_host")); return; }
+        new Thread(() -> {
+            try {
+                int[] ports = {21,22,23,53,80,111,135,139,445,554,631,1723,1900,
+                               2323,3306,5000,5353,5900,7547,8080,8291,8443,9100};
+                final JSArray open = new JSArray();
+                java.util.concurrent.ExecutorService pool =
+                        java.util.concurrent.Executors.newFixedThreadPool(16);
+                final java.util.concurrent.CountDownLatch done =
+                        new java.util.concurrent.CountDownLatch(ports.length);
+                for (final int p : ports) {
+                    pool.execute(() -> {
+                        try (java.net.Socket s = new java.net.Socket()) {
+                            s.connect(new java.net.InetSocketAddress(host, p), 350);
+                            synchronized (open) { open.put(p); }
+                        } catch (Exception ignored) {
+                        } finally {
+                            done.countDown();
+                        }
+                    });
+                }
+                done.await(15, java.util.concurrent.TimeUnit.SECONDS);
+                pool.shutdown();
+                JSObject r = ok();
+                r.put("host", host);
+                r.put("open", open);
+                call.resolve(r);
+            } catch (Exception e) {
+                call.resolve(fail(e.getMessage()));
+            }
+        }).start();
+    }
 }
