@@ -3,7 +3,7 @@
    CDN libraries (vision OCR/objects, future transformers.js) are cached
    so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v7-1';
+const CACHE = 'friday-os-v7-2';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
@@ -24,12 +24,11 @@ const NO_CACHE = [
   'open.er-api.com',
   'api.rss2json.com',
   'api.mymemory.translated.net',
-  'dummyjson.com',
-  'huggingface.co'
+  'dummyjson.com'
 ];
 
-/* Cross-origin hosts whose scripts SHOULD be cached (offline AI libs) */
-const CACHEABLE_CDN = ['cdn.jsdelivr.net'];
+/* Cross-origin hosts whose scripts/models SHOULD be cached (offline AI) */
+const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co', 'xenova-transformers'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
