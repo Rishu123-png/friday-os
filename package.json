@@ -1,10 +1,11 @@
 {
   "name": "friday-os",
-  "version": "6.0.0",
-  "description": "FRIDAY OS — personal AI assistant. Offline-first, optional Groq key.",
+  "version": "7.1.0",
+  "description": "FRIDAY OS — personal AI assistant. Offline-first, optional Groq key, offline LLM via llama.cpp.",
   "private": true,
   "scripts": {
     "serve": "npx --yes http-server www -p 8080 -c-1",
+    "test": "node --test tests/",
     "sync": "npx cap sync android",
     "apk": "cd android && ./gradlew assembleDebug",
     "build": "echo \"static app — nothing to compile\""
@@ -21,6 +22,7 @@
     "@capacitor/network": "^6.0.3",
     "@capacitor/preferences": "^6.0.3",
     "@capacitor/share": "^6.0.3",
+    "@capacitor/splash-screen": "^6.0.3",
     "@capacitor/status-bar": "^6.0.2"
   },
   "devDependencies": {
