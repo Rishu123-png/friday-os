@@ -20,6 +20,11 @@ public class FridayService extends Service {
     public static final String CHANNEL = "friday_core";
     public static final int NOTIF_ID = 7001;
 
+    /* Install-watcher for the security guard. Manifest receivers for
+       PACKAGE_ADDED are dead since Android 8 - dynamic registration from
+       this running service is the supported way. */
+    private FridaySecurityReceiver installWatcher;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -31,6 +36,22 @@ public class FridayService extends Service {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
         }
+        registerInstallWatcher();
+    }
+
+    private void registerInstallWatcher() {
+        try {
+            if (installWatcher != null) return;
+            installWatcher = new FridaySecurityReceiver();
+            android.content.IntentFilter f =
+                    new android.content.IntentFilter(Intent.ACTION_PACKAGE_ADDED);
+            f.addDataScheme("package");
+            if (Build.VERSION.SDK_INT >= 34) {
+                registerReceiver(installWatcher, f, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(installWatcher, f);
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -61,6 +82,10 @@ public class FridayService extends Service {
 
     @Override
     public void onDestroy() {
+        try {
+            if (installWatcher != null) unregisterReceiver(installWatcher);
+        } catch (Exception ignored) {}
+        installWatcher = null;
         super.onDestroy();
     }
 
