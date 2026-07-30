@@ -267,6 +267,41 @@ export async function performGlobalAction(action) {
   return call('globalAction', { action });
 }
 
+/* ================= QS TILE ================= */
+/** One-shot: did the user launch via the Quick Settings tile? */
+export async function consumeTileRequest() { return call('consumeTileRequest'); }
+
+/* ================= WIDGET ================= */
+export async function updateWidget(text, meta = '') {
+  return call('updateWidget', { text: String(text).slice(0, 120), meta: String(meta).slice(0, 60) });
+}
+
+/* ================= NATIVE GEOFENCING ================= */
+export async function geofenceSync(fences) {
+  return call('syncGeofences', {
+    fences: (fences || []).map(f => ({ id: String(f.id), name: f.name, lat: f.lat, lon: f.lon, radius: f.radius || 250 }))
+  });
+}
+export async function geofenceAddNative(f) {
+  return call('addGeofence', { id: String(f.id), name: f.name, lat: f.lat, lon: f.lon, radius: f.radius || 250 });
+}
+export function onGeofence(cb) {
+  const p = plugin();
+  if (!p || !p.addListener) return () => {};
+  const sub = p.addListener('geofenceEvent', ev => cb(ev));
+  return () => { try { sub.remove && sub.remove(); } catch (_) {} };
+}
+
+/* ================= NOTIFICATION REPLY (RemoteInput) ================= */
+export async function replyNotification(app, text) {
+  return call('replyNotification', { app: app || '', text });
+}
+
+/* ================= ACCESSIBILITY v2 ================= */
+export async function tapText(text) { return call('tapText', { text }); }
+export async function scrollScreen(dir = 'down') { return call('scrollScreen', { dir }); }
+export async function typeText(text) { return call('typeText', { text }); }
+
 /* ================= CAPABILITY REPORT ================= */
 /** What actually works on this device right now */
 export async function capabilities() {
