@@ -613,9 +613,11 @@ public class FridayNative extends Plugin {
     public void whatsappSend(PluginCall call) {
         String number = call.getString("number", "").replaceAll("[^0-9]", "");
         String message = call.getString("message", "");
+        String cc = call.getString("cc", "91").replaceAll("[^0-9]", "");
+        if (cc.isEmpty()) cc = "91";
         boolean autoSend = call.getBoolean("autoSend", true);
         try {
-            if (number.length() == 10) number = "91" + number;
+            if (number.length() == 10) number = cc + number;
             Intent i = new Intent(Intent.ACTION_VIEW);
             i.setData(Uri.parse("https://api.whatsapp.com/send?phone=" + number
                     + "&text=" + Uri.encode(message)));
@@ -636,7 +638,6 @@ public class FridayNative extends Plugin {
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
 
-    @PluginMethod
     /* ============ CAPABILITIES ============ */
     @PluginMethod
     public void capabilities(PluginCall call) {
