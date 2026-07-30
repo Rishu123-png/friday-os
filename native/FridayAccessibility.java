@@ -208,7 +208,7 @@ public class FridayAccessibility extends AccessibilityService {
 
     private static AccessibilityNodeInfo findEditable(AccessibilityNodeInfo n, int depth) {
         if (n == null || depth > 8) return null;
-        if (n.isEditable() && n.isVisibleToScreen()) return n;
+        if (n.isEditable() && n.isVisibleToUser()) return n;
         for (int i = 0; i < n.getChildCount(); i++) {
             AccessibilityNodeInfo r = findEditable(n.getChild(i), depth + 1);
             if (r != null) return r;
