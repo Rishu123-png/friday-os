@@ -1,3 +1,4 @@
+
 workflows:
   friday-android:
     name: FRIDAY OS — Android APK
@@ -6,7 +7,9 @@ workflows:
 
     environment:
       node: 20
-      java: 21
+      java: 17
+      vars:
+        PACKAGE_NAME: "com.rishu.fridayos"
 
     triggering:
       events:
@@ -21,79 +24,41 @@ workflows:
         - $CM_BUILD_DIR/node_modules
 
     scripts:
-      - name: Install dependencies
-        script: |
-          npm install
+      - name: Install npm dependencies
+        script: npm install
 
-      - name: Add Android platform if missing
+      - name: Create Android platform
         script: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-
-      - name: Point Gradle at the Android SDK
-        script: |
+          if [ ! -d "android" ]; then npx cap add android; fi
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
 
-      - name: Inject permissions into AndroidManifest
-        script: |
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          python3 - <<'PY'
-          import re, io, os
-          p = "android/app/src/main/AndroidManifest.xml"
-          s = open(p).read()
-          perms = [
-            "android.permission.INTERNET",
-            "android.permission.RECORD_AUDIO",
-            "android.permission.CAMERA",
-            "android.permission.VIBRATE",
-            "android.permission.ACCESS_FINE_LOCATION",
-            "android.permission.ACCESS_COARSE_LOCATION",
-            "android.permission.POST_NOTIFICATIONS",
-            "android.permission.SCHEDULE_EXACT_ALARM",
-            "android.permission.USE_EXACT_ALARM",
-            "android.permission.FOREGROUND_SERVICE",
-            "android.permission.RECEIVE_BOOT_COMPLETED",
-            "android.permission.WAKE_LOCK",
-            "android.permission.CALL_PHONE",
-            "android.permission.READ_CONTACTS",
-            "android.permission.SEND_SMS",
-            "android.permission.FLASHLIGHT",
-            "android.permission.MODIFY_AUDIO_SETTINGS",
-            "android.permission.QUERY_ALL_PACKAGES",
-          ]
-          add = ""
-          for perm in perms:
-              if perm not in s:
-                  add += '    <uses-permission android:name="%s"/>\n' % perm
-          feats = '    <uses-feature android:name="android.hardware.camera" android:required="false"/>\n'
-          if "android.hardware.camera" not in s:
-              add += feats
-          if add:
-              s = s.replace("<application", add + "\n    <application", 1)
-          # allow tel:/sms:/whatsapp intents to resolve
-          if "<queries>" not in s:
-              q = """    <queries>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="sms"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
-              </queries>
-          """
-              s = s.replace("<application", q + "\n    <application", 1)
-          open(p, "w").write(s)
-          print("Manifest patched")
-          PY
-          cat $MANIFEST | head -40
+      - name: Copy web assets into native project
+        script: npx cap sync android
 
-      - name: Sync web assets into the native project
+      - name: Install native Java sources
         script: |
-          npx cap sync android
+          PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
+          mkdir -p "$PKG_DIR"
+          cp native/*.java "$PKG_DIR/"
+          echo "Installed:"; ls -1 "$PKG_DIR"
+
+      - name: Add accessibility service config
+        script: |
+          mkdir -p android/app/src/main/res/xml
+          cp native/friday_accessibility.xml android/app/src/main/res/xml/
+          cat android/app/src/main/res/xml/friday_accessibility.xml
+
+      - name: Register plugin with Capacitor
+        script: python3 native/register_plugin.py
+
+      - name: Patch AndroidManifest
+        script: python3 native/patch_manifest.py
 
       - name: Build debug APK
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
     artifacts:
       - android/app/build/outputs/apk/**/*.apk
