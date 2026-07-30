@@ -7,6 +7,8 @@
 
    Nothing here can crash the app. */
 
+import { getSetting } from './store.js';
+
 const CAP = () => (typeof window !== 'undefined' ? window.Capacitor : null);
 
 export function isNative() {
@@ -236,7 +238,9 @@ export async function showAlarms() { return call('showAlarms'); }
 
 /* ================= WHATSAPP ================= */
 export async function whatsappSend(number, message, autoSend = true) {
-  return call('whatsappSend', { number, message, autoSend });
+  let cc = '91';
+  try { cc = getSetting('waCountryCode') || '91'; } catch (_) {}
+  return call('whatsappSend', { number, message, autoSend, cc });
 }
 
 /* ================= OVERLAY BUBBLE (Phase C) ================= */
