@@ -17,13 +17,16 @@ import * as NLU from './nlu.js';
 import * as AUTO from './automation.js';
 import * as NAT from './native.js';
 import * as CODER from './coder.js';
+import * as VAULT from './vault.js';
+import * as HACKER from './hacker.js';
 import { humanTime, parseTime, pick } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
 
 const state = {
   listening: false, speaking: false, processing: false,
-  messages: [], expect: null, lastTopic: null, lastSubject: null, booted: false
+  messages: [], expect: null, lastTopic: null, lastSubject: null, booted: false,
+  vaultPending: null
 };
 
 /* ================= BOOT ================= */
@@ -212,6 +215,9 @@ async function handleInput(text, opts = {}) {
     if (kind === 'note_text') { S.addItem(KEYS.NOTES, { text }); refresh('notes'); return reply(`Saved: "${text}"`); }
     if (kind === 'reminder_text') return handleInput('remind me to ' + text);
     if (kind === 'task_text') { S.addItem(KEYS.TASKS, { text, done: false }); refresh('tasks'); return reply(`Task added: "${text}"`); }
+    if (kind === 'vault_pin') return handleVaultPin(text);
+    if (kind === 'password_check_text') return auditPassword(text.replace(/["']/g, '').trim());
+    if (kind === 'phish_link') return judgeLink(text);
   }
 
   // 1) OFFLINE INTENT ENGINE
@@ -462,6 +468,104 @@ async function runAction(a, hit) {
       else if (r.reason === 'no_listener') { reply('I need notification access for that. Opening settings.'); NAT.openSpecialSetting('notification_listener'); }
       else if (r.reason === 'not_found') reply('No replyable notification found — nothing waiting for an answer.');
       else reply('That notification cannot take replies.');
+      return true;
+    }
+
+    /* ---------- v7.3: find a person on Google Maps ---------- */
+    case 'find_person': return findPersonOnMaps(a);
+
+    /* ---------- v7.3: security guard ---------- */
+    case 'security_scan': return runSecurityScan();
+
+    /* ---------- v7.3: password vault ---------- */
+    case 'vault_save': {
+      if (!VAULT.cryptoOk()) { reply('Your WebView is too old for the encrypted vault.'); return true; }
+      state.vaultPending = { kind: 'save', service: a.service, password: a.password };
+      if (!VAULT.vaultExists()) {
+        reply(`I'll keep that in your encrypted vault. First-time setup — type a 4-8 digit vault PIN (digits only, it's never spoken or stored).`);
+        state.expect = 'vault_pin';
+        return true;
+      }
+      if (!VAULT.vaultUnlocked()) {
+        reply('Vault is locked. Type your vault PIN (digits only).');
+        state.expect = 'vault_pin';
+        return true;
+      }
+      return finishVaultPending();
+    }
+    case 'vault_read': {
+      if (!VAULT.vaultExists()) { reply(`No vault yet. Say "save my gmail password as …" and I'll create one.`); return true; }
+      state.vaultPending = { kind: 'read', service: a.service };
+      if (!VAULT.vaultUnlocked()) { reply('Type your vault PIN first (digits only).'); state.expect = 'vault_pin'; return true; }
+      return finishVaultPending();
+    }
+    case 'vault_forget': {
+      if (!VAULT.vaultExists()) { reply('No vault yet.'); return true; }
+      state.vaultPending = { kind: 'forget', service: a.service };
+      if (!VAULT.vaultUnlocked()) { reply('Type your vault PIN first (digits only).'); state.expect = 'vault_pin'; return true; }
+      return finishVaultPending();
+    }
+    case 'vault_lock': {
+      VAULT.vaultLock();
+      reply('Vault locked. Your passwords are sealed again.');
+      return true;
+    }
+    case 'vault_list': {
+      if (!VAULT.vaultExists()) { reply('No vault yet.'); return true; }
+      if (!VAULT.vaultUnlocked()) {
+        state.vaultPending = { kind: 'list' };
+        reply('Type your vault PIN first (digits only).');
+        state.expect = 'vault_pin';
+        return true;
+      }
+      const svcs = VAULT.vaultServices();
+      reply(svcs.length
+        ? `Your vault holds ${svcs.length}: ${svcs.map(s => '"' + s + '"').join(', ')}. Ask "what's my <name> password".`
+        : 'Vault is empty. Say "save my gmail password as …".');
+      return true;
+    }
+
+    /* ---------- v7.4 REDTEAM: ethical hacker pack ---------- */
+    case 'net_recon': return runNetRecon();
+    case 'port_scan': return runPortScan(a.host);
+    case 'password_check': {
+      if (!a.password) {
+        state.expect = 'password_check_text';
+        reply('Type the password to audit. It is checked **locally** — never stored, never spoken.');
+        return true;
+      }
+      return auditPassword(a.password);
+    }
+    case 'phish_check': {
+      if (!a.url) {
+        state.expect = 'phish_link';
+        reply('Paste the link and I will judge it.');
+        return true;
+      }
+      return judgeLink(a.url);
+    }
+    case 'phish_sms': return scanSmsForPhishing();
+
+    /* ---------- v7.3: full-control UI commands ---------- */
+    case 'ui_tap':
+    case 'ui_scroll':
+    case 'ui_type': {
+      if (!NAT.isNative()) { reply(nativeOnly('screen control')); return true; }
+      const caps = await NAT.capabilities();
+      if (!caps.accessibility) {
+        reply('I need my Accessibility service for screen control. Opening settings — enable "FRIDAY Control".');
+        NAT.openSpecialSetting('accessibility');
+        return true;
+      }
+      let r;
+      if (a.type === 'ui_tap') r = await NAT.tapText(a.text);
+      else if (a.type === 'ui_scroll') r = await NAT.scrollScreen(a.dir);
+      else r = await NAT.typeText(a.text);
+      if (r.ok) reply(a.type === 'ui_tap' ? `Tapped "${a.text}".`
+                      : a.type === 'ui_scroll' ? `Scrolled ${a.dir}.` : 'Typed.');
+      else reply(a.type === 'ui_tap'
+        ? `Couldn't find "${a.text}" on screen.`
+        : 'Nothing on screen took that action.');
       return true;
     }
 
@@ -1047,6 +1151,358 @@ function nativeOnly(what) {
   return `${what.charAt(0).toUpperCase() + what.slice(1)} only works in the installed app, not the browser. Build the APK and it'll work.`;
 }
 
+/* ================= v7.3 GUARDIAN HELPERS ================= */
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* Tap something on screen with patience: apps take seconds to open. */
+async function tapRetry(label, tries = 4, gapMs = 1100) {
+  for (let i = 0; i < tries; i++) {
+    const r = await NAT.tapText(label);
+    if (r.ok) return true;
+    if (r.reason === 'accessibility_off') return 'a11y_off';
+    await sleep(gapMs);
+  }
+  return false;
+}
+
+/* "Where is my dad" — opens Google Maps and taps through to the person's
+   shared location. Best-effort UI automation: Maps' layout changes, so on
+   any miss we hand the user exact tap instructions instead of failing. */
+async function findPersonOnMaps(a) {
+  const name = a.name || null;
+  const nameShort = name ? name.split(/\s+/)[0] : null;
+  const stepsText = `your profile photo (top right) → "Location sharing"${nameShort ? ` → "${nameShort}"` : ' → their name'}`;
+
+  if (!NAT.isNative()) {
+    reply(`On your phone: open Google Maps → tap ${stepsText}.`);
+    return true;
+  }
+
+  const caps = await NAT.capabilities();
+  if (!caps.accessibility) {
+    reply(`I can drive Maps for you — but I need my Accessibility service first. Opening settings: enable "FRIDAY Control", then ask me again. (Or do it by hand: Maps → ${stepsText}.)`);
+    NAT.openSpecialSetting('accessibility');
+    return true;
+  }
+
+  reply(`Opening Maps and looking for ${name || 'your ' + (a.rel || 'contact')}'s shared location. A few seconds — please don't touch the screen.`);
+
+  const opened = await NAT.launchApp('maps');
+  if (!opened.ok) {
+    reply(`Couldn't open Google Maps — is it installed? Do it by hand: Maps → ${stepsText}.`);
+    return true;
+  }
+
+  await sleep(3800);                                  // Maps cold start
+  let step = await tapRetry('profile photo', 4, 1200);
+  if (step === true) {
+    await sleep(1500);
+    step = await tapRetry('Location sharing');
+  }
+  if (step === true && nameShort) {
+    await sleep(1900);
+    step = await tapRetry(nameShort, 3, 1400);
+    if (step === true) {
+      reply(`That's ${name} — their shared location should be on the map now.`);
+      return true;
+    }
+  }
+
+  if (step === 'a11y_off') {
+    reply('Accessibility switched off mid-way, so I had to stop. Enable "FRIDAY Control" and ask again.');
+    return true;
+  }
+  if (step === true) {
+    // reached the Location-sharing screen but no name known/found
+    reply(nameShort
+      ? `You're on the Location sharing screen. I couldn't spot "${nameShort}" — tap them if you see them. (Is ${name} sharing their location with your Google account?)`
+      : `You're on the Location sharing screen — tap the person. Tip: teach me their name, e.g. "my father's name is Ramesh", and I'll tap straight to them next time.`);
+    return true;
+  }
+  reply(`Maps fought back — layout changed. Finish by hand: tap ${stepsText}.`);
+  return true;
+}
+
+/* Full device-hygiene audit, explained in plain language. */
+async function runSecurityScan() {
+  if (!NAT.isNative()) { reply(nativeOnly('the security scan')); return true; }
+  addMsg('ai', '🛡️ Running a security scan — installed apps, device admins, listeners, developer options…');
+  const a = await NAT.securityAudit();
+  if (!a.ok) { reply('Scan failed — the native layer did not answer.'); return true; }
+
+  const SELF = 'com.rishu.fridayos';
+  const good = [], warn = [], danger = [];
+  const splitPkgs = s => (String(s || '').match(/[a-z][a-z0-9_]*(\.[a-z0-9_]+)+(?=\/|:)/gi) || [])
+    .filter(p => p !== SELF);
+
+  // sideloaded apps
+  const side = Array.isArray(a.sideloaded) ? a.sideloaded : [];
+  if (!side.length) good.push('Every app came from the Play Store');
+  side.slice(0, 6).forEach(x => danger.push(
+    `"${x.name || x.pkg}" was installed outside the Play Store (via ${x.installer || 'unknown'}) — uninstall it if you don't fully trust it`));
+  if (side.length > 6) danger.push(`…and ${side.length - 6} more sideloaded apps`);
+
+  // device admins
+  const admins = (Array.isArray(a.deviceAdmins) ? a.deviceAdmins : []).filter(p => p !== SELF);
+  if (!admins.length) good.push('No app holds Device Admin power');
+  admins.forEach(p => danger.push(`"${p}" holds **Device Admin** power — it can lock or wipe your phone. Review it under Settings → Security → Device admin apps`));
+
+  // accessibility services
+  const acc = splitPkgs(a.accessibilityServices);
+  if (!acc.length) good.push('No other app can see/control your screen');
+  acc.forEach(p => warn.push(`"${p}" has **Accessibility access** — it can read and tap everything on screen. Remove it unless you trust it completely`));
+
+  // notification listeners
+  const nls = splitPkgs(a.notifListeners);
+  nls.forEach(p => warn.push(`"${p}" can **read all your notifications** (OTP codes included). Disable if you didn't allow it on purpose`));
+
+  // dev options
+  if (a.adbEnabled) warn.push('**USB debugging is ON** — anyone with a cable can control this phone. Turn it off unless you are developing');
+  if (a.devSettings && !a.adbEnabled) warn.push('Developer options are ON — consider turning them off');
+
+  // lock screen
+  if (a.lockScreenSet === false) danger.push('**No lock screen PIN/pattern is set** — anyone picking up your phone owns it. Set one now');
+
+  const score = danger.length * 2 + warn.length;
+  const verdict = score === 0
+    ? 'Verdict: CLEAN. Your phone looks well protected.'
+    : score <= 2
+      ? 'Verdict: FAIR — a couple of things deserve your attention.'
+      : 'Verdict: AT RISK — fix the flagged items, starting from the top.';
+
+  const text = ['**Security report**', verdict, '']
+    .concat(good.map(g => '✅ ' + g))
+    .concat(warn.map(w => '⚠️ ' + w))
+    .concat(danger.map(d => '🚨 ' + d))
+    .join('\n');
+  addMsg('ai', text);
+  S.remember('ai', '[security scan] ' + verdict);
+  V.speak(score === 0
+    ? 'Security scan complete. Your phone is clean.'
+    : `Security scan complete. ${danger.length} serious and ${warn.length} warning-level findings. Check the report.`,
+    { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  return true;
+}
+
+/* PIN gate: unlock/setup happens ONLY from typed digits (never via STT,
+   so the PIN never lands in transcripts or the episode log). */
+async function handleVaultPin(text) {
+  const digits = String(text).trim();
+  if (/^(cancel|never ?mind|stop)$/i.test(digits)) {
+    state.vaultPending = null;
+    reply('Vault closed. Nothing was saved or shown.');
+    return;
+  }
+  if (!/^\d{4,8}$/.test(digits)) {
+    state.expect = 'vault_pin';   // keep waiting
+    reply('PIN must be 4-8 digits. Type only the numbers — or say "cancel".');
+    return;
+  }
+  if (!VAULT.vaultExists()) {
+    const r = await VAULT.vaultSetup(digits);
+    if (!r.ok) { state.vaultPending = null; reply('Could not create the vault on this device.'); return; }
+    reply('Vault created and PIN set. Locked to this phone only.');
+  } else {
+    const r = await VAULT.vaultUnlock(digits);
+    if (!r.ok) {
+      state.vaultPending = null;
+      reply('Wrong PIN. Vault is still locked — issue your command again to retry.');
+      return;
+    }
+    reply('Vault unlocked.');
+  }
+  finishVaultPending();
+}
+
+async function finishVaultPending() {
+  const p = state.vaultPending;
+  state.vaultPending = null;
+  if (!p) return;
+  if (p.kind === 'save') {
+    const r = await VAULT.vaultSave(p.service, p.password);
+    if (r.ok) {
+      addMsg('ai', `🔐 Saved: **${p.service}** password is now in your encrypted vault.`);
+      V.speak(`${p.service} password saved to your vault.`, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    } else reply('Could not save that.');
+    return;
+  }
+  if (p.kind === 'read') {
+    const r = await VAULT.vaultRead(p.service);
+    if (r.ok) {
+      addMsg('ai', `🔓 **${p.service}** password: \`${r.password}\`\n\n(Shown once, on screen only — never spoken. Say "lock my vault" when done.)`);
+    } else {
+      const others = VAULT.vaultServices();
+      reply(`Nothing saved for "${p.service}".${others.length ? ' You have: ' + others.join(', ') + '.' : ''}`);
+    }
+    return;
+  }
+  if (p.kind === 'forget') {
+    const r = VAULT.vaultForget(p.service);
+    reply(r.ok ? `Forgotten: "${p.service}" password is wiped from the vault.` : `Nothing saved for "${p.service}".`);
+    return;
+  }
+  if (p.kind === 'list') {
+    const svcs = VAULT.vaultServices();
+    reply(svcs.length
+      ? `Vault holds: ${svcs.join(', ')}.`
+      : 'Vault is empty.');
+    return;
+  }
+}
+
+/* ================= v7.4 REDTEAM HELPERS ================= */
+
+/* HaveIBeenPwned range check (k-anonymity). Only the FIRST 5 chars of the
+   SHA-1 hash ever leave the phone — the password itself never does.
+   This is the same technique real password managers use. */
+async function breachCount(password) {
+  try {
+    if (typeof crypto === 'undefined' || !crypto.subtle) return null;
+    const hash = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password));
+    const hex = [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const res = await fetch('https://api.pwnedpasswords.com/range/' + hex.slice(0, 5));
+    if (!res.ok) return null;
+    const suffix = hex.slice(5);
+    const rows = (await res.text()).split('\n');
+    for (const row of rows) {
+      const [suf, count] = row.split(':');
+      if (suf && suf.trim() === suffix) return parseInt(count, 10) || 0;
+    }
+    return 0;
+  } catch (_) { return null; }   // offline -> skip quietly
+}
+
+const speakShort = (text) => V.speak(text, {
+  onStart: () => state.speaking = true,
+  onEnd: () => state.speaking = false
+});
+
+async function auditPassword(pw) {
+  if (!pw || pw.length < 2) { reply('Give me a fuller password to audit (it is never stored).'); return true; }
+  const s = HACKER.entropyScore(pw);
+  addMsg('ai', `🧪 **Password lab** — ${pw.length} chars\n` +
+    `Verdict: **${s.grade}** (~${s.bits} bits of entropy)\n` +
+    s.notes.map(n => '▸ ' + n).join('\n'));
+  const bc = await breachCount(pw);
+  if (bc === null) {
+    addMsg('ai', '_Breach check skipped — offline. (Uses k-anonymity: only 5 hash-chars leave the phone, never the password.)_');
+  } else if (bc > 0) {
+    addMsg('ai', `🚨 **Seen ${bc.toLocaleString()} times in public breach dumps.** Treat this password as burned — change it everywhere it is used.`);
+  } else {
+    addMsg('ai', '✅ Not found in any public breach dump (k-anonymity check, HaveIBeenPwned).');
+  }
+  speakShort(`Password audit: ${s.grade}, about ${s.bits} bits.` +
+    (bc > 0 ? ' Warning — it has leaked in data breaches.' : ''));
+  return true;
+}
+
+function judgeLink(url) {
+  const r = HACKER.phishScore(url);
+  const icon = r.level === 'PHISHING' ? '🚨' : r.level === 'SUS' ? '⚠️'
+             : r.level === 'CAUTION' ? '🟡' : '✅';
+  addMsg('ai', `🎣 **Link verdict: ${r.level}** (risk ${r.score}/100)\n` +
+    `\`${String(url).slice(0, 90)}\`\n` + r.flags.map(f => '▸ ' + f).join('\n') +
+    (r.level === 'PHISHING' ? '\n\nVerdict says do NOT open it, and definitely do not type any password or OTP there.' : ''));
+  speakShort(`Link check: ${r.level}. ${r.flags[0] || ''}`);
+  return true;
+}
+
+async function scanSmsForPhishing() {
+  if (!NAT.isNative()) { reply(nativeOnly('SMS scanning')); return true; }
+  const res = await NAT.getRecentSMS(20);
+  if (!res.ok) {
+    reply(res.reason === 'no_permission'
+      ? 'I need SMS read permission. Say "give permissions" first.'
+      : 'Could not read messages.');
+    return true;
+  }
+  const msgs = Array.isArray(res.messages) ? res.messages : [];
+  const flagged = [];
+  let checkedLinks = 0;
+  msgs.forEach(m => {
+    const links = String(m.body || '').match(/https?:\/\/[^\s)"]+|[a-z0-9-]+\.(?:tk|ml|ga|cf|gq|xyz|top|click|link)\b[^\s)"]*/gi) || [];
+    links.forEach(l => {
+      checkedLinks++;
+      const r = HACKER.phishScore(l);
+      if (r.score >= 20) flagged.push({ from: m.from || '?', url: l, ...r });
+    });
+  });
+  flagged.sort((a, b) => b.score - a.score);
+  if (!checkedLinks) {
+    reply('Looked through your 20 latest messages — no links at all. Inbox looks clean.');
+    return true;
+  }
+  if (!flagged.length) {
+    reply(`Checked ${checkedLinks} link(s) in your last 20 messages — nothing phishy. ✅`);
+    return true;
+  }
+  const lines = flagged.slice(0, 5).map(f =>
+    `▸ **${f.level}** (${f.score}) from ${f.from}\n  \`${f.url.slice(0, 70)}\``);
+  addMsg('ai', `🎣 **Smishing scan** — ${checkedLinks} links checked, ${flagged.length} suspicious:\n` +
+    lines.join('\n') +
+    `\n\nGolden rule: banks, IRCTC and delivery firms never ask for OTP/password over SMS links. When in doubt, ask me to check the link first.`);
+  speakShort(`Smishing scan done. ${flagged.length} suspicious link${flagged.length > 1 ? 's' : ''} found — check the report.`);
+  return true;
+}
+
+async function runNetRecon() {
+  if (!NAT.isNative()) { reply(nativeOnly('network recon')); return true; }
+  addMsg('ai', '🛰 Recon running — auditing WiFi security and sweeping your network (~15 seconds)…');
+  const [audit, lan] = await Promise.all([NAT.wifiAudit(), NAT.lanScan()]);
+  const hosts = (lan.ok && Array.isArray(lan.hosts)) ? lan.hosts : [];
+  hosts.sort((x, y) => ((y.isGateway ? 1 : 0) - (x.isGateway ? 1 : 0))
+    || x.ip.localeCompare(y.ip, undefined, { numeric: true }));
+  addMsg('ai', HACKER.netReport(audit.ok ? audit : null, hosts));
+  const unknown = hosts.filter(h => HACKER.vendorOf(h.mac) === 'unknown' && !h.isSelf && !h.isGateway).length;
+  const weakWifi = audit.ok && /open|wep/.test(String(audit.security));
+
+  if (lan.ok && lan.gateway) {
+    addMsg('ai', `_Now probing the router (${lan.gateway}) for risky open ports…_`);
+    const ps = await NAT.portScan(lan.gateway);
+    if (ps.ok) {
+      const opens = (Array.isArray(ps.open) ? ps.open : []).sort((x, y) => x - y);
+      if (!opens.length) {
+        addMsg('ai', `✅ Router (${lan.gateway}) exposes nothing. Tight ship.`);
+      } else {
+        addMsg('ai', `**Open ports on ${lan.gateway}:**\n` + opens.map(p => {
+          const d = HACKER.describePort(p);
+          const ic = d.risk === 'crit' ? '🚨' : d.risk === 'high' ? '🔥' : d.risk === 'warn' ? '⚠️' : 'ℹ️';
+          return `${ic} **${p}** ${d.name}${d.why ? ' — ' + d.why : ''}`;
+        }).join('\n') + `\nSay "scan ports on 192.168.x.x" to check any device.`);
+      }
+    }
+  }
+  speakShort(`Recon complete — ${hosts.length} devices online` +
+    (unknown ? `, ${unknown} I don't recognize.` : '.') +
+    (weakWifi ? ' Warning: your WiFi encryption is weak.' : ''));
+  return true;
+}
+
+async function runPortScan(host) {
+  if (!NAT.isNative()) { reply(nativeOnly('port scanning')); return true; }
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(host || ''))) {
+    reply('Give me an IP on your own network, e.g. "scan ports on 192.168.1.5".');
+    return true;
+  }
+  addMsg('ai', `🎯 Scanning ${host} — 23 ports that matter…`);
+  const ps = await NAT.portScan(host);
+  if (!ps.ok) { reply('Scan failed — host unreachable or scan blocked.'); return true; }
+  const opens = (Array.isArray(ps.open) ? ps.open : []).sort((x, y) => x - y);
+  if (!opens.length) {
+    reply(`✅ ${host} answers on none of the 23 common ports. Either quiet or well-locked.`);
+    return true;
+  }
+  const crit = opens.filter(p => ['crit', 'high'].includes(HACKER.describePort(p).risk));
+  addMsg('ai', `**${host}** — ${opens.length} open:\n` + opens.map(p => {
+    const d = HACKER.describePort(p);
+    const ic = d.risk === 'crit' ? '🚨' : d.risk === 'high' ? '🔥' : d.risk === 'warn' ? '⚠️' : 'ℹ️';
+    return `${ic} **${p}** ${d.name}${d.why ? ' — ' + d.why : ''}`;
+  }).join('\n') + (crit.length ? `\n\n⚠ ${crit.length} of those are attack targets. Close them unless you know exactly why they're open.` : ''));
+  speakShort(`${host} has ${opens.length} open ports${crit.length ? `, ${crit.length} risky` : ''}.`);
+  return true;
+}
+
 async function initNative() {
   nativeCaps = await NAT.capabilities();
   if (!nativeCaps.native) return;
@@ -1092,6 +1548,17 @@ async function initNative() {
   // launched via the Quick Settings tile -> start listening
   const tile = await NAT.consumeTileRequest();
   if (tile && tile.listen) setTimeout(() => V.listen(), 2000);
+
+  // security guard: a non-Play-Store app just got installed on the device
+  NAT.onSecurityAlert(ev => {
+    const label = ev.label || ev.pkg || 'An app';
+    addMsg('ai',
+      `🛡️ **Security alert:** "${label}" was just installed **outside the Play Store** (via ${ev.source || 'unknown'}). ` +
+      `If that wasn't you, uninstall it now — or ask me to "scan my phone" for the full picture.`,
+      { proactive: true });
+    V.speak('Security alert. A new app was installed outside the Play Store.',
+      { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  });
 
   syncWidget();
 }
