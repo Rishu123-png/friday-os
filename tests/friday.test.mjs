@@ -17,8 +17,8 @@ const { parseTime, safeMath, wordToNum } = await import('../www/js/nlp.js');
 const { resolve, intentCount } = await import('../www/js/brain.js');
 const { parseAlarm } = await import('../www/js/automation.js');
 const { convertUnit, generatePassword, offlineCode } = await import('../www/js/templates.js');
-const { extractFacts, saveFact, getFact, kinshipName } = await import('../www/js/memory.js');
-const { splitCommands, autoCorrect, sentiment, semanticSearch, resolveFollowup } = await import('../www/js/nlu.js');
+const { extractFacts, saveFact, getFact, kinshipName, applyPronunciations, forgetFact } = await import('../www/js/memory.js');
+const { splitCommands, autoCorrect, sentiment, semanticSearch, resolveFollowup, hinglishAliases } = await import('../www/js/nlu.js');
 
 /* ---------------- NLP: math ---------------- */
 test('safeMath respects precedence', () => {
@@ -133,4 +133,33 @@ test('generatePassword length and charset', () => {
 });
 test('offlineCode finds a scaffold', () => {
   assert.ok(offlineCode('write a python script').body.includes('```python'));
+});
+
+/* ---------------- v7.2: Hinglish command layer ---------------- */
+test('hinglishAliases translates high-confidence phrases only', () => {
+  assert.equal(hinglishAliases('kitne baje hai'), 'what time is it');
+  assert.ok(hinglishAliases('mausam kaisa hai').includes('weather'));
+  assert.ok(hinglishAliases('mummy ko call karo').includes('call'));
+  assert.equal(hinglishAliases('what is the weather'), 'what is the weather');
+  assert.equal(hinglishAliases('tell me about the mausoleum'), 'tell me about the mausoleum'); // no false hit
+});
+test('hinglish input reaches the intent engine', () => {
+  const r = resolve('kitne baje');
+  assert.ok(r && r.intent === 'time');
+  const w = resolve('mausam batao');
+  assert.ok(w && w.intent === 'weather');
+});
+
+/* ---------------- v7.2: pronunciation memory ---------------- */
+test('learned pronunciations are stored and applied', () => {
+  const f = extractFacts('pronounce Raghav as raa-ghuv');
+  assert.ok(f.find(x => x.key === 'say.raghav'));
+  assert.equal(applyPronunciations('should I call Raghav now?'), 'should I call raa-ghuv now?');
+  assert.equal(applyPronunciations('nothing to change here'), 'nothing to change here');
+  forgetFact('say.raghav');
+});
+test('"is pronounced" phrasing also teaches pronunciation', () => {
+  extractFacts('Seema is pronounced see-maa');
+  assert.equal(getFact('say.seema'), 'see-maa');
+  forgetFact('say.seema');
 });
