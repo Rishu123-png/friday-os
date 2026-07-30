@@ -146,6 +146,25 @@ const RULES = [
       if (days < 2) return null;
       return { text: `Been ${days} days. Good to have you back. Anything I should catch up on?`, priority: 6 };
     }
+  },
+
+  /* ---- Weekly digest (Turn 13) ---- */
+  /* Once a week: usage stats + suggest automating the strongest habit. */
+  {
+    id: 'weekly_digest', cooldownH: 24 * 6.5,
+    check: () => {
+      const s = stats();
+      if (s.interactions < 40) return null;
+      const habit = patterns().find(p => p.type === 'time_habit');
+      const tip = habit
+        ? ` I noticed ${habit.text.toLowerCase()}. Want me to make that an automatic routine? Just say "when I say ${habit.intent === 'weather' ? 'good morning' : habit.intent.replace(/_/g, ' ')}, ${habit.intent === 'news' ? 'tell me the news' : 'give me the weather'}".`
+        : '';
+      return {
+        text: `Weekly digest: ${s.interactions} interactions across ${s.days} days — I know ${s.facts} things about you and noticed ${s.patterns} habits.${tip}`,
+        action: { type: 'open_panel', panel: 'activity' },
+        priority: 3
+      };
+    }
   }
 ];
 
