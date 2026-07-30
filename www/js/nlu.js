@@ -1,4 +1,3 @@
-
 /* ===== FRIDAY OS — Advanced NLU =====
    Four capabilities that make conversation feel natural, all offline:
 
@@ -225,6 +224,40 @@ export function toneFor(mood, urgent) {
   if (mood === 'negative') return ['Understood.', "I'm on it.", 'Let me help with that.'];
   if (mood === 'positive') return ['Happy to.', 'Of course.', 'Absolutely.'];
   return [];
+}
+
+/* ================= 5b. HINGLISH COMMAND LAYER ================= */
+/* Normalizes common Hindi/Hinglish command phrases to English intents
+   BEFORE the intent engine runs, so every existing intent just works.
+   Conservative: only high-confidence command phrases are translated. */
+
+const HINGLISH = [
+  [/\bkitne baje( hai| hain| hai kya)?\b/, 'what time is it'],
+  [/\bsamay kya( hai| hain)?\b/, 'what time is it'],
+  [/\btarikh kya( hai| hain)?\b/, 'what is the date'],
+  [/\bmausam( kaisa hai| kaisa| batao| bataye)?\b/, 'weather'],
+  [/\byaad dila ?(?:do|na|o)?\b/, 'remind me'],
+  [/\balarm (?:laga ?do|lagao|laga do na|set karo)\b/, 'set an alarm'],
+  [/\b(?:call|phone|dial) (?:karo|kar do|karna|milao)\b/, 'call'],
+  [/\b(?:message|sms|text) bhejo\b/, 'send message'],
+  [/\bkhabar(?:ein| en)?|samachar\b/, 'news'],
+  [/\bkholo\b|\bkhol do\b|\bkholiye\b/, 'open'],
+  [/\bband (?:karo|kar do)\b/, 'turn off'],
+  [/\bchalu (?:karo|kar do)\b|\bchalao\b/, 'turn on'],
+  [/\b(awaaz|awaz) (?:kam|zyada|badha|ghata|mute)\b/, 'volume'],
+  [/\bkitni battery( hai)?\b|\bbattery kitna\b/, 'battery'],
+  [/\bjoke suna ?(?:o|na)?\b|\bmazaak\b/, 'tell me a joke'],
+  [/\bnikal do\b|\bhata do\b/, 'delete'],
+  [/\bphoto kheencho\b|\btasveer lo\b/, 'take a photo']
+];
+
+/** Translate high-confidence Hinglish phrases to English commands. */
+export function hinglishAliases(text) {
+  let t = ' ' + String(text).toLowerCase().trim() + ' ';
+  for (const [re, en] of HINGLISH) {
+    t = t.replace(re, ' ' + en + ' ');
+  }
+  return t.replace(/\s+/g, ' ').trim();
 }
 
 /* ================= 5. SPELL CORRECTION for commands ================= */
