@@ -1,0 +1,7 @@
+node_modules/
+android/
+ios/
+.DS_Store
+*.log
+screenshot-*.png
+shot-*.png
