@@ -10,7 +10,7 @@ if not cands:
 path = cands[0]
 s = io.open(path, encoding='utf-8').read()
 
-if 'FridayNative.class' in s:
+if 'FridaySpeech.class' in s:
     print('Plugin already registered in', path)
     sys.exit(0)
 
@@ -20,7 +20,7 @@ if 'import android.os.Bundle;' not in s:
 
 if 'onCreate' in s:
     s = re.sub(r'(public void onCreate\s*\(\s*Bundle\s+\w+\s*\)\s*\{\s*)',
-               r'\1        registerPlugin(FridayNative.class);\n        ',
+               r'\1        registerPlugin(FridayNative.class);\n        registerPlugin(FridaySpeech.class);\n        ',
                s, count=1)
 else:
     s = s.replace(
@@ -29,6 +29,7 @@ else:
         '    @Override\n'
         '    public void onCreate(Bundle savedInstanceState) {\n'
         '        registerPlugin(FridayNative.class);\n'
+        '        registerPlugin(FridaySpeech.class);\n'
         '        super.onCreate(savedInstanceState);\n'
         '    }\n')
 
