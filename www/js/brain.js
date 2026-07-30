@@ -9,6 +9,7 @@ import { parseTime, humanTime, safeMath, cleanSubject, fuzzyHas, keywordScore, p
 import { persona } from './ai.js';
 import { convertUnit, generatePassword } from './templates.js';
 import { parseAlarm, parseRoutine, findRoutine, alarms, describeAlarm } from './automation.js';
+import { isNative } from './native.js';
 
 const ACK = () => pick(['Done.', 'Got it.', 'Consider it handled.', 'Noted.', 'On it.']);
 const who = () => getSetting('userName') || persona().address || 'Boss';
@@ -122,6 +123,7 @@ I('call', t => /\b(call|dial|phone)\s+\w+/.test(t) && !/\b(recall|calling card)\
     const contacts = getList(KEYS.CONTACTS);
     const hit = contacts.find(c => c.name.toLowerCase().includes(name.toLowerCase()) || fuzzyHas(c.name, name));
     if (hit) return { say: `Calling ${hit.name}.`, action: { type: 'call', number: hit.phone, name: hit.name } };
+    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: 'call' } };
     return { say: `I don't have "${name}" in contacts. Add them in the Contacts panel, or say the number.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
@@ -138,6 +140,7 @@ I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
       say: `Opening ${isWa ? 'WhatsApp' : 'messages'} for ${hit.name}.`,
       action: { type: isWa ? 'whatsapp' : 'sms', number: hit.phone, body: msg, name: hit.name }
     };
+    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: 'sms', body: msg } };
     return { say: `No contact named "${name}". Add them first.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
@@ -345,6 +348,78 @@ I('geofence_add', t => /\bremind me when i (get|arrive|reach)\b/.test(t) ? 1 : 0
 /* ---------- ACTIVITY PANEL ---------- */
 I('activity', t => /\b(activity|what.*(running|scheduled|automations)|show automations)\b/.test(t) ? 1 : 0,
   () => ({ say: 'Here is everything running in the background.', action: { type: 'open_panel', panel: 'activity' } }), 4);
+
+
+/* ---------- PHASE C: system toggles (native) ---------- */
+I('toggle_wifi', t => /\b(wifi|wi-fi)\b/.test(t) && /\b(on|off|enable|disable|turn)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'sys_toggle', what: 'wifi', on: !/\b(off|disable)\b/.test(t) } }), 5);
+
+I('toggle_bt', t => /\b(bluetooth)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'sys_toggle', what: 'bluetooth', on: !/\b(off|disable)\b/.test(t) } }), 5);
+
+I('toggle_dnd', t => /\b(do not disturb|dnd|silent mode)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'sys_toggle', what: 'dnd', on: !/\b(off|disable)\b/.test(t) } }), 5);
+
+I('volume', t => /\b(volume|sound)\b/.test(t) && /\d|\b(up|down|max|mute|full)\b/.test(t) ? 1 : 0,
+  t => {
+    let pct = 50;
+    const m = t.match(/(\d{1,3})\s*(?:%|percent)?/);
+    if (m) pct = Math.min(100, parseInt(m[1], 10));
+    if (/\b(max|full)\b/.test(t)) pct = 100;
+    if (/\b(mute)\b/.test(t)) pct = 0;
+    if (/\bup\b/.test(t)) pct = 80;
+    if (/\bdown\b/.test(t)) pct = 25;
+    return { say: null, action: { type: 'sys_volume', percent: pct } };
+  }, 5);
+
+I('brightness', t => /\b(brightness|screen bright)\b/.test(t) ? 1 : 0,
+  t => {
+    let pct = 60;
+    const m = t.match(/(\d{1,3})\s*(?:%|percent)?/);
+    if (m) pct = Math.min(100, parseInt(m[1], 10));
+    if (/\b(max|full)\b/.test(t)) pct = 100;
+    if (/\b(low|dim)\b/.test(t)) pct = 20;
+    return { say: null, action: { type: 'sys_brightness', percent: pct } };
+  }, 5);
+
+I('media', t => /\b(play|pause|resume|next song|next track|previous song|skip|stop music)\b/.test(t) && !/\b(play (a |the )?(game|video)|playlist)\b/.test(t) ? 1 : 0,
+  t => {
+    let a = 'playpause';
+    if (/\bnext|skip\b/.test(t)) a = 'next';
+    else if (/\bprevious|back\b/.test(t)) a = 'previous';
+    else if (/\bpause\b/.test(t)) a = 'pause';
+    else if (/\bstop\b/.test(t)) a = 'stop';
+    else if (/\bplay|resume\b/.test(t)) a = 'play';
+    return { say: null, action: { type: 'media', action: a } };
+  }, 4);
+
+I('nav_gesture', t => /\b(go back|go home|show recents|open notifications|quick settings|lock (the )?(phone|screen))\b/.test(t) ? 1 : 0,
+  t => {
+    let a = 'home';
+    if (/\bback\b/.test(t)) a = 'back';
+    else if (/\brecents\b/.test(t)) a = 'recents';
+    else if (/\bnotifications\b/.test(t)) a = 'notifications';
+    else if (/\bquick settings\b/.test(t)) a = 'quicksettings';
+    else if (/\block\b/.test(t)) a = 'lock';
+    return { say: null, action: { type: 'gesture', action: a } };
+  }, 5);
+
+I('otp', t => /\b(otp|verification code|read.*code|what.*otp)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'read_otp' } }), 5);
+
+I('storage', t => /\b(storage|disk space|free space|memory left)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'storage' } }), 4);
+
+I('bubble', t => /\b(bubble|overlay|floating)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'bubble', on: !/\b(off|hide|disable|remove)\b/.test(t) } }), 5);
+
+I('read_notifications', t => /\b(read.*notifications?|any notifications?|what.*notifications?|my notifications?)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'read_notifications' } }), 5);
+
+I('setup', t => /\b(setup|set up|permissions|grant access|enable everything|configure)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'setup' } }), 5);
+
+/* ---------- PHASE C: system toggles end ---------- */
 
 /* ---------- Memory ---------- */
 I('what_you_know', t => /\b(what do you know about me|what have you learned|what do you remember about me|my profile|show memory|my memories)\b/.test(t) ? 1 : 0,
