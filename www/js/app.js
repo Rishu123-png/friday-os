@@ -54,7 +54,7 @@ async function boot() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ================= INIT ================= */
-function init() {
+async function init() {
   state.booted = true;
 
   U.applyTheme(S.getSetting('uiTheme'));
@@ -62,7 +62,7 @@ function init() {
   U.initParticles($('#particleCanvas'));
   U.animateWaveform($('#voiceWaveform'), state);
 
-  V.initSynthesis();
+  await V.initSynthesis();
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
@@ -105,7 +105,13 @@ function init() {
     ? `${tod}, ${name}. Systems online.`
     : (learnedName ? `${tod}, ${name}. Systems online.` : p.greeting);
   addMsg('ai', greet);
-  V.speak(greet, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  const spoke = V.speak(greet, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  if (!spoke) {
+    // TTS engine may still be warming up on first launch
+    setTimeout(() => V.speak(greet, {
+      onStart: () => state.speaking = true, onEnd: () => state.speaking = false
+    }), 1500);
+  }
 
   updateBrainBadge();
   MEM.learnPatterns();
@@ -257,7 +263,21 @@ async function runAction(a, hit) {
       D.sms(a.number, a.body);
       return true;
     }
-    case 'whatsapp': D.whatsapp(a.number, a.body); return true;
+    case 'whatsapp': {
+      if (NAT.isNative()) {
+        const r = await NAT.whatsappSend(a.number, a.body || '', true);
+        if (r.ok) {
+          reply(a.body
+            ? (r.autoSend
+                ? `Sending "${a.body}" to ${a.name || 'them'} on WhatsApp.`
+                : `WhatsApp is open with your message. Tap send \u2014 or enable Accessibility so I can tap it for you.`)
+            : `Opening WhatsApp for ${a.name || 'them'}.`);
+          return true;
+        }
+      }
+      D.whatsapp(a.number, a.body);
+      return true;
+    }
     case 'navigate': D.maps(a.dest); return true;
     case 'open_app': {
       if (NAT.isNative()) {
@@ -283,6 +303,7 @@ async function runAction(a, hit) {
       if (hit) {
         if (a.mode === 'call') return runAction({ type: 'call', number: hit.phone, name: hit.name }, {});
         if (a.mode === 'sms') return runAction({ type: 'sms', number: hit.phone, body: a.body, name: hit.name }, {});
+        if (a.mode === 'whatsapp') return runAction({ type: 'whatsapp', number: hit.phone, body: a.body, name: hit.name }, {});
       }
       reply(`I couldn't find "${a.name}" in your contacts.`);
       return true;
@@ -409,8 +430,16 @@ async function runAction(a, hit) {
       refresh('alarms');
       const when = AUTO.describeAlarm(rec);
       const next = new Date(AUTO.nextOccurrence(rec));
-      reply(`Alarm set \u2014 ${rec.label} at ${when}. That's ${humanTime(next)}.`);
       D.notifyPermission();
+      if (NAT.isNative()) {
+        const [hh, mm] = rec.time.split(':').map(Number);
+        const r = await NAT.setSystemAlarm(hh, mm, rec.label, rec.repeat);
+        reply(r.ok
+          ? `Alarm set in your Clock app \u2014 ${rec.label} at ${when}.`
+          : `Alarm saved in FRIDAY \u2014 ${rec.label} at ${when}. (Clock app refused: ${r.reason})`);
+      } else {
+        reply(`Alarm set \u2014 ${rec.label} at ${when}. That's ${humanTime(next)}.`);
+      }
       return true;
     }
 
@@ -1056,6 +1085,7 @@ function renderContacts() {
 function renderCaps() {
   const el = $('#capsList'); if (!el) return;
   const items = [
+    ['_tts', 'Voice output (speaking)'], ['_stt', 'Voice input (listening)'],
     ['contacts', 'Real contacts'], ['notifications', 'Notification reading'],
     ['sms', 'Read SMS / OTP'], ['sendSms', 'Send SMS'], ['phone', 'Direct calling'],
     ['overlay', 'Floating bubble'], ['accessibility', 'System gestures'],
@@ -1065,6 +1095,14 @@ function renderCaps() {
     el.innerHTML = '<div class="cap-row off"><span>\u25cb</span> Browser mode \u2014 install the APK to unlock phone features</div>';
     return;
   }
+  V.speechStatus().then(st => {
+    nativeCaps._tts = st.tts; nativeCaps._stt = st.stt;
+    const rows = el.querySelectorAll('.cap-row');
+    if (rows[0]) { rows[0].className = 'cap-row ' + (st.tts ? 'on' : 'off');
+      rows[0].innerHTML = `<span>${st.tts ? '\u25cf' : '\u25cb'}</span> Voice output (speaking)`; }
+    if (rows[1]) { rows[1].className = 'cap-row ' + (st.stt ? 'on' : 'off');
+      rows[1].innerHTML = `<span>${st.stt ? '\u25cf' : '\u25cb'}</span> Voice input (listening)`; }
+  });
   el.innerHTML = items.map(([k, label]) =>
     `<div class="cap-row ${nativeCaps[k] ? 'on' : 'off'}"><span>${nativeCaps[k] ? '\u25cf' : '\u25cb'}</span> ${label}</div>`
   ).join('');
