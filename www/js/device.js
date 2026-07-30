@@ -15,7 +15,16 @@ export const tap = () => vibrate(15);
 export const buzz = () => vibrate([40, 60, 40]);
 
 /* ---------- Battery ---------- */
+/* navigator.getBattery is Chromium-only and deprecated; prefer the
+   native FridayNative.getBatteryDetail in the APK, fall back to web. */
 export async function battery() {
+  try {
+    const c = CAP();
+    if (c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.FridayNative) {
+      const r = await c.Plugins.FridayNative.getBatteryDetail();
+      if (r && r.level > 0) return { level: Math.round(r.level), charging: false };
+    }
+  } catch (_) {}
   try {
     if (!navigator.getBattery) return null;
     const b = await navigator.getBattery();
