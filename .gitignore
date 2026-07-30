@@ -5,3 +5,5 @@ ios/
 *.log
 screenshot-*.png
 shot-*.png
+__pycache__/
+*.pyc
