@@ -10,6 +10,7 @@ import { persona } from './ai.js';
 import { convertUnit, generatePassword } from './templates.js';
 import { parseAlarm, parseRoutine, findRoutine, alarms, describeAlarm } from './automation.js';
 import { isNative } from './native.js';
+import { kinshipName } from './memory.js';
 
 const ACK = () => pick(['Done.', 'Got it.', 'Consider it handled.', 'Noted.', 'On it.']);
 const who = () => getSetting('userName') || persona().address || 'Boss';
@@ -120,11 +121,17 @@ I('call', t => /\b(call|dial|phone)\s+\w+/.test(t) && !/\b(recall|calling card)\
   t => {
     const name = cleanSubject(t.replace(/\b(call|dial|phone|please|up)\b/gi, ''));
     if (!name) return { say: 'Who should I call?' };
+    // kinship resolution: "call mom" -> fact person.mother -> real contact
+    const kin = kinshipName(name);
+    const target = kin ? kin.name : name;
     const contacts = getList(KEYS.CONTACTS);
-    const hit = contacts.find(c => c.name.toLowerCase().includes(name.toLowerCase()) || fuzzyHas(c.name, name));
-    if (hit) return { say: `Calling ${hit.name}.`, action: { type: 'call', number: hit.phone, name: hit.name } };
-    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: 'call' } };
-    return { say: `I don't have "${name}" in contacts. Add them in the Contacts panel, or say the number.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
+    const hit = contacts.find(c => c.name.toLowerCase().includes(target.toLowerCase()) || fuzzyHas(c.name, target));
+    if (hit) return {
+      say: kin ? `Calling your ${kin.rel}, ${hit.name}.` : `Calling ${hit.name}.`,
+      action: { type: 'call', number: hit.phone, name: hit.name }
+    };
+    if (isNative()) return { say: null, action: { type: 'contact_lookup', name: target, mode: 'call' } };
+    return { say: `I don't have "${target}" in contacts. Add them in the Contacts panel, or say the number.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
 I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
@@ -146,15 +153,17 @@ I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
     // only strip command verbs from the NAME, never from the message
     namePart = namePart.replace(/\b(send a|send|text|message|whatsapp|sms|to|a|on)\b/gi, ' ');
     const name = cleanSubject(namePart || '').replace(/\s+(and|then)$/i, '').trim();
+    const kin = kinshipName(name);
+    const target = kin ? kin.name : name;
     const contacts = getList(KEYS.CONTACTS);
-    const hit = contacts.find(c => fuzzyHas(c.name, name));
+    const hit = contacts.find(c => fuzzyHas(c.name, target));
     const isWa = /whatsapp/.test(t);
     if (hit) return {
       say: `Opening ${isWa ? 'WhatsApp' : 'messages'} for ${hit.name}.`,
       action: { type: isWa ? 'whatsapp' : 'sms', number: hit.phone, body: msg, name: hit.name }
     };
-    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: isWa ? 'whatsapp' : 'sms', body: msg } };
-    return { say: `No contact named "${name}". Add them first.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
+    if (isNative()) return { say: null, action: { type: 'contact_lookup', name: target, mode: isWa ? 'whatsapp' : 'sms', body: msg } };
+    return { say: `No contact named "${target}". Add them first.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
 /* ---------- Device control ---------- */
@@ -172,7 +181,8 @@ I('open_app', t => /\b(open|launch|start)\s+\w+/.test(t) ? 0.8 : 0,
       notes: 'sub-notes', reminders: 'sub-reminders', calendar: 'sub-calendar',
       contacts: 'sub-contacts', translate: 'sub-translate', translator: 'sub-translate',
       weather: 'sub-weather', search: 'sub-search', camera: 'camera', coder: 'sub-coder',
-      code: 'sub-coder', planner: 'sub-planner', research: 'sub-research', writer: 'sub-writer'
+      code: 'sub-coder', planner: 'sub-planner', research: 'sub-research', writer: 'sub-writer',
+      tasks: 'sub-tasks', task: 'sub-tasks', todo: 'sub-tasks', 'to-do': 'sub-tasks'
     };
     for (const [k, v] of Object.entries(panels)) {
       if (fuzzyHas(app, k)) return { say: `Opening ${k}.`, action: { type: 'open_panel', panel: v } };

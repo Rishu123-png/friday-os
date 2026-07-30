@@ -16,6 +16,7 @@ import * as PRO from './proactive.js';
 import * as NLU from './nlu.js';
 import * as AUTO from './automation.js';
 import * as NAT from './native.js';
+import * as CODER from './coder.js';
 import { humanTime, parseTime, pick } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -187,9 +188,14 @@ async function handleInput(text, opts = {}) {
   S.remember('user', text);
   $('#textInput').value = '';
 
-  // mood detection -> tone
+  // mood detection -> tone (prepended once to the next reply)
   const mood = NLU.sentiment(text);
   state.mood = mood;
+  state.tonePrefix = null;
+  if (mood.urgent || mood.mood === 'negative') {
+    const tones = NLU.toneFor(mood.mood, mood.urgent);
+    if (tones.length) state.tonePrefix = pick(tones);
+  }
 
   // learn from what was said
   const learned = MEM.extractFacts(text);
@@ -685,7 +691,21 @@ async function doBriefing() {
 }
 
 /* ---------- Coding ---------- */
+/* Priority: 1) on-device LLM (install once, unlimited, no key)
+             2) Groq cloud (if key)
+             3) curated offline templates                        */
 async function doCode(prompt) {
+  if (CODER.ready()) return streamLocalCode(prompt);
+  if (CODER.engineAvailable() && !CODER.installedModelId()) {
+    U.openPanel('sub-coder');
+    $('#codeResult').innerHTML = U.renderRich(
+      'The offline coding engine is bundled but **no model is installed yet**.\n\n' +
+      'Open **Settings → Offline Coder** and download one (Qwen Coder 1.5B ≈ 1 GB, recommended). ' +
+      'After that one-time step, code generation works with **no internet and no key**.');
+    reply('The offline coder needs a one-time model download. Opening Settings.');
+    setTimeout(() => { U.closeAllPanels(); U.openPanel('settings'); }, 1600);
+    return;
+  }
   if (!AI.hasGroq()) {
     U.openPanel('sub-coder');
     const tpl = T.offlineCode(prompt);
@@ -694,8 +714,8 @@ async function doCode(prompt) {
       out.innerHTML = U.renderRich(tpl.body);
       reply(`No cloud key, so here's an offline template: ${tpl.title}. Check the Coder panel.`);
     } else {
-      out.innerHTML = U.renderRich(`I have offline templates for: **${T.codeTopics().join(', ')}**.\n\nFor code written specifically for your request, add a free Groq key in Settings (console.groq.com — no card needed).`);
-      reply('No offline template matches that. Add a Groq key in Settings for real coding.');
+      out.innerHTML = U.renderRich(`I have offline templates for: **${T.codeTopics().join(', ')}**.\n\nFor code written specifically for your request, add a free Groq key in Settings (console.groq.com — no card needed), or install the offline coder (Settings → Offline Coder).`);
+      reply('No offline template matches that. Add a Groq key, or download the offline coder.');
     }
     return;
   }
@@ -712,6 +732,95 @@ async function doCode(prompt) {
   } catch (e) {
     out.innerHTML = U.emptyState(errMsg(e));
   }
+}
+
+/* Stream code from the on-device LLM (tokens arrive live, no network). */
+async function streamLocalCode(prompt) {
+  U.openPanel('sub-coder');
+  const out = $('#codeResult');
+  out.innerHTML = '<div class="agent-thinking">Generating on-device… (first load takes a few seconds)</div>';
+  let acc = '', live = null, rafPending = false;
+
+  const flush = () => {
+    rafPending = false;
+    if (!acc) return;
+    if (!live) { out.innerHTML = ''; live = document.createElement('div'); out.appendChild(live); }
+    live.innerHTML = U.renderRich(acc);
+  };
+
+  try {
+    const final = await CODER.generate(prompt, {
+      onToken: (_, sofar) => {
+        acc = sofar;
+        if (!rafPending) { rafPending = true; requestAnimationFrame(flush); }
+      }
+    });
+    if (final && final !== acc) { acc = final; }
+    flush();
+    reply('Code ready — generated locally, no cloud used.');
+  } catch (e) {
+    const m = String(e.message || e);
+    out.innerHTML = U.emptyState(
+      m.includes('LLAMA_BINDING_MISSING') ? 'Engine binding missing — rebuild with native/add_llama_dep.py (see llama_setup.md).'
+      : m === 'NO_MODEL' ? 'Download a model in Settings → Offline Coder.'
+      : m === 'BUSY' ? 'Still generating the previous answer — one moment.'
+      : 'Offline coder failed: ' + m);
+  }
+}
+
+/* ---------- Offline Coder settings UI ---------- */
+async function renderCoder() {
+  const box = $('#coderStatus'); if (!box) return;
+  const list = $('#modelList');
+  const st = await CODER.status();
+
+  if (!st.native) {
+    box.innerHTML = '<div class="bs-row"><span class="bs-dot"></span><div><strong>APK only</strong><div class="dim">The offline coder runs in the installed Android app, not the browser.</div></div></div>';
+    if (list) list.innerHTML = '';
+    return;
+  }
+  if (!st.engine) {
+    box.innerHTML = '<div class="bs-row"><span class="bs-dot"></span><div><strong>Engine not linked</strong><div class="dim">This build lacks the llama.cpp binding (see native/llama_setup.md). Templates &amp; Groq still work.</div></div></div>';
+    if (list) list.innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = `<div class="bs-row"><span class="bs-dot ok"></span><div><strong>llama.cpp engine ready</strong><div class="dim">~${st.ramGB} GB RAM · budget ${st.budgetMB} MB · recommended: ${U.escapeHtml(st.recommendedCode.name)} (code) · ${U.escapeHtml(st.recommendedChat.name)} (chat)</div></div></div>`;
+
+  if (!list) return;
+  const rowFor = m => {
+    const installed = st.installed && st.installed.id === m.id;
+    const fits = (m.sizeMB * 1.5) <= st.budgetMB;
+    const meta = `${m.kind === 'code' ? '💻' : '💬'} ${m.sizeMB} MB${m.humanEval ? ` · HumanEval ${m.humanEval}%` : ''} · ${m.blurb}`;
+    return `<div class="model-row ${installed ? 'on' : ''}">
+      <div class="model-info"><strong>${m.name}</strong><div class="dim">${meta}</div></div>
+      ${installed
+        ? `<button class="danger-btn" data-model-del="${m.id}">Delete</button>`
+        : `<button class="tool-add-btn" data-model-dl="${m.id}" ${fits ? '' : 'disabled'}>${fits ? 'Download' : 'Too big'}</button>`}
+    </div>`;
+  };
+  list.innerHTML = MODELS_ORDERED(st).map(rowFor).join('');
+}
+function MODELS_ORDERED(st) {
+  // recommended first, then by size ascending
+  const rec = new Set([st.recommendedCode.id, st.recommendedChat.id]);
+  return [...CODER.MODELS].sort((a, b) => (rec.has(b.id) - rec.has(a.id)) || (a.sizeMB - b.sizeMB));
+}
+
+async function downloadModelFlow(id) {
+  const dl = $('#dlProgress'), fill = $('#dlFill'), txt = $('#dlText');
+  if (dl) dl.style.display = 'block';
+  try {
+    await CODER.downloadModel(id, (pct, done, total) => {
+      if (fill) fill.style.width = pct + '%';
+      if (txt) txt.textContent = `${done.toFixed(0)} / ${total.toFixed(0)} MB (${pct}%) — keep FRIDAY open`;
+    });
+    U.toast('Model ready — fully offline from now on', '✅', 3200);
+  } catch (e) {
+    U.toast('Download failed: ' + (e.message || e), '❌', 3500);
+  }
+  if (dl) dl.style.display = 'none';
+  renderCoder();
 }
 
 /* ---------- Groq chat (streaming) ---------- */
@@ -799,6 +908,7 @@ async function initNative() {
 
   updateBrainBadge();
   renderCaps();
+  renderCoder();
 }
 
 function handleNotification(n) {
@@ -946,6 +1056,7 @@ async function runProactive() {
 
 /* ================= MESSAGES ================= */
 function reply(text) {
+  if (state.tonePrefix) { text = state.tonePrefix + ' ' + text; state.tonePrefix = null; }
   addMsg('ai', text);
   S.remember('ai', text);
   V.speak(text, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
@@ -1003,7 +1114,35 @@ function loadChat() {
 
 /* ================= REMINDERS ================= */
 const timers = new Map();
+
+/* stable numeric id for LocalNotifications (int32) */
+function notifId(seed) {
+  let h = 0;
+  const s = String(seed);
+  for (let i = 0; i < s.length; i++) h = ((h * 31 + s.charCodeAt(i)) >>> 0);
+  return (h % 2000000000) + 1;
+}
+
+/* Native schedule: fires even when the app is closed/killed (APK only). */
+async function scheduleNativeReminder(item) {
+  try {
+    if (!NAT.isNative()) return false;
+    const LN = window.Capacitor?.Plugins?.LocalNotifications;
+    if (!LN || !LN.schedule) return false;
+    if (LN.requestPermissions) await LN.requestPermissions();
+    await LN.schedule({ notifications: [{
+      id: notifId(item.id),
+      title: 'FRIDAY — Reminder',
+      body: item.text,
+      schedule: { at: new Date(item.due), allowWhileIdle: true },
+      smallIcon: 'ic_stat_icon'
+    }]});
+    return true;
+  } catch (e) { console.warn('[reminders] native schedule failed', e); return false; }
+}
+
 function scheduleReminder(item) {
+  scheduleNativeReminder(item);   // background-safe path (APK)
   const delay = item.due - Date.now();
   if (delay < 0 || delay > 2 ** 31 - 1) return;
   clearTimeout(timers.get(item.id));
@@ -1254,7 +1393,7 @@ function bindEvents() {
     else {
       U.openPanel(p);
       if (p === 'activity') refresh('activity');
-      if (p === 'settings') renderCaps();
+      if (p === 'settings') { renderCaps(); renderCoder(); }
       $$('.nav-btn').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
     }
@@ -1304,7 +1443,14 @@ function bindEvents() {
     if (cp) {
       const code = document.getElementById(cp.dataset.copy)?.textContent || '';
       D.copy(code).then(() => { cp.textContent = 'Copied'; setTimeout(() => cp.textContent = 'Copy', 1500); });
+      return;
     }
+
+    // coder model download / delete
+    const mdl = e.target.closest('[data-model-dl]');
+    if (mdl) { downloadModelFlow(mdl.dataset.modelDl); return; }
+    const mx = e.target.closest('[data-model-del]');
+    if (mx) { CODER.deleteModel(mx.dataset.modelDel).then(() => { U.toast('Model deleted', '🗑️'); renderCoder(); }); return; }
   });
 
   // Quick actions
@@ -1333,6 +1479,7 @@ function bindEvents() {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   };
   adder('#addNoteBtn', '#noteInput', v => { S.addItem(KEYS.NOTES, { text: v }); refresh('notes'); U.toast('Note saved', '📝'); });
+  adder('#addTaskBtn', '#taskInput', v => { S.addItem(KEYS.TASKS, { text: v, done: false }); refresh('tasks'); U.toast('Task added', '✅'); });
   adder('#addReminderBtn', '#reminderInput', v => {
     const when = parseTime(v);
     const date = when ? when.date : new Date(Date.now() + 3600000);
@@ -1472,6 +1619,7 @@ function bindEvents() {
   bind('#bootStart', 'bootStart', 'change', 'checked');
   bind('#announceNotifications', 'announceNotifications', 'change', 'checked');
   bind('#bubbleEnabled', 'bubbleEnabled', 'change', 'checked');
+  bind('#waCC', 'waCountryCode', 'input');
 
   $('#setupBtn')?.addEventListener('click', () => { U.closeAllPanels(); U.showView('chat'); runSetup(); });
   $('#syncContactsBtn')?.addEventListener('click', async () => {
@@ -1568,6 +1716,7 @@ function syncSettingsUI() {
   set('#bootStart', S.getSetting('bootStart'), 'checked');
   set('#announceNotifications', S.getSetting('announceNotifications'), 'checked');
   set('#bubbleEnabled', S.getSetting('bubbleEnabled'), 'checked');
+  set('#waCC', S.getSetting('waCountryCode') || '91');
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');
   const ic = $('#intentCount'); if (ic) ic.textContent = intentCount();
