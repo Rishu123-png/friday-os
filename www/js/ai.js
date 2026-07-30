@@ -1,232 +1,210 @@
-/* ===== FRIDAY OS — Keyless Data APIs =====
-   Every endpoint here is FREE, requires NO API KEY, and is CORS-open.
-   All responses cached so they degrade gracefully offline. */
+/* ===== FRIDAY OS — AI Layer =====
+   Priority chain:
+     1. Intent engine  (brain.js)  — instant, offline, free
+     2. Knowledge APIs (api.js)    — keyless, needs net
+     3. Groq           (optional)  — only if user adds a key
+     4. Local composer             — always works, never fails
 
-import { cacheGet, cacheSet, getSetting } from './store.js';
+   NOTHING here is required for the app to run. No key = still works. */
 
-const j = async (url, opts = {}) => {
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' }, ...opts });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+import { getSetting, setSetting } from './store.js';
+import { pick } from './nlp.js';
+
+export const GROQ_MODELS = [
+  { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B — best all-round', ctx: '128k' },
+  { id: 'llama-3.1-8b-instant',    label: 'Llama 3.1 8B — fastest',         ctx: '128k' },
+  { id: 'openai/gpt-oss-120b',     label: 'GPT-OSS 120B — strongest',       ctx: '128k' },
+  { id: 'qwen/qwen3-32b',          label: 'Qwen3 32B — great at code',      ctx: '128k' },
+  { id: 'moonshotai/kimi-k2-instruct', label: 'Kimi K2 — long context',     ctx: '128k' }
+];
+
+const PERSONAS = {
+  friday: {
+    name: 'FRIDAY',
+    address: 'Boss',
+    greeting: "Systems online. Good to see you, Boss.",
+    style: 'warm, loyal, efficient. You call the user "Boss". Concise, never rambling. Dry wit occasionally.'
+  },
+  jarvis: {
+    name: 'JARVIS',
+    address: 'Sir',
+    greeting: "Good day, Sir. All systems nominal.",
+    style: 'formal, precise, British butler. You call the user "Sir". Impeccably polite, subtly witty.'
+  },
+  karen: {
+    name: 'KAREN',
+    address: '',
+    greeting: "Hey! Karen here. What are we doing today?",
+    style: 'sassy, confident, funny. Casual and direct. Light teasing is fine.'
+  },
+  custom: {
+    name: 'AI',
+    address: '',
+    greeting: "Hello. How can I help?",
+    style: 'neutral, helpful, concise.'
+  }
 };
 
-/* ---------- Location ---------- */
-export function getPosition(timeout = 8000) {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error('No geolocation'));
-    navigator.geolocation.getCurrentPosition(
-      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
-      e => reject(e),
-      { enableHighAccuracy: false, timeout, maximumAge: 600000 }
-    );
+export function persona() {
+  return PERSONAS[getSetting('personality')] || PERSONAS.friday;
+}
+
+export function systemPrompt() {
+  const p = persona();
+  const name = getSetting('userName') || p.address || 'Boss';
+  return `You are ${p.name}, a personal AI assistant OS on the user's Android phone, inspired by Iron Man's AI.
+Personality: ${p.style}
+Address the user as "${name}".
+Keep replies short and conversational — they are often read aloud by text-to-speech.
+Never use markdown headers or bullet lists unless the user explicitly asks for code or a list.
+For code requests: output complete, working, runnable code with no placeholders.
+Today is ${new Date().toDateString()}.`;
+}
+
+/* ---------- Groq (OPTIONAL — only used if a key exists) ---------- */
+export function hasGroq() {
+  return !!(getSetting('groqKey') || '').trim();
+}
+
+export async function callGroq(messages, { stream = false, onToken = null, maxTokens = 1024, temperature = 0.7, model = null } = {}) {
+  const key = (getSetting('groqKey') || '').trim();
+  if (!key) throw new Error('NO_KEY');
+
+  const body = {
+    model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+    stream
+  };
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify(body)
   });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    if (res.status === 401) throw new Error('BAD_KEY');
+    if (res.status === 429) throw new Error('RATE_LIMIT');
+    throw new Error('GROQ_' + res.status + ' ' + txt.slice(0, 120));
+  }
+
+  if (!stream) {
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  }
+
+  // streaming
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let full = '', buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s.startsWith('data:')) continue;
+      const payload = s.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      try {
+        const tok = JSON.parse(payload).choices?.[0]?.delta?.content;
+        if (tok) { full += tok; onToken && onToken(tok, full); }
+      } catch (_) { /* partial chunk */ }
+    }
+  }
+  return full.trim();
 }
 
-/** Falls back to Delhi if GPS denied */
-export async function resolveLocation() {
-  const cached = cacheGet('location', true);
+export async function testGroqKey(key) {
   try {
-    const pos = await getPosition();
-    cacheSet('location', pos, 60);
-    return pos;
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key.trim()}` },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        max_tokens: 5
+      })
+    });
+    if (res.status === 401) return { ok: false, msg: 'Invalid key — check you copied it fully (starts with gsk_)' };
+    if (!res.ok) return { ok: false, msg: 'Error ' + res.status };
+    return { ok: true, msg: 'Key works. Cloud brain online.' };
   } catch (e) {
-    if (cached) return cached;
-    return { lat: 28.6139, lon: 77.2090, fallback: true, label: 'New Delhi' };
+    return { ok: false, msg: 'No internet connection' };
   }
 }
 
-export async function reverseGeocode(lat, lon) {
-  const key = `rev_${lat.toFixed(2)}_${lon.toFixed(2)}`;
-  const hit = cacheGet(key);
-  if (hit) return hit;
-  try {
-    const d = await j(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=12`);
-    const a = d.address || {};
-    const name = a.suburb || a.city || a.town || a.village || a.county || a.state || 'your location';
-    cacheSet(key, name, 1440);
-    return name;
-  } catch (_) { return 'your location'; }
-}
+/* ---------- Offline composer — the always-works fallback ---------- */
+/* This is NOT a language model. It is a large template engine with
+   context awareness. It handles conversation gracefully so the app
+   never feels broken without a key. */
 
-export async function geocodeCity(name) {
-  const d = await j(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`);
-  if (!d.results || !d.results.length) throw new Error('City not found');
-  const r = d.results[0];
-  return { lat: r.latitude, lon: r.longitude, label: `${r.name}, ${r.country_code}` };
-}
+const SMALL_TALK = [
+  { k: /\b(hi|hello|hey|yo|hola|namaste|good morning|good evening)\b/,
+    r: () => {
+      const h = new Date().getHours();
+      const tod = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+      const n = getSetting('userName') || persona().address;
+      return pick([`${tod}, ${n}. What do you need?`, `${tod}. Systems ready.`,
+                   `Hello ${n}. I'm listening.`, `${tod}, ${n}. All systems nominal.`]);
+    }},
+  { k: /\bhow are you|how'?s it going|kaise ho\b/,
+    r: () => pick(['Running at full capacity. All systems nominal.',
+                   'Operating perfectly. More importantly — how are you?',
+                   'All green across the board. What can I do?']) },
+  { k: /\b(who are you|what are you|your name|tumhara naam)\b/,
+    r: () => {
+      const p = persona();
+      return `I'm ${p.name} — your personal assistant OS. I run on this phone, mostly offline. Voice, reminders, notes, weather, calculations, knowledge lookups. Ask away.`;
+    }},
+  { k: /\b(thanks|thank you|thx|shukriya|dhanyavad)\b/,
+    r: () => pick(['Anytime.', 'Of course.', "That's what I'm here for.", 'Always.']) },
+  { k: /\b(bye|goodbye|good night|see you|later)\b/,
+    r: () => pick(['Standing by.', "I'll be here.", 'Going idle. Say the word.', 'Good night.']) },
+  { k: /\b(i love you|you'?re the best|good job|well done|nice)\b/,
+    r: () => pick(['Appreciated.', 'Just doing my job.', "You're too kind.", 'Noted with satisfaction.']) },
+  { k: /\b(sorry|my bad)\b/,
+    r: () => pick(['No need to apologize.', "It's fine.", 'Forgotten already.']) },
+  { k: /\b(are you (real|alive|conscious|human)|do you (feel|think))\b/,
+    r: () => "I'm software — pattern matching and probability. But I'm your software, and I'm consistent. That counts for something." },
+  { k: /\b(what can you do|help|capabilities|features|commands)\b/,
+    r: () => `Plenty, and most of it works offline:
+• Voice — "Hey Friday" wake word, speak or type
+• Reminders & alarms — "remind me to call mom in 20 minutes"
+• Notes — "note: buy milk"
+• Weather & air quality — "what's the weather"
+• Knowledge — "who is Nikola Tesla"
+• Math — "calculate 15% of 2400"
+• Translate, dictionary, currency, news
+• Phone control — call, message, open apps (in the APK)
+• Camera — scan QR, read text
+Say "settings" to configure, or add a Groq key for full conversation and coding.` }
+];
 
-/* ---------- Weather (Open-Meteo — no key, CORS open) ---------- */
-const WMO = {
-  0: ['Clear sky', '☀️'], 1: ['Mainly clear', '🌤️'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁️'],
-  45: ['Foggy', '🌫️'], 48: ['Icy fog', '🌫️'],
-  51: ['Light drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Heavy drizzle', '🌧️'],
-  56: ['Freezing drizzle', '🌧️'], 57: ['Freezing drizzle', '🌧️'],
-  61: ['Light rain', '🌦️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '⛈️'],
-  66: ['Freezing rain', '🌧️'], 67: ['Freezing rain', '🌧️'],
-  71: ['Light snow', '🌨️'], 73: ['Snow', '❄️'], 75: ['Heavy snow', '❄️'], 77: ['Snow grains', '🌨️'],
-  80: ['Showers', '🌦️'], 81: ['Showers', '🌧️'], 82: ['Violent showers', '⛈️'],
-  85: ['Snow showers', '🌨️'], 86: ['Snow showers', '🌨️'],
-  95: ['Thunderstorm', '⛈️'], 96: ['Thunderstorm w/ hail', '⛈️'], 99: ['Severe thunderstorm', '⛈️']
-};
-export const describeWMO = c => WMO[c] || ['Unknown', '🌡️'];
+export function offlineReply(text, context = {}) {
+  const t = text.toLowerCase().trim();
 
-export async function getWeather(lat, lon) {
-  const key = `wx_${lat.toFixed(2)}_${lon.toFixed(2)}`;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day` +
-    `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
-    `&timezone=auto&forecast_days=7`;
-  try {
-    const d = await j(url);
-    cacheSet(key, d, 30);
-    return d;
-  } catch (e) {
-    const hit = cacheGet(key, true);
-    if (hit) return { ...hit, _stale: true };
-    throw e;
+  for (const rule of SMALL_TALK) {
+    if (rule.k.test(t)) return rule.r();
   }
-}
 
-export async function getAQI(lat, lon) {
-  const key = `aqi_${lat.toFixed(2)}_${lon.toFixed(2)}`;
-  const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}` +
-    `&current=pm10,pm2_5,us_aqi&timezone=auto`;
-  try {
-    const d = await j(url);
-    cacheSet(key, d, 30);
-    return d;
-  } catch (e) {
-    const hit = cacheGet(key, true);
-    if (hit) return { ...hit, _stale: true };
-    throw e;
+  // Question detection — be honest, offer the upgrade path
+  const isQuestion = /^(what|who|when|where|why|how|which|can|could|should|is|are|does|do|did|will|would)\b/.test(t) || t.endsWith('?');
+
+  if (isQuestion) {
+    return pick([
+      `I don't have that offline, ${persona().address || 'Boss'}. I can look up facts, people and places via Wikipedia — try "who is <name>" or "what is <thing>". For open reasoning, add a Groq key in Settings (free tier available).`,
+      `That one needs the cloud brain. Wikipedia lookups work offline-ish — ask "what is <topic>". Otherwise add a free Groq key in Settings and I'll handle anything.`
+    ]);
   }
-}
 
-export function aqiLabel(v) {
-  if (v == null) return ['Unknown', '⚪'];
-  if (v <= 50) return ['Good', '🟢'];
-  if (v <= 100) return ['Moderate', '🟡'];
-  if (v <= 150) return ['Unhealthy for sensitive groups', '🟠'];
-  if (v <= 200) return ['Unhealthy', '🔴'];
-  if (v <= 300) return ['Very unhealthy', '🟣'];
-  return ['Hazardous', '🟤'];
-}
-
-/* ---------- Wikipedia (knowledge, no key) ---------- */
-export async function wikiSummary(query) {
-  const key = 'wiki_' + query.toLowerCase().slice(0, 40);
-  const hit = cacheGet(key, true);
-  try {
-    const d = await j(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
-    if (d.type === 'disambiguation' || !d.extract) throw new Error('ambiguous');
-    const out = { title: d.title, extract: d.extract, url: d.content_urls?.mobile?.page, thumb: d.thumbnail?.source };
-    cacheSet(key, out, 10080);
-    return out;
-  } catch (e) {
-    if (hit) return { ...hit, _stale: true };
-    // fall back to search
-    const s = await wikiSearch(query);
-    if (s.length) return wikiSummary(s[0].title);
-    throw e;
-  }
-}
-
-export async function wikiSearch(query, limit = 5) {
-  try {
-    const d = await j(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=${limit}`);
-    return (d.query?.search || []).map(r => ({
-      title: r.title,
-      snippet: r.snippet.replace(/<[^>]+>/g, ''),
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`
-    }));
-  } catch (_) { return []; }
-}
-
-/* ---------- Dictionary ---------- */
-export async function define(word) {
-  const key = 'def_' + word.toLowerCase();
-  const hit = cacheGet(key, true);
-  try {
-    const d = await j(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
-    const e = d[0];
-    const out = {
-      word: e.word,
-      phonetic: e.phonetic || e.phonetics?.find(p => p.text)?.text || '',
-      audio: e.phonetics?.find(p => p.audio)?.audio || '',
-      meanings: e.meanings.slice(0, 3).map(m => ({
-        pos: m.partOfSpeech,
-        def: m.definitions[0].definition,
-        example: m.definitions[0].example || ''
-      }))
-    };
-    cacheSet(key, out, 10080);
-    return out;
-  } catch (e) {
-    if (hit) return hit;
-    throw new Error('No definition found');
-  }
-}
-
-/* ---------- Currency ---------- */
-export async function rates(base = 'USD') {
-  const key = 'fx_' + base;
-  const hit = cacheGet(key, true);
-  try {
-    const d = await j(`https://open.er-api.com/v6/latest/${base}`);
-    cacheSet(key, d.rates, 720);
-    return d.rates;
-  } catch (e) {
-    if (hit) return hit;
-    throw e;
-  }
-}
-
-export async function convertCurrency(amount, from, to) {
-  const r = await rates(from.toUpperCase());
-  const rate = r[to.toUpperCase()];
-  if (!rate) throw new Error('Unknown currency');
-  return { value: amount * rate, rate };
-}
-
-/* ---------- News (RSS, no key) ---------- */
-export async function news(topic = '') {
-  const feed = topic
-    ? `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`
-    : `https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en`;
-  const key = 'news_' + (topic || 'top');
-  const hit = cacheGet(key, true);
-  try {
-    const d = await j(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed)}`);
-    const items = (d.items || []).slice(0, 8).map(i => ({
-      title: i.title.replace(/\s+-\s+[^-]+$/, ''),
-      source: i.title.match(/-\s+([^-]+)$/)?.[1] || '',
-      link: i.link,
-      date: i.pubDate
-    }));
-    cacheSet(key, items, 30);
-    return items;
-  } catch (e) {
-    if (hit) return hit;
-    throw e;
-  }
-}
-
-/* ---------- Quotes ---------- */
-export async function quote() {
-  try {
-    const d = await j('https://api.quotable.io/random?maxLength=140');
-    return { text: d.content, author: d.author };
-  } catch (_) {
-    return { text: 'Sometimes you gotta run before you can walk.', author: 'Tony Stark' };
-  }
-}
-
-/* ---------- Translate (LibreTranslate mirrors / MyMemory — keyless) ---------- */
-export async function translate(text, from = 'auto', to = 'en') {
-  // MyMemory: free, no key, CORS open
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from === 'auto' ? 'en' : from}|${to}`;
-  const d = await j(url);
-  const out = d.responseData?.translatedText;
-  if (!out) throw new Error('Translation failed');
-  return out;
+  return pick([
+    `Noted. I'm running on the offline engine — commands, reminders, notes, weather, math and lookups all work. For open conversation, add a Groq key in Settings.`,
+    `I hear you. Offline mode handles tasks and commands well. Say "help" to see what I can do right now.`
+  ]);
 }
