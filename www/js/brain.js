@@ -11,6 +11,7 @@ import { convertUnit, generatePassword } from './templates.js';
 import { parseAlarm, parseRoutine, findRoutine, alarms, describeAlarm } from './automation.js';
 import { isNative } from './native.js';
 import { kinshipName } from './memory.js';
+import { hinglishAliases } from './nlu.js';
 
 const ACK = () => pick(['Done.', 'Got it.', 'Consider it handled.', 'Noted.', 'On it.']);
 const who = () => getSetting('userName') || persona().address || 'Boss';
@@ -439,6 +440,18 @@ I('bubble', t => /\b(bubble|overlay|floating)\b/.test(t) ? 1 : 0,
 I('read_notifications', t => /\b(read.*notifications?|any notifications?|what.*notifications?|my notifications?)\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'read_notifications' } }), 5);
 
+I('reply_notif', t => /\b(reply|respond)\b/.test(t) && !/^(reply to me|reply to this)$/i.test(t) ? 0.9 : 0,
+  t => {
+    // "reply to whatsapp on my way"    -> app=whatsapp  text="on my way"
+    // "reply on my way"                -> app=null      text="on my way"
+    let app = null, body = t.replace(/^\s*(please\s+)?(reply|respond|answer)\b\s*/i, '');
+    const toApp = body.match(/^(?:to\s+)?(whatsapp|gmail|messages|sms|telegram|instagram|teams|slack|linkedin|x|twitter|facebook|snapchat)\s+(?:saying\s+|that\s+|:\s*)?(.+)$/i);
+    if (toApp) { app = toApp[1].toLowerCase(); body = toApp[2].trim(); }
+    body = body.replace(/^(to me|back)\s*/i, '').trim();
+    if (!body) return { say: 'What should I reply?' };
+    return { say: null, action: { type: 'reply_notif', app, text: body } };
+  }, 5);
+
 I('setup', t => /\b(setup|set up|permissions|grant access|enable everything|configure)\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'setup' } }), 5);
 
@@ -498,8 +511,9 @@ I('briefing', t => /\b(good morning|brief me|daily briefing|status report|whats 
  * @returns {null | {say, action?, refresh?, expect?}}
  */
 export function resolve(text, ctx = {}) {
-  const t = text.toLowerCase().trim();
-  if (!t) return null;
+  const raw = text.toLowerCase().trim();
+  if (!raw) return null;
+  const t = hinglishAliases(raw);
 
   let best = null, bestScore = 0;
   for (const intent of INTENTS) {
