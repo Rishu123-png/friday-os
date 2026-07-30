@@ -54,13 +54,20 @@ workflows:
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
           cat android/app/src/main/res/xml/friday_accessibility.xml
 
+      - name: Add widget + tile resources
+        script: |
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout
+          cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
+          cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
+          ls -1 android/app/src/main/res/xml android/app/src/main/res/layout
+
       - name: Register plugin with Capacitor
         script: python3 native/register_plugin.py
 
       - name: Patch AndroidManifest
         script: python3 native/patch_manifest.py
 
-      - name: Add llama.cpp binding (offline coder)
+      - name: Add native dependencies (llama.cpp, geofencing; Porcupine optional)
         script: python3 native/add_llama_dep.py
 
       - name: Build debug APK
