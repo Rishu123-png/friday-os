@@ -768,3 +768,12 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .cap-row.on{color:var(--success)}
 .cap-row.off{color:var(--text-dim)}
 .cap-row span{font-size:.7rem}
+
+/* ===== Offline Coder model list (v7.1) ===== */
+.model-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.model-row:last-child{border-bottom:none}
+.model-row.on .model-info strong{color:var(--primary,#00d4ff)}
+.model-info{flex:1;min-width:0}
+.model-row button{flex-shrink:0}
+.model-row button[disabled]{opacity:.4;pointer-events:none}
