@@ -1,3 +1,4 @@
+
 /* ===== FRIDAY OS — Advanced NLU =====
    Four capabilities that make conversation feel natural, all offline:
 
@@ -119,12 +120,12 @@ export function semanticSearch(query, docs, limit = 8) {
 /* Turns follow-ups into complete commands using the previous turn. */
 
 const FOLLOWUPS = [
-  { re: /^(?:and\s+)?what about (.+)\??$/i,        kind: 'topic_shift' },
-  { re: /^(?:and\s+)?how about (.+)\??$/i,          kind: 'topic_shift' },
+  { re: /^(?:and\s+)?what about (.+?)\??$/i,        kind: 'topic_shift' },
+  { re: /^(?:and\s+)?how about (.+?)\??$/i,          kind: 'topic_shift' },
   { re: /^(?:what|how) about (?:it|that|this)\??$/i,kind: 'repeat' },
   { re: /^(?:and\s+)?(tomorrow|today|tonight|this week|next week)\??$/i, kind: 'time_shift' },
   { re: /^(?:do|tell me) (?:it|that) again\??$/i,   kind: 'repeat' },
-  { re: /^(?:and )?(?:the )?same (?:for|with) (.+)$/i, kind: 'topic_shift' },
+  { re: /^(?:and )?(?:the )?same (?:for|with) (.+?)\??$/i, kind: 'topic_shift' },
   { re: /^more(?: details?| info(?:rmation)?)?\??$/i, kind: 'elaborate' },
   { re: /^(?:tell me )?more about (?:it|that|this)\??$/i, kind: 'elaborate' }
 ];
@@ -158,11 +159,14 @@ export function resolveFollowup(text, ctx = {}) {
     const builder = REBUILD[ctx.lastIntent];
     if (!builder) return null;
 
+    // strip trailing punctuation from the captured argument
+    const arg = m[1] ? m[1].replace(/[?!.,;:\s]+$/, '').trim() : null;
+
     if (f.kind === 'repeat' || f.kind === 'elaborate') {
       return builder(ctx.lastSubject) || null;
     }
-    if (f.kind === 'time_shift') return builder(m[1]);
-    if (f.kind === 'topic_shift') return builder(m[1]);
+    if (f.kind === 'time_shift') return builder(arg);
+    if (f.kind === 'topic_shift') return builder(arg);
   }
   return null;
 }
