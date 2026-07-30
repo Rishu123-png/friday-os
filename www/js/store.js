@@ -29,6 +29,12 @@ export const DEFAULTS = {
   voiceLang: 'en-US',
   wakeWord: false,
   autoListen: false,
+  bargeIn: true,
+  streamingTts: true,
+  // offline brain
+  offlineChat: true,
+  porcupineKey: '',
+  wakeKeyword: 'jarvis',
   // UI
   uiTheme: 'cyber',
   particleEffects: true,
