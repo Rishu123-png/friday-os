@@ -1,7 +1,7 @@
 /* FRIDAY OS — Service Worker v6
    Resilient precache: one missing file never kills the whole cache. */
 
-const CACHE = 'friday-os-v7-1';
+const CACHE = 'friday-os-v8-0';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
