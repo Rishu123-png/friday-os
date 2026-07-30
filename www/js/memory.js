@@ -61,6 +61,10 @@ const FACT_RULES = [
   { re: new RegExp('\\bi(?:\'m| am) allergic to ([a-z\\s]{2,24}?)' + TAIL, 'i'),   key: 'health.allergy', label: 'Allergic to', multi: true },
   { re: /\bmy favou?rite ([a-z\s]{2,20}) is ([a-z0-9\s]{2,30}?)(?:\s+(?:and|but|so|because)\b|[.,!?;]|$)/i,
     key: m => 'fav.' + m[1].trim().replace(/\s+/g, '_'), label: m => 'Favourite ' + m[1], val: m => m[2] },
+  { re: /\bpronounce ([a-z][a-z\s]{1,20}?) as ([a-z0-9\s\-']{1,25}?)(?:[.,!?]|$)/i,
+    key: m => 'say.' + m[1].trim().toLowerCase().replace(/\s+/g, '_'), label: m => 'Pronounce ' + m[1], val: m => m[2] },
+  { re: /\b([a-z][a-z\s]{1,20}?) is pronounced ([a-z0-9\s\-']{1,25})\b/i,
+    key: m => 'say.' + m[1].trim().toLowerCase().replace(/\s+/g, '_'), label: m => 'Pronounce ' + m[1], val: m => m[2] },
   { re: /\bi (?:usually|always|normally) ([a-z0-9\s:.]{4,50})/i, key: 'habit.stated',  label: 'You usually', multi: true },
   { re: /^(?!.*\b(?:do|did|can|could|will|would)\s+you\b)(?:please\s+)?remember (?:that |this )?(.{4,120})/i,
     key: 'note.explicit', label: 'You told me', multi: true }
@@ -91,6 +95,22 @@ export function kinshipName(spoken) {
   const value = getFact('person.' + canon) || getFact('person.' + raw);
   return value ? { rel: canon, name: value } : null;
 }
+
+/* ---------- Pronunciation memory ---------- */
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Rewrite names in text using learned pronunciations ("Raghav" -> "raa-ghuv"). */
+export function applyPronunciations(text) {
+  let out = String(text);
+  for (const f of allFacts()) {
+    if (!f.key.startsWith('say.')) continue;
+    const word = f.key.slice(4).replace(/_/g, ' ');
+    if (!word || !f.value) continue;
+    out = out.replace(new RegExp('\\b' + escRe(word) + '\\b', 'gi'), f.value);
+  }
+  return out;
+}
+
 
 
 export function extractFacts(text) {
@@ -262,7 +282,7 @@ export function buildContext({ maxFacts = 14, maxPatterns = 4 } = {}) {
 }
 
 /* ================= 5. SEARCH ================= */
-export function recall(query, limit = 6) {
+function recallDocs() {
   const docs = [];
   allFacts().forEach(f => docs.push({ kind: 'fact', text: `${f.label}: ${f.value}`, boost: 1.6 }));
   getList(KEYS.NOTES).forEach(n => docs.push({ kind: 'note', text: n.text, boost: 1.3 }));
@@ -270,16 +290,43 @@ export function recall(query, limit = 6) {
     .filter(e => e.role === 'user' && e.text.length > 8 &&
       !/^(do you remember|what did i say|recall|remind me what|what do you know)/i.test(e.text))
     .forEach(e => docs.push({ kind: 'episode', text: e.text, ts: e.ts, boost: 1 }));
+  return docs;
+}
 
+/** Fast sync recall (TF-IDF + concepts). */
+export function recall(query, limit = 6) {
+  const docs = recallDocs();
   if (!docs.length) return [];
   const hits = semanticSearch(query, docs, limit * 2);
-  // apply kind boost then dedupe by text
   const seen = new Set();
   return hits
     .map(h => ({ ...h, score: h.score * (h.boost || 1) }))
     .sort((a, b) => b.score - a.score)
     .filter(h => { const k = h.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, limit);
+}
+
+/**
+ * Deep recall: true meaning-search via on-device embeddings (MiniLM),
+ * falling back to TF-IDF when the model isn't available.
+ */
+export async function recallAsync(query, limit = 6) {
+  const docs = recallDocs();
+  if (!docs.length) return [];
+  try {
+    const { rank } = await import('./embeddings.js');
+    const scored = await rank(query, docs.map(d => d.text));
+    if (scored && scored.length) {
+      const seen = new Set();
+      return scored
+        .filter(s => s.score > 0.25)
+        .map(s => ({ ...docs[s.i], score: s.score * (docs[s.i].boost || 1) }))
+        .sort((a, b) => b.score - a.score)
+        .filter(h => { const k = h.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+        .slice(0, limit);
+    }
+  } catch (_) { /* embeddings unavailable */ }
+  return recall(query, limit);
 }
 
 /* ================= 6. STATS ================= */
