@@ -43,20 +43,23 @@ export function episodes() { return getList(EPISODES); }
 /* Pulls durable facts out of ordinary sentences, so you never
    have to "train" FRIDAY — she just picks things up. */
 
+/* Value captures are LAZY and stop at conjunctions/punctuation, so
+   "my name is Rishu and I live in Delhi" -> name "Rishu" (not the tail). */
+const TAIL = /(?:\s+(?:and|but|so|because|also|then)\b|[.,!?;]|$)/i.source;
 const FACT_RULES = [
-  { re: /\bmy name is ([a-z][a-z\s]{1,24})\b/i,                key: 'user.name',      label: 'Your name' },
-  { re: /\bcall me ([a-z][a-z\s]{1,20})\b/i,                   key: 'user.name',      label: 'Your name' },
+  { re: new RegExp('\\bmy name is ([a-z][a-z\\s]{0,24}?)' + TAIL, 'i'),   key: 'user.name',      label: 'Your name' },
+  { re: new RegExp('\\bcall me ([a-z][a-z\\s]{0,20}?)' + TAIL, 'i'),      key: 'user.name',      label: 'Your name' },
   { re: /\bi(?:'m| am) (?:a |an )?([a-z\s]{3,30}?) (?:by profession|by trade)\b/i, key: 'user.job', label: 'Your work' },
-  { re: /\bi work (?:as|at) (?:a |an )?([a-z0-9\s&.]{2,35})\b/i, key: 'user.job',     label: 'Your work' },
-  { re: /\bi (?:study|am studying) ([a-z\s]{3,30})\b/i,        key: 'user.study',     label: 'You study' },
-  { re: /\bi live in ([a-z\s,]{2,30})\b/i,                     key: 'user.city',      label: 'You live in' },
-  { re: /\bmy (?:birthday|bday) is ([a-z0-9\s,]{3,20})\b/i,    key: 'user.birthday',  label: 'Your birthday' },
-  { re: /\bmy (mother|father|mom|dad|sister|brother|wife|husband|girlfriend|boyfriend|friend|boss)(?:'s)? name is ([a-z][a-z\s]{1,20})\b/i,
-    key: m => 'person.' + m[1].toLowerCase(), label: m => 'Your ' + m[1], val: m => m[2] },
-  { re: /\bi (?:like|love|enjoy) ([a-z\s]{3,30})\b/i,          key: 'pref.likes',     label: 'You like', multi: true },
-  { re: /\bi (?:hate|dislike|can'?t stand) ([a-z\s]{3,30})\b/i,key: 'pref.dislikes',  label: 'You dislike', multi: true },
-  { re: /\bi(?:'m| am) allergic to ([a-z\s]{2,25})\b/i,        key: 'health.allergy', label: 'Allergic to', multi: true },
-  { re: /\bmy favou?rite ([a-z\s]{2,20}) is ([a-z0-9\s]{2,30})\b/i,
+  { re: new RegExp('\\bi work (?:as|at) (?:a |an )?([a-z0-9\\s&.]{2,34}?)' + TAIL, 'i'), key: 'user.job', label: 'Your work' },
+  { re: new RegExp('\\bi (?:study|am studying) ([a-z\\s]{3,29}?)' + TAIL, 'i'),    key: 'user.study', label: 'You study' },
+  { re: new RegExp('\\bi live in ([a-z\\s,]{2,29}?)' + TAIL, 'i'),                 key: 'user.city',  label: 'You live in' },
+  { re: new RegExp('\\bmy (?:birthday|bday) is ([a-z0-9\\s,]{3,19}?)' + TAIL, 'i'), key: 'user.birthday', label: 'Your birthday' },
+  { re: /\bmy (mother|father|mom|mum|mumma|dad|papa|sister|brother|wife|husband|girlfriend|boyfriend|friend|boss)(?:'s)? name is ([a-z][a-z\s]{0,20}?)(?:\s+(?:and|but|so|because)\b|[.,!?;]|$)/i,
+    key: m => 'person.' + canonicalKin(m[1]), label: m => 'Your ' + m[1], val: m => m[2] },
+  { re: new RegExp('\\bi (?:like|love|enjoy) ([a-z\\s]{3,29}?)' + TAIL, 'i'),      key: 'pref.likes', label: 'You like', multi: true },
+  { re: new RegExp('\\bi (?:hate|dislike|can\'?t stand) ([a-z\\s]{3,29}?)' + TAIL, 'i'), key: 'pref.dislikes', label: 'You dislike', multi: true },
+  { re: new RegExp('\\bi(?:\'m| am) allergic to ([a-z\\s]{2,24}?)' + TAIL, 'i'),   key: 'health.allergy', label: 'Allergic to', multi: true },
+  { re: /\bmy favou?rite ([a-z\s]{2,20}) is ([a-z0-9\s]{2,30}?)(?:\s+(?:and|but|so|because)\b|[.,!?;]|$)/i,
     key: m => 'fav.' + m[1].trim().replace(/\s+/g, '_'), label: m => 'Favourite ' + m[1], val: m => m[2] },
   { re: /\bi (?:usually|always|normally) ([a-z0-9\s:.]{4,50})/i, key: 'habit.stated',  label: 'You usually', multi: true },
   { re: /^(?!.*\b(?:do|did|can|could|will|would)\s+you\b)(?:please\s+)?remember (?:that |this )?(.{4,120})/i,
@@ -64,6 +67,31 @@ const FACT_RULES = [
 ];
 
 const clean = s => String(s).trim().replace(/[.,!?;]+$/, '').replace(/\s+/g, ' ');
+
+/* ================= KINSHIP ALIASES ================= */
+/* "mom"/"papa" etc normalize to a canonical person.* fact key, so
+   "my mother's name is Seema" makes "call mom" resolve to Seema. */
+const KIN_CANON = {
+  mom: 'mother', mum: 'mother', mumma: 'mother', mummy: 'mother', mommy: 'mother', ma: 'mother', maa: 'mother',
+  dad: 'father', papa: 'father', daddy: 'father', pa: 'father', pops: 'father',
+  mother: 'mother', father: 'father',
+  sister: 'sister', brother: 'brother',
+  wife: 'wife', husband: 'husband',
+  girlfriend: 'girlfriend', boyfriend: 'boyfriend',
+  friend: 'friend', boss: 'boss',
+  son: 'son', daughter: 'daughter', bhai: 'brother', didi: 'sister'
+};
+const canonicalKin = w => KIN_CANON[String(w).toLowerCase()] || String(w).toLowerCase();
+
+/** Spoken word -> { rel, name } if we know a fact for it, else null. */
+export function kinshipName(spoken) {
+  const raw = String(spoken || '').toLowerCase().trim();
+  if (!raw) return null;
+  const canon = canonicalKin(raw);
+  const value = getFact('person.' + canon) || getFact('person.' + raw);
+  return value ? { rel: canon, name: value } : null;
+}
+
 
 export function extractFacts(text) {
   const found = [];
