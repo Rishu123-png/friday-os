@@ -242,8 +242,50 @@ async function handleInput(text, opts = {}) {
   // 2) CLOUD (only if key present)
   if (AI.hasGroq()) return askGroq(text);
 
+  // 2.5) OFFLINE LLM CHAT — real conversation with no key, if a local
+  //      model is installed (Settings -> Offline Coder -> chat model).
+  if (S.getSetting('offlineChat') !== false && CODER.ready()) return streamLocalChat(text);
+
   // 3) OFFLINE COMPOSER
   reply(AI.offlineReply(text));
+}
+
+/* Fully-offline LLM chat: memory brief + streamed tokens, no network. */
+async function streamLocalChat(text) {
+  thinking(true);
+  let el = null, acc = '', rafPending = false;
+  const flush = () => {
+    rafPending = false;
+    if (!el) return;
+    el.querySelector('.message-bubble').innerHTML = U.renderRich(acc);
+    scrollBottom();
+  };
+  try {
+    const final = await CODER.chat(text, {
+      context: MEM.buildContext(),
+      history: state.messages.slice(-6).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text })),
+      maxTokens: 700,
+      onToken: (_, sofar) => {
+        acc = sofar;
+        if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true }); }
+        if (!rafPending) { rafPending = true; requestAnimationFrame(flush); }
+      }
+    });
+    thinking(false);
+    const out = (final || acc).trim() || AI.offlineReply(text);
+    if (el) {
+      acc = out; flush();
+      const rec = state.messages[state.messages.length - 1];
+      if (rec) { rec.text = out; saveChat(); }
+    } else {
+      addMsg('ai', out);
+    }
+    S.remember('ai', out);
+    V.speak(out, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  } catch (e) {
+    thinking(false);
+    reply(AI.offlineReply(text));
+  }
 }
 
 /* ================= ACTIONS ================= */
@@ -413,6 +455,16 @@ async function runAction(a, hit) {
       return true;
     }
 
+    case 'reply_notif': {
+      if (!NAT.isNative()) { reply(nativeOnly('notification replies')); return true; }
+      const r = await NAT.replyNotification(a.app || '', a.text);
+      if (r.ok) reply(`Reply sent${r.app ? ' in ' + NAT.friendlyApp(r.app) : ''}.`);
+      else if (r.reason === 'no_listener') { reply('I need notification access for that. Opening settings.'); NAT.openSpecialSetting('notification_listener'); }
+      else if (r.reason === 'not_found') reply('No replyable notification found — nothing waiting for an answer.');
+      else reply('That notification cannot take replies.');
+      return true;
+    }
+
     case 'read_notifications': {
       if (!NAT.isNative()) { reply(nativeOnly('notification reading')); return true; }
       const caps = await NAT.capabilities();
@@ -440,9 +492,19 @@ async function runAction(a, hit) {
       if (NAT.isNative()) {
         const [hh, mm] = rec.time.split(':').map(Number);
         const r = await NAT.setSystemAlarm(hh, mm, rec.label, rec.repeat);
-        reply(r.ok
-          ? `Alarm set in your Clock app \u2014 ${rec.label} at ${when}.`
-          : `Alarm saved in FRIDAY \u2014 ${rec.label} at ${when}. (Clock app refused: ${r.reason})`);
+        if (r.ok) {
+          reply(`Alarm set in your Clock app \u2014 ${rec.label} at ${when}.`);
+        } else {
+          // never dump raw Android errors into chat - translate them
+          const why = String(r.reason || '');
+          console.warn('[alarm] clock sync failed:', why);
+          reply(`Alarm set \u2014 ${rec.label} at ${when}. That's ${humanTime(next)}.`);
+          if (why.includes('SET_ALARM')) {
+            addMsg('ai', '\u26a0\ufe0f Your phone blocked Clock-app sync (missing alarm permission in this build). The alarm **will still ring inside FRIDAY**. Rebuild with the updated manifest to enable Clock-app alarms.');
+          } else if (why.includes('ActivityNotFound') || why.includes('NO_ACTIVITY')) {
+            addMsg('ai', '\u26a0\ufe0f No system clock app found to mirror this alarm. The in-app alarm still works.');
+          }
+        }
       } else {
         reply(`Alarm set \u2014 ${rec.label} at ${when}. That's ${humanTime(next)}.`);
       }
@@ -496,7 +558,8 @@ async function runAction(a, hit) {
         const pos = await API.resolveLocation();
         const nameM = a.text.match(/when i (?:get|arrive|reach) (?:to |at )?(?:the )?([a-z\s]{2,20})/i);
         const place = nameM ? nameM[1].trim() : 'here';
-        AUTO.addGeofence({ name: place, lat: pos.lat, lon: pos.lon, radius: 250, onEnter: 'good morning' });
+        const fence = AUTO.addGeofence({ name: place, lat: pos.lat, lon: pos.lon, radius: 250, onEnter: 'good morning' });
+        NAT.geofenceAddNative(fence);
         refresh('geofences');
         reply(`Saved this spot as "${place}". I'll alert you when you arrive.`);
       } catch (e) { reply('I need location access for that.'); }
@@ -504,7 +567,7 @@ async function runAction(a, hit) {
     }
 
     case 'recall': {
-      const hits = MEM.recall(a.query).filter(h =>
+      const hits = (await MEM.recallAsync(a.query)).filter(h =>
         h.kind !== 'episode' || !h.text.toLowerCase().includes(a.query.toLowerCase()));
       if (!hits.length) { reply(`I don't have anything on "${a.query}".`); return true; }
       reply(`Here's what I remember:\n` + hits.map(h => `• ${h.text}`).join('\n'));
@@ -823,7 +886,71 @@ async function downloadModelFlow(id) {
   renderCoder();
 }
 
-/* ---------- Groq chat (streaming) ---------- */
+/* ---------- Groq chat: agent mode (tools) + streaming TTS ---------- */
+
+/* Execute a model-requested tool. Side effects happen here; the string
+   goes back to the model so IT speaks the summary (no double-talk).  */
+async function runToolByName(name, args = {}) {
+  try {
+    switch (name) {
+      case 'set_reminder': {
+        const when = args.when ? parseTime(String(args.when)) : null;
+        const due = when ? when.date : new Date(Date.now() + 3600000);
+        const rec = S.addItem(KEYS.REMINDERS, { text: args.text, due: due.getTime(), done: false });
+        scheduleReminder(rec); refresh('reminders');
+        return `Reminder "${args.text}" set for ${humanTime(due)}`;
+      }
+      case 'set_alarm': {
+        const rec = AUTO.addAlarm({ time: String(args.time || '07:00'), label: args.label || 'Alarm', repeat: args.repeat || 'once' });
+        refresh('alarms');
+        if (NAT.isNative()) {
+          const [h, m] = rec.time.split(':').map(Number);
+          NAT.setSystemAlarm(h, m, rec.label, rec.repeat).catch(() => {});
+        }
+        return `Alarm set at ${AUTO.describeAlarm(rec)}`;
+      }
+      case 'add_note': S.addItem(KEYS.NOTES, { text: args.text }); refresh('notes'); return `Note saved: "${args.text}"`;
+      case 'add_task': S.addItem(KEYS.TASKS, { text: args.text, done: false }); refresh('tasks'); return `Task added: "${args.text}"`;
+      case 'call_contact': {
+        const hit = await contactByName(args.name);
+        if (!hit) return `No contact named ${args.name}`;
+        runAction({ type: 'call', number: hit.phone, name: hit.name }, {});
+        return `Calling ${hit.name}`;
+      }
+      case 'send_message': {
+        const hit = await contactByName(args.name);
+        if (!hit) return `No contact named ${args.name}`;
+        await runAction({ type: args.app === 'whatsapp' ? 'whatsapp' : 'sms', number: hit.phone, body: args.body, name: hit.name }, {});
+        return `Message queued to ${hit.name}`;
+      }
+      case 'get_weather': {
+        try {
+          const loc = await API.resolveLocation();
+          const wx = await API.getWeather(loc.lat, loc.lon);
+          const [desc] = API.describeWMO(wx.current.weather_code);
+          return `${Math.round(wx.current.temperature_2m)}°C, ${desc}, feels ${Math.round(wx.current.apparent_temperature)}°, humidity ${wx.current.relative_humidity_2m}%`;
+        } catch (_) { return 'Weather unavailable (offline)'; }
+      }
+      case 'search_knowledge': {
+        try { const r = await API.wikiSummary(args.query); return r.extract.slice(0, 400); }
+        catch (_) { return 'No knowledge result'; }
+      }
+      case 'tell_time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      case 'tell_battery': { const b = await D.battery(); return b ? `${b.level}%${b.charging ? ' charging' : ''}` : 'unknown'; }
+      default: return 'Unknown tool';
+    }
+  } catch (e) { return 'Tool failed: ' + (e.message || e); }
+}
+
+async function contactByName(name) {
+  const q = String(name || '').toLowerCase().trim();
+  if (!q) return null;
+  if (NAT.isNative()) { const h = await NAT.findContact(q); if (h) return h; }
+  return S.getList(KEYS.CONTACTS).find(c => c.name.toLowerCase().includes(q)) || null;
+}
+
+const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule)\b/i;
+
 async function askGroq(text) {
   thinking(true);
   const history = state.messages.slice(-10).map(m => ({
@@ -831,11 +958,45 @@ async function askGroq(text) {
     content: m.text
   }));
   const ctxBrief = MEM.buildContext();
-  const sys = AI.systemPrompt() + (ctxBrief ? '\n\n' + ctxBrief : '');
+  const sys = AI.systemPrompt() + (ctxBrief ? '\n\n' + ctxBrief : '') +
+    '\nIf the user asks you to DO something (remind, alarm, call, message, note, weather...), use the appropriate tool. Confirm briefly afterward.';
   const msgs = [{ role: 'system', content: sys }, ...history, { role: 'user', content: text }];
+
+  // streaming TTS: speech starts on the first complete sentence
+  const useFeed = S.getSetting('streamingTts') !== false && S.getSetting('voiceOutput');
+  const feed = useFeed ? V.createSpeechFeed({
+    onStart: () => { state.speaking = true; },
+    onDone: () => { state.speaking = false; }
+  }) : null;
+  let boundaryCursor = 0;
+  const feedFrom = sofar => {
+    if (!feed) return;
+    let cut = -1;
+    for (let i = boundaryCursor; i < sofar.length; i++) {
+      if ('.!?\n'.includes(sofar[i])) cut = i + 1;
+    }
+    if (cut > boundaryCursor) { feed.push(sofar.slice(boundaryCursor, cut)); boundaryCursor = cut; }
+  };
 
   let el = null, acc = '';
   try {
+    // --- pass 1: tool detection (only when the request looks actionable) ---
+    if (ACTIONISH.test(text)) {
+      try {
+        const first = await AI.callGroqTools(msgs);
+        if (first && Array.isArray(first.tool_calls) && first.tool_calls.length) {
+          msgs.push({ role: 'assistant', content: first.content || '', tool_calls: first.tool_calls });
+          for (const tc of first.tool_calls) {
+            let out;
+            try { out = await runToolByName(tc.function?.name, JSON.parse(tc.function?.arguments || '{}')); }
+            catch (e) { out = 'Tool failed'; }
+            msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function?.name, content: String(out) });
+          }
+        }
+      } catch (toolErr) { console.warn('[agent] tool pass failed, continuing plain', toolErr.message); }
+    }
+
+    // --- pass 2: final answer, streamed ---
     const full = await AI.callGroq(msgs, {
       stream: true,
       maxTokens: 1500,
@@ -844,10 +1005,17 @@ async function askGroq(text) {
         if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true }); }
         el.querySelector('.message-bubble').innerHTML = U.renderRich(sofar);
         scrollBottom();
+        feedFrom(sofar);
       }
     });
     thinking(false);
     const final = full || acc;
+    if (feed) {
+      if (boundaryCursor < final.length) feed.push(final.slice(boundaryCursor));
+      feed.markDone();
+    } else {
+      V.speak(final, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    }
     if (el) {
       el.querySelector('.message-bubble').innerHTML = U.renderRich(final);
       const rec = state.messages[state.messages.length - 1];
@@ -856,9 +1024,9 @@ async function askGroq(text) {
       addMsg('ai', final);
     }
     S.remember('ai', final);
-    V.speak(final, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
   } catch (e) {
     thinking(false);
+    if (feed) feed.cancel();
     reply(errMsg(e));
   }
 }
@@ -909,6 +1077,35 @@ async function initNative() {
   updateBrainBadge();
   renderCaps();
   renderCoder();
+
+  // native geofences: hardware-level, fires with app closed
+  NAT.geofenceSync(AUTO.geofences());
+  NAT.onGeofence(async ev => {
+    const g = AUTO.geofences().find(x => x.name === ev.name);
+    addMsg('ai', `📍 ${ev.transition === 'exit' ? 'Left' : 'Arrived at'} **${ev.name}**.`, { proactive: true });
+    if (g) {
+      if (ev.transition === 'enter' && g.onEnter) await AUTO.runNamed(g.onEnter);
+      if (ev.transition === 'exit' && g.onExit) await AUTO.runNamed(g.onExit);
+    }
+  });
+
+  // launched via the Quick Settings tile -> start listening
+  const tile = await NAT.consumeTileRequest();
+  if (tile && tile.listen) setTimeout(() => V.listen(), 2000);
+
+  syncWidget();
+}
+
+/* ============ HOME-SCREEN WIDGET SYNC ============ */
+function syncWidget() {
+  if (!NAT.isNative()) return;
+  const rem = S.getList(KEYS.REMINDERS).filter(r => !r.done && r.due > Date.now()).sort((a, b) => a.due - b.due)[0];
+  const al = AUTO.alarms().filter(x => x.enabled).sort((a, b) => AUTO.nextOccurrence(a) - AUTO.nextOccurrence(b))[0];
+  let text = 'All clear. Say "Hey Friday".';
+  if (rem) text = 'Next: ' + rem.text;
+  else if (al) text = 'Alarm: ' + AUTO.describeAlarm(al);
+  const meta = rem ? humanTime(new Date(rem.due)) : (al ? al.time : '');
+  NAT.updateWidget(text, meta);
 }
 
 function handleNotification(n) {
@@ -1161,12 +1358,12 @@ function scheduleAllReminders() {
 
 /* ================= PANEL RENDERERS ================= */
 function refresh(what) {
-  if (what === 'alarms') renderAlarms();
+  if (what === 'alarms') { renderAlarms(); syncWidget(); }
   if (what === 'routines') renderRoutines();
   if (what === 'geofences') renderGeofences();
   if (what === 'activity') { renderAlarms(); renderRoutines(); renderGeofences(); renderRunLog(); renderFacts(); }
   if (what === 'notes') renderList(KEYS.NOTES, '#notesList', '#notesData', 'No notes yet');
-  if (what === 'reminders') renderReminders();
+  if (what === 'reminders') { renderReminders(); syncWidget(); }
   if (what === 'tasks') renderList(KEYS.TASKS, '#tasksList', null, 'No tasks');
   if (what === 'contacts') renderContacts();
   if (what === 'events') renderList(KEYS.EVENTS, '#eventsList', null, 'No events');
@@ -1620,6 +1817,10 @@ function bindEvents() {
   bind('#announceNotifications', 'announceNotifications', 'change', 'checked');
   bind('#bubbleEnabled', 'bubbleEnabled', 'change', 'checked');
   bind('#waCC', 'waCountryCode', 'input');
+  bind('#bargeIn', 'bargeIn', 'change', 'checked');
+  bind('#streamingTts', 'streamingTts', 'change', 'checked');
+  bind('#offlineChat', 'offlineChat', 'change', 'checked');
+  bind('#porcupineKey', 'porcupineKey', 'input');
 
   $('#setupBtn')?.addEventListener('click', () => { U.closeAllPanels(); U.showView('chat'); runSetup(); });
   $('#syncContactsBtn')?.addEventListener('click', async () => {
@@ -1717,6 +1918,10 @@ function syncSettingsUI() {
   set('#announceNotifications', S.getSetting('announceNotifications'), 'checked');
   set('#bubbleEnabled', S.getSetting('bubbleEnabled'), 'checked');
   set('#waCC', S.getSetting('waCountryCode') || '91');
+  set('#bargeIn', S.getSetting('bargeIn') !== false, 'checked');
+  set('#streamingTts', S.getSetting('streamingTts') !== false, 'checked');
+  set('#offlineChat', S.getSetting('offlineChat') !== false, 'checked');
+  set('#porcupineKey', S.getSetting('porcupineKey') || '');
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');
   const ic = $('#intentCount'); if (ic) ic.textContent = intentCount();
