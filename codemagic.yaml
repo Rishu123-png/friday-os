@@ -26,6 +26,9 @@ workflows:
       - name: Install npm dependencies
         script: npm install
 
+      - name: Run unit tests (offline engine)
+        script: npm test
+
       - name: Create Android platform
         script: |
           if [ ! -d "android" ]; then npx cap add android; fi
@@ -56,6 +59,9 @@ workflows:
 
       - name: Patch AndroidManifest
         script: python3 native/patch_manifest.py
+
+      - name: Add llama.cpp binding (offline coder)
+        script: python3 native/add_llama_dep.py
 
       - name: Build debug APK
         script: |
