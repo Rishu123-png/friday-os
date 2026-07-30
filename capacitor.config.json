@@ -3,8 +3,8 @@
   "appName": "FRIDAY OS",
   "webDir": "www",
   "android": {
-    "allowMixedContent": true,
-    "webContentsDebuggingEnabled": true
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
   },
   "server": {
     "androidScheme": "https"
