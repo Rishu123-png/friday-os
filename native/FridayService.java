@@ -51,7 +51,7 @@ public class FridayService extends Service {
             } else {
                 registerReceiver(installWatcher, f);
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}   // Throwable: class-verify errors are Errors, not Exceptions
     }
 
     @Override
@@ -61,9 +61,14 @@ public class FridayService extends Service {
         String text = intent != null && intent.getStringExtra("text") != null
                 ? intent.getStringExtra("text") : "Say \"Hey Friday\"";
 
-        Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        PendingIntent pi = PendingIntent.getActivity(this, 0, open,
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pi = null;
+        try {
+            Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
+            if (open != null) {
+                pi = PendingIntent.getActivity(this, 0, open,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            }
+        } catch (Throwable ignored) {}
 
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL)
@@ -76,7 +81,14 @@ public class FridayService extends Service {
                 .setOngoing(true)
                 .build();
 
-        startForeground(NOTIF_ID, n);
+        try {
+            startForeground(NOTIF_ID, n);
+        } catch (Throwable t) {
+            /* Android 14+ throws when an FGS may not run (boot, battery).
+               The keep-alive service must NEVER kill the app process. */
+            try { stopSelf(); } catch (Throwable ignored) {}
+            return START_NOT_STICKY;
+        }
         return START_STICKY;   // restart if Android kills us
     }
 
@@ -84,7 +96,7 @@ public class FridayService extends Service {
     public void onDestroy() {
         try {
             if (installWatcher != null) unregisterReceiver(installWatcher);
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         installWatcher = null;
         super.onDestroy();
     }
