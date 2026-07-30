@@ -761,3 +761,10 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .toast.show{ transform:translate(-50%,0); opacity:1; }
 #toastMsg{ font-size:.88rem; color:var(--text); }
 #toastIcon{ flex:none; }
+
+/* Capability list (Settings > Phone Integration) */
+.caps-list{margin-top:12px;display:flex;flex-direction:column;gap:5px}
+.cap-row{display:flex;align-items:center;gap:9px;font-size:.8rem;padding:5px 2px}
+.cap-row.on{color:var(--success)}
+.cap-row.off{color:var(--text-dim)}
+.cap-row span{font-size:.7rem}
