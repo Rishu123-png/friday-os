@@ -120,6 +120,63 @@ export async function callGroq(messages, { stream = false, onToken = null, maxTo
   return full.trim();
 }
 
+/* ---------- Tool calling (function calling) ---------- */
+/* The cloud brain stops *talking about* actions and starts *doing* them.
+   Only schemas here - execution dispatch lives in app.js. */
+export const TOOLS = [
+  { type: 'function', function: { name: 'set_reminder', description: 'Set a reminder for the user',
+    parameters: { type: 'object', properties: {
+      text: { type: 'string', description: 'what to remind about' },
+      when: { type: 'string', description: 'natural time: "in 20 minutes", "5pm", "tomorrow 9am"' } },
+      required: ['text', 'when'] } } },
+  { type: 'function', function: { name: 'set_alarm', description: 'Set a clock alarm',
+    parameters: { type: 'object', properties: {
+      time: { type: 'string', description: 'HH:MM 24h' },
+      label: { type: 'string' },
+      repeat: { type: 'string', enum: ['once', 'daily', 'weekdays', 'weekends'] } },
+      required: ['time'] } } },
+  { type: 'function', function: { name: 'add_note', description: 'Save a note',
+    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+  { type: 'function', function: { name: 'add_task', description: 'Add a to-do task',
+    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+  { type: 'function', function: { name: 'call_contact', description: 'Phone-call a contact by name',
+    parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } },
+  { type: 'function', function: { name: 'send_message', description: 'Send SMS or WhatsApp to a contact',
+    parameters: { type: 'object', properties: {
+      name: { type: 'string' }, body: { type: 'string' },
+      app: { type: 'string', enum: ['sms', 'whatsapp'] } },
+      required: ['name', 'body'] } } },
+  { type: 'function', function: { name: 'get_weather', description: 'Current weather at the user location',
+    parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'search_knowledge', description: 'Look up facts/people/places (Wikipedia)',
+    parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
+  { type: 'function', function: { name: 'tell_time', description: 'Current time', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'tell_battery', description: 'Phone battery level', parameters: { type: 'object', properties: {} } } }
+];
+
+/** First-pass, non-streaming call that may return tool_calls. */
+export async function callGroqTools(messages, { model = null } = {}) {
+  const key = (getSetting('groqKey') || '').trim();
+  if (!key) throw new Error('NO_KEY');
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({
+      model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
+      messages, tools: TOOLS, tool_choice: 'auto',
+      max_tokens: 600, temperature: 0.3
+    })
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('BAD_KEY');
+    if (res.status === 429) throw new Error('RATE_LIMIT');
+    const txt = await res.text().catch(() => '');
+    throw new Error('GROQ_' + res.status + ' ' + txt.slice(0, 120));
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message || null;
+}
+
 export async function testGroqKey(key) {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
