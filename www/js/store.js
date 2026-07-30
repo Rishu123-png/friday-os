@@ -36,7 +36,13 @@ export const DEFAULTS = {
   // Data
   saveMemory: true,
   locationAccess: false,
-  units: 'metric'
+  units: 'metric',
+  // native (APK only)
+  backgroundService: true,
+  bootStart: false,
+  announceNotifications: true,
+  announceApps: null,
+  bubbleEnabled: false
 };
 
 function read(key, fallback) {
