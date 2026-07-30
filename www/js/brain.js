@@ -375,7 +375,8 @@ I('activity', t => /\b(activity|what.*(running|scheduled|automations)|show autom
 
 
 /* ---------- PHASE C: system toggles (native) ---------- */
-I('toggle_wifi', t => /\b(wifi|wi-fi)\b/.test(t) && /\b(on|off|enable|disable|turn)\b/.test(t) ? 1 : 0,
+I('toggle_wifi', t => /\b(wifi|wi-fi)\b/.test(t) && /\b(on|off|enable|disable|turn)\b/.test(t)
+  && !/\b(who|anyone|someone)\b/.test(t) ? 1 : 0,   // "who is on my wifi" is recon, not a toggle
   t => ({ say: null, action: { type: 'sys_toggle', what: 'wifi', on: !/\b(off|disable)\b/.test(t) } }), 5);
 
 I('toggle_bt', t => /\b(bluetooth)\b/.test(t) ? 1 : 0,
@@ -501,6 +502,87 @@ I('task_list', t => /\b(my |show |list )?(tasks|todos|to-dos|todo list)\b/.test(
 /* ---------- Greeting routine ---------- */
 I('briefing', t => /\b(good morning|brief me|daily briefing|status report|whats my day|what's my day)\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'briefing' } }), 4);
+
+/* ---------- Security guard (v7.3) ---------- */
+I('security_scan', t =>
+  /\b(security (scan|check|audit)|scan (my )?(phone|device|mobile)|is my phone (safe|hacked|secure|ok)|check.*(hack|virus|malware|spy|suspicious|spyware)|some(one|body).*(hack|spy|steal|track)|protect my (phone|device))/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'security_scan' } }), 5);
+
+/* ---------- Find a person on Google Maps (location sharing) ---------- */
+const KIN_RE = /\b(dad|daddy|papa|father|aba|mom|mum|mumma|mummy|mother|parents?|brother|bhai|sister|didi|wife|husband|girlfriend|boyfriend|son|daughter|best friend|friend)\b/;
+
+I('find_person', t =>
+  /\b(where|find|locate|track|show me|look (for|up))\b/.test(t) && KIN_RE.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(KIN_RE);
+    const rel = m ? m[1].toLowerCase() : null;
+    const k = rel ? kinshipName(rel) : null;
+    return { say: null, action: { type: 'find_person', rel, name: k ? k.name : null } };
+  }, 5);
+
+/* ---------- Password vault (v7.3) ---------- */
+const VAULT_SAVE_RE = /\b(?:save|remember|store|keep)\s+(?:my\s+)?([a-z0-9][a-z0-9.]{1,19})\s+(?:password|passcode|pass|login|pin)\s*(?:as|is|to|:)?\s+(.{2,64})$/i;
+I('vault_save', t => VAULT_SAVE_RE.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(VAULT_SAVE_RE);
+    return { say: null, action: { type: 'vault_save', service: m[1].toLowerCase(), password: m[2].trim() } };
+  }, 6);
+
+const VAULT_READ_RE = /\b(?:what(?:'s| is)|tell me|show me|read|get)\s+my\s+([a-z0-9][a-z0-9.]{1,19})\s+(?:password|passcode|pass|pin)\b/i;
+I('vault_read', t => VAULT_READ_RE.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'vault_read', service: t.match(VAULT_READ_RE)[1].toLowerCase() } }), 6);
+
+const VAULT_FORGET_RE = /\bforget\s+(?:my\s+)?([a-z0-9][a-z0-9.]{1,19})\s+(?:password|passcode|pass|pin)\b/i;
+I('vault_forget', t => VAULT_FORGET_RE.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'vault_forget', service: t.match(VAULT_FORGET_RE)[1].toLowerCase() } }), 6);
+
+I('vault_lock', t => /\block (my )?vault\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'vault_lock' } }), 5);
+
+I('vault_list', t => /\b(what'?s in my vault|list (my )?(saved )?passwords|show my vault|which passwords do (you|i) (have|know))\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'vault_list' } }), 5);
+
+/* ---------- Full-control UI commands (v7.3) ---------- */
+I('ui_scroll', t => /\bscroll (down|up|left|right)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'ui_scroll', dir: (t.match(/\b(down|up|left|right)\b/) || [])[1] || 'down' } }), 3);
+
+I('ui_tap', t => /^tap (?:on )?(.{2,30})$/.test(t) ? 0.9 : 0,
+  t => ({ say: null, action: { type: 'ui_tap', text: t.replace(/^tap (?:on )?/, '').trim() } }), 3);
+
+I('ui_type', t => /^type (?:this |that )?(.{2,80})$/.test(t) && !/^type (of|what)/.test(t) ? 0.85 : 0,
+  t => ({ say: null, action: { type: 'ui_type', text: t.replace(/^type (?:this |that )?/, '').trim() } }), 3);
+
+/* ---------- Ethical hacker pack (v7.4 REDTEAM) ---------- */
+I('net_recon', t =>
+  /\b(who|anyone|someone).*(on|using|connect).*(my )?(wi-?fi|wifi|network)|\bscan (my )?(wi-?fi|network|lan)\b|\bnetwork (scan|recon|audit)\b|\bwi-?fi (audit|security|check)\b|\brecon\b|\bhacker mode\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'net_recon' } }), 7);
+
+const IP_RE = /(\d{1,3}(?:\.\d{1,3}){3})/;
+I('port_scan', t => /\bports?\b|\bport scan\b/.test(t) && IP_RE.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'port_scan', host: t.match(IP_RE)[1] } }), 5);
+
+I('password_check', t =>
+  /\b(check|test|rate|is|how)\b.*\bpassword\b.*\b(strong|safe|secure|good|weak)\b|\bhow strong is\b/.test(t) ? 1 : 0,
+  t => {
+    // pull the candidate: "is my password X strong" / "check password X" / "how strong is X"
+    let pw = null;
+    let m = t.match(/password\s+([a-z0-9!@#$%^&*._-]{3,64})\s*(?:strong|safe|secure|good|weak|\?|$)/i)
+         || t.match(/(?:check|test|rate)\s+(?:the\s+)?([a-z0-9!@#$%^&*._-]{4,64})(?:\s+(?:password|for me))?(?:\s|$)/i)
+         || t.match(/how strong is\s+(?:my\s+)?(?:password\s+)?([a-z0-9!@#$%^&*._-]{3,64})/i);
+    if (m && !/^(my|the|this|a)$/i.test(m[1])) pw = m[1];
+    return { say: null, action: { type: 'password_check', password: pw } };
+  }, 6);
+
+I('phish_check', t =>
+  /\b(is|check|scan).*(link|url|site).*(safe|phish|scam|fake|dangerous)\b|\bis this (link|url|site) safe\b|\bcheck (this|the) (link|url)\b/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/(https?:\/\/\S+|[a-z0-9-]+\.[a-z]{2,}\S*)/i);
+    return { say: null, action: { type: 'phish_check', url: m ? m[1] : null } };
+  }, 6);
+
+I('phish_sms', t =>
+  /\b(scan|check|test) my (sms|messages|texts|inbox)\b.*(phish|scam|fraud|dangerous|suspicious|link)?|\b(smishing|phishing) (scan|check|test)\b|\bam i being scammed\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'phish_sms' } }), 5);
 
 /* ------------------------------------------------------------------ */
 /*  ROUTER                                                             */
