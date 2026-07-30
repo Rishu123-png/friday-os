@@ -17,6 +17,7 @@ const { parseTime, safeMath, wordToNum } = await import('../www/js/nlp.js');
 const { resolve, intentCount } = await import('../www/js/brain.js');
 const { parseAlarm } = await import('../www/js/automation.js');
 const { convertUnit, generatePassword, offlineCode } = await import('../www/js/templates.js');
+const HACKER = await import('../www/js/hacker.js');
 const { extractFacts, saveFact, getFact, kinshipName, applyPronunciations, forgetFact } = await import('../www/js/memory.js');
 const { splitCommands, autoCorrect, sentiment, semanticSearch, resolveFollowup, hinglishAliases } = await import('../www/js/nlu.js');
 
@@ -162,4 +163,108 @@ test('"is pronounced" phrasing also teaches pronunciation', () => {
   extractFacts('Seema is pronounced see-maa');
   assert.equal(getFact('say.seema'), 'see-maa');
   forgetFact('say.seema');
+});
+
+/* ---------------- v7.3: security guard routing ---------------- */
+test('security scan intent catches hacking worries', () => {
+  for (const q of ['is my phone hacked', 'scan my phone for viruses',
+                   'check if someone is spying on me', 'security check',
+                   'is my phone safe']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'security_scan', 'missed: ' + q);
+  }
+});
+
+/* ---------------- v7.3: find person on maps ---------------- */
+test('find_person resolves kinship names', () => {
+  saveFact({ key: 'person.father', label: 'Your dad', value: 'Ramesh Sharma' });
+  const r = resolve('where is my dad');
+  assert.ok(r && r.intent === 'find_person');
+  assert.equal(r.action.name, 'Ramesh Sharma');
+  const m = resolve('locate my sister');
+  assert.ok(m && m.intent === 'find_person');
+  assert.equal(m.action.name, null);   // no fact yet -> graceful path
+  forgetFact('person.father');
+});
+test('place lookups are NOT stolen by find_person', () => {
+  const r = resolve('where is connaught place');
+  assert.ok(!r || r.intent !== 'find_person');
+});
+
+/* ---------------- v7.3: vault intent routing ---------------- */
+test('vault commands parse service and password', () => {
+  const s = resolve('save my gmail password as hunter2xz');
+  assert.ok(s && s.intent === 'vault_save');
+  assert.equal(s.action.service, 'gmail');
+  assert.equal(s.action.password, 'hunter2xz');
+  const r = resolve("what's my gmail password");
+  assert.ok(r && r.intent === 'vault_read');
+  assert.equal(r.action.service, 'gmail');
+  const f = resolve('forget my netflix password');
+  assert.ok(f && f.intent === 'vault_forget');
+});
+
+/* ---------------- v7.3: vault crypto roundtrip ---------------- */
+test('vault encrypts, locks, unlocks and reads back', async (t) => {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    t.skip('no WebCrypto in this node');
+    return;
+  }
+  const V = await import('../www/js/vault.js');
+  // fresh state
+  if (!V.vaultExists()) {
+    const setup = await V.vaultSetup('1234');
+    assert.ok(setup.ok);
+  }
+  const wrong = await V.vaultUnlock('0000');
+  assert.equal(wrong.ok, false);
+  const right = await V.vaultUnlock('1234');
+  assert.ok(right.ok);
+  assert.ok((await V.vaultSave('gmail', 's3cret-value')).ok);
+  V.vaultLock();
+  assert.equal((await V.vaultRead('gmail')).ok, false);   // locked vault refuses reads
+  assert.ok((await V.vaultUnlock('1234')).ok);
+  const back = await V.vaultRead('gmail');
+  assert.ok(back.ok && back.password === 's3cret-value');
+  assert.ok(V.vaultServices().includes('gmail'));
+  assert.ok(V.vaultForget('gmail').ok);
+});
+
+/* ---------------- v7.4: ethical hacker pack ---------------- */
+test('password lab grades honestly', () => {
+  const weak = HACKER.entropyScore('password');
+  assert.equal(weak.grade, 'TERRIBLE');
+  assert.ok(weak.bits <= 12);
+  const seq = HACKER.entropyScore('123456789012');
+  assert.ok(seq.bits <= 18);
+  const strong = HACKER.entropyScore('Xv9!kQ2#mZ7$pL4&nR8@');
+  assert.ok(['STRONG', 'FORTRESS'].includes(strong.grade), 'got ' + strong.grade);
+  const year = HACKER.entropyScore('Summer2026!');
+  assert.ok(year.notes.some(n => n.includes('year')));
+});
+test('phishing heuristics score the classics', () => {
+  assert.equal(HACKER.phishScore('https://paypa1-secure.tk/verify-account').level, 'PHISHING');
+  assert.ok(HACKER.phishScore('http://192.168.1.44/admin').score >= 40);
+  assert.ok(HACKER.phishScore('https://sbi-netbanking.xyz/kyc-update').score >= 40);
+  assert.ok(HACKER.phishScore('https://google.com').score < 20);
+  assert.ok(HACKER.phishScore('https://paypal.com/signin').score < 30);
+});
+test('MAC vendor lookup + randomized-MAC detection', () => {
+  assert.equal(HACKER.vendorOf('b8:27:eb:aa:bb:cc'), 'Raspberry Pi');
+  assert.equal(HACKER.vendorOf(''), 'unknown');
+  assert.equal(HACKER.vendorOf('3e:12:34:aa:bb:cc'), 'phone (randomized MAC)');
+});
+test('hacker intents route correctly', () => {
+  for (const q of ['who is on my wifi', 'scan my wifi', 'network recon', 'hacker mode']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'net_recon', 'missed: ' + q);
+  }
+  const ps = resolve('scan ports on 192.168.1.5');
+  assert.ok(ps && ps.intent === 'port_scan' && ps.action.host === '192.168.1.5');
+  const pc = resolve('is my password tiger123zz safe');
+  assert.ok(pc && pc.intent === 'password_check' && pc.action.password === 'tiger123zz');
+  const ph = resolve('is this link safe https://paypa1.tk/login');
+  assert.ok(ph && ph.intent === 'phish_check' && ph.action.url.includes('paypa1.tk'));
+  const sm = resolve('scan my sms for phishing links');
+  assert.ok(sm && sm.intent === 'phish_sms');
 });
