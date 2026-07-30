@@ -74,7 +74,17 @@ workflows:
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon > /tmp/gradle_build.log 2>&1 || {
+            echo ""
+            echo "====================== GRADLE ERROR DETAILS ======================"
+            grep -n -B2 -A25 "What went wrong" /tmp/gradle_build.log | head -80 || true
+            echo ""
+            echo "====================== COMPILER ERROR LINES ======================"
+            grep -nE "error:|error |Error:" /tmp/gradle_build.log | grep -v "error-prone\|--error" | head -30 || true
+            echo "=================================================================="
+            exit 1
+          }
+          tail -5 /tmp/gradle_build.log
 
     artifacts:
       - android/app/build/outputs/apk/**/*.apk
