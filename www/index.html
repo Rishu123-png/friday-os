@@ -322,6 +322,21 @@
           </div>
         </div>
         <div class="settings-group">
+          <h3>⌨ Offline Coder</h3>
+          <div id="coderStatus" class="brain-status">
+            <div class="bs-row"><span class="bs-dot"></span><div><strong>Checking…</strong></div></div>
+          </div>
+          <div id="modelList" class="model-list"></div>
+          <div id="dlProgress" class="dl-progress" style="display:none">
+            <div class="dl-bar"><div class="dl-fill" id="dlFill"></div></div>
+            <div class="dim" id="dlText">Starting…</div>
+          </div>
+          <p class="hint">One-time download. After that FRIDAY writes code with
+          <strong>no internet and no API key</strong>. Runs on your CPU, so expect
+          10–30 seconds per answer.</p>
+        </div>
+
+        <div class="settings-group">
           <h3>◉ Phone Integration</h3>
           <div class="setting-item">
             <label>Run in background</label>
@@ -351,6 +366,7 @@
           <h3>🧠 Memory & Data</h3>
           <div class="setting-item">
             <label>Save Conversations</label>
+            
             <div class="toggle-switch"><input type="checkbox" id="saveMemory" checked><span class="toggle-slider"></span></div>
           </div>
           <div class="setting-item">
@@ -368,7 +384,7 @@
             <label class="tool-add-btn file-label">Import<input type="file" id="importInput" accept="application/json" hidden></label>
           </div>
         </div>
-                <div class="settings-group">
+        <div class="settings-group">
           <h3>📱 About</h3>
           <div class="setting-item"><label>Version</label><span class="setting-value">7.0.0</span></div>
           <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7-AUTOMATION</span></div>
@@ -520,5 +536,5 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2339d32ca073406',t:'MTc4NTQwNjY1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
