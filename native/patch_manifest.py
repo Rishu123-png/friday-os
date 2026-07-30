@@ -15,6 +15,7 @@ PERMS = [
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.SCHEDULE_EXACT_ALARM",
     "android.permission.USE_EXACT_ALARM",
+    "com.android.alarm.permission.SET_ALARM",
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
     "android.permission.RECEIVE_BOOT_COMPLETED",
