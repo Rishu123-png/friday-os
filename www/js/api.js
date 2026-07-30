@@ -212,10 +212,15 @@ export async function news(topic = '') {
 }
 
 /* ---------- Quotes ---------- */
+/* quotable.io went offline; dummyjson is keyless, CORS-open and stable. */
 export async function quote() {
+  const hit = cacheGet('quote_of_day');
+  if (hit) return hit;
   try {
-    const d = await j('https://api.quotable.io/random?maxLength=140');
-    return { text: d.content, author: d.author };
+    const d = await j('https://dummyjson.com/quotes/random');
+    const out = { text: d.quote, author: d.author };
+    cacheSet('quote_of_day', out, 720);   // one quote per 12 h
+    return out;
   } catch (_) {
     return { text: 'Sometimes you gotta run before you can walk.', author: 'Tony Stark' };
   }
