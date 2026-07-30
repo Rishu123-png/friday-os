@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0a1a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,7 +32,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v7.0</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v7.1</span></div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
 
@@ -354,6 +354,10 @@
             <label>Floating bubble</label>
             <div class="toggle-switch"><input type="checkbox" id="bubbleEnabled"><span class="toggle-slider"></span></div>
           </div>
+          <div class="setting-item">
+            <label>WhatsApp country code</label>
+            <input type="text" id="waCC" placeholder="91" maxlength="4" inputmode="numeric">
+          </div>
           <div class="setting-item btn-row">
             <button class="tool-add-btn" id="setupBtn">Run Setup</button>
             <button class="tool-add-btn" id="syncContactsBtn">Sync Contacts</button>
@@ -386,8 +390,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">7.0.0</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7-AUTOMATION</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">7.1.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7.1-LLM</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -414,6 +418,19 @@
           <button class="tool-add-btn" id="addNoteBtn">Save</button>
         </div>
         <div id="notesList" class="items-list"></div>
+      </div>
+    </div>
+
+
+    <!-- Tasks Panel -->
+    <div class="sub-panel" id="tasksSubPanel">
+      <div class="panel-header"><h2>✅ Tasks</h2><button class="panel-close" data-close="sub-tasks">✕</button></div>
+      <div class="panel-content">
+        <div class="sub-tool-input">
+          <input type="text" id="taskInput" placeholder="Add a task...">
+          <button class="tool-add-btn" id="addTaskBtn">Add</button>
+        </div>
+        <div id="tasksList" class="items-list"></div>
       </div>
     </div>
 
@@ -536,5 +553,5 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2339d32ca073406',t:'MTc4NTQwNjY1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2340381d98ca7bc',t:'MTc4NTQxMDg0MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
