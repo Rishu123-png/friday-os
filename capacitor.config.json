@@ -1,0 +1,23 @@
+{
+  "appId": "com.rishu.fridayos",
+  "appName": "FRIDAY OS",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#0a0a1a",
+      "showSpinner": false
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#00d4ff"
+    }
+  }
+}
