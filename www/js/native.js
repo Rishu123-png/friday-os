@@ -225,6 +225,20 @@ export async function launchApp(nameOrPkg) {
   return { ...r, app: hit };
 }
 
+/* ================= SYSTEM ALARM / TIMER ================= */
+export async function setSystemAlarm(hour, minute, label, repeat) {
+  return call('setSystemAlarm', { hour, minute, label, repeat });
+}
+export async function setSystemTimer(seconds, label) {
+  return call('setSystemTimer', { seconds, label });
+}
+export async function showAlarms() { return call('showAlarms'); }
+
+/* ================= WHATSAPP ================= */
+export async function whatsappSend(number, message, autoSend = true) {
+  return call('whatsappSend', { number, message, autoSend });
+}
+
 /* ================= OVERLAY BUBBLE (Phase C) ================= */
 export async function showBubble(on = true) { return call('showBubble', { enabled: on }); }
 export async function updateBubble(state) { return call('updateBubble', { state }); }
