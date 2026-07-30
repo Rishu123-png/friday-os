@@ -9,15 +9,16 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
-import android.os.PowerManager;
 
 /** Keeps FRIDAY alive in the background with a persistent notification,
- *  so wake word / alarms / automations keep running with the screen off. */
+ *  so wake word / alarms / automations keep running with the screen off.
+ *  NOTE: deliberately NO partial wakelock - it drained battery without
+ *  improving reliability. The foreground service alone is the supported
+ *  way to stay resident; Android manages the rest. */
 public class FridayService extends Service {
 
     public static final String CHANNEL = "friday_core";
     public static final int NOTIF_ID = 7001;
-    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -55,22 +56,11 @@ public class FridayService extends Service {
                 .build();
 
         startForeground(NOTIF_ID, n);
-
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null && wakeLock == null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "friday:core");
-                wakeLock.acquire(12 * 60 * 60 * 1000L);
-            }
-        } catch (Exception ignored) {}
-
         return START_STICKY;   // restart if Android kills us
     }
 
     @Override
     public void onDestroy() {
-        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
-        wakeLock = null;
         super.onDestroy();
     }
 
