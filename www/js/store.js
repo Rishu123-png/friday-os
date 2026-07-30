@@ -42,7 +42,9 @@ export const DEFAULTS = {
   bootStart: false,
   announceNotifications: true,
   announceApps: null,
-  bubbleEnabled: false
+  bubbleEnabled: false,
+  // telephony
+  waCountryCode: '91'
 };
 
 function read(key, fallback) {
@@ -138,7 +140,15 @@ export function cacheGet(name, allowStale = false) {
 export function exportAll() {
   const dump = {};
   Object.values(KEYS).forEach(k => { dump[k] = read(k, null); });
-  return { version: 6, exported: new Date().toISOString(), data: dump };
+  // never leak API keys / secrets into a backup file
+  if (dump[KEYS.SETTINGS]) {
+    dump[KEYS.SETTINGS] = {
+      ...dump[KEYS.SETTINGS],
+      groqKey: '',
+      _note: 'API keys are intentionally not exported. Re-add them after import.'
+    };
+  }
+  return { version: 7, exported: new Date().toISOString(), data: dump };
 }
 export function importAll(payload) {
   if (!payload || !payload.data) throw new Error('Invalid backup file');
