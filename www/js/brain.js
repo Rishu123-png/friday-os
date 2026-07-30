@@ -129,10 +129,23 @@ I('call', t => /\b(call|dial|phone)\s+\w+/.test(t) && !/\b(recall|calling card)\
 
 I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
   t => {
-    const rest = t.replace(/\b(send a|send|text|message|whatsapp|sms|to)\b/gi, '').trim();
-    const [namePart, ...msgParts] = rest.split(/\s+saying\s+|\s+that\s+|:/);
-    const name = cleanSubject(namePart || '');
-    const msg = msgParts.join(' ').trim();
+    let src = t;
+    // drop a leading "open whatsapp and" / "open whatsapp then"
+    src = src.replace(/^\s*open\s+(whatsapp|messages?|sms)\s+(and|then)\s+/i, '');
+
+    let msg = '', namePart = src;
+    // quoted message wins:  message Divik 'hi'
+    const q = src.match(/['"\u2018\u201c]([^'"\u2019\u201d]{1,200})['"\u2019\u201d]/);
+    if (q) { msg = q[1].trim(); namePart = src.slice(0, q.index); }
+
+    if (!msg) {
+      const parts = namePart.split(/\s+saying\s+|\s+that\s+|\s+:\s*|:/);
+      namePart = parts[0];
+      msg = parts.slice(1).join(' ').trim();
+    }
+    // only strip command verbs from the NAME, never from the message
+    namePart = namePart.replace(/\b(send a|send|text|message|whatsapp|sms|to|a|on)\b/gi, ' ');
+    const name = cleanSubject(namePart || '').replace(/\s+(and|then)$/i, '').trim();
     const contacts = getList(KEYS.CONTACTS);
     const hit = contacts.find(c => fuzzyHas(c.name, name));
     const isWa = /whatsapp/.test(t);
@@ -140,7 +153,7 @@ I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
       say: `Opening ${isWa ? 'WhatsApp' : 'messages'} for ${hit.name}.`,
       action: { type: isWa ? 'whatsapp' : 'sms', number: hit.phone, body: msg, name: hit.name }
     };
-    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: 'sms', body: msg } };
+    if (isNative()) return { say: null, action: { type: 'contact_lookup', name, mode: isWa ? 'whatsapp' : 'sms', body: msg } };
     return { say: `No contact named "${name}". Add them first.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
