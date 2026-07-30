@@ -3,6 +3,8 @@ package com.rishu.fridayos;
 import android.Manifest;
 import android.app.Activity;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.SharedPreferences;
 import android.bluetooth.BluetoothAdapter;
 import android.content.ComponentName;
 import android.content.Context;
@@ -39,6 +41,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -52,6 +57,26 @@ public class FridayNative extends Plugin {
     private JSObject fail(String why) { JSObject o = new JSObject(); o.put("ok", false); o.put("reason", why); return o; }
     private boolean granted(String perm) {
         return ContextCompat.checkSelfPermission(getContext(), perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /* Static handle for broadcast receivers (geofences) to reach the JS app. */
+    private static FridayNative activePlugin;
+
+    @Override
+    public void load() {
+        activePlugin = this;
+    }
+
+    /** Called by FridayGeofenceReceiver; no-op when the web app isn't running. */
+    public static void emitGeofence(String name, String transition) {
+        FridayNative p = activePlugin;
+        if (p == null) return;
+        try {
+            JSObject o = new JSObject();
+            o.put("name", name);
+            o.put("transition", transition);
+            p.notifyListeners("geofenceEvent", o);
+        } catch (Exception ignored) {}
     }
 
     /* ============ PERMISSIONS ============ */
@@ -659,5 +684,243 @@ public class FridayNative extends Plugin {
             r.put("accessibility", acc != null && acc.contains(ctx.getPackageName()));
         } catch (Exception ignored) {}
         call.resolve(r);
+    }
+
+    /* ============ QUICK SETTINGS TILE ============ */
+    /** One-shot flag the QS tile drops before launching the app. */
+    @PluginMethod
+    public void consumeTileRequest(PluginCall call) {
+        try {
+            SharedPreferences p = getContext().getSharedPreferences(
+                    FridayTileService.PREFS, Context.MODE_PRIVATE);
+            long at = p.getLong(FridayTileService.KEY_LISTEN, 0);
+            p.edit().remove(FridayTileService.KEY_LISTEN).apply();
+            JSObject r = ok();
+            r.put("listen", at > 0 && System.currentTimeMillis() - at < 5 * 60 * 1000);
+            call.resolve(r);
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    /* ============ HOME-SCREEN WIDGET ============ */
+    @PluginMethod
+    public void updateWidget(PluginCall call) {
+        try {
+            FridayWidgetProvider.push(getContext(),
+                    call.getString("text", ""), call.getString("meta", ""));
+            call.resolve(ok());
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    /* ============ GEOFENCING (Play services via reflection) ============ */
+    /* Native hardware geofencing without a compile-time GMS dependency: all
+       play-services classes are reached with Class.forName, so a build without
+       the location library still compiles and simply resolves gms_missing.
+       The JS-side GPS fallback (automation.js) keeps working in that case. */
+
+    private PendingIntent geofenceIntent() {
+        Intent i = new Intent(getContext(), FridayGeofenceReceiver.class);
+        i.setAction(FridayGeofenceReceiver.ACTION);
+        return PendingIntent.getBroadcast(getContext(), 7717, i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private Object buildGeofence(String id, double lat, double lon, float radius) throws Exception {
+        Class<?> gCls = Class.forName("com.google.android.gms.location.Geofence");
+        Class<?> bCls = Class.forName("com.google.android.gms.location.Geofence$Builder");
+        Object b = bCls.getDeclaredConstructor().newInstance();
+        bCls.getMethod("setRequestId", String.class).invoke(b, id);
+        bCls.getMethod("setCircularRegion", double.class, double.class, float.class)
+            .invoke(b, lat, lon, radius);
+        bCls.getMethod("setExpirationDuration", long.class).invoke(b, -1L);  // NEVER_EXPIRE
+        int enter = gCls.getField("GEOFENCE_TRANSITION_ENTER").getInt(null);
+        int exit = gCls.getField("GEOFENCE_TRANSITION_EXIT").getInt(null);
+        bCls.getMethod("setTransitionTypes", int.class).invoke(b, enter | exit);
+        return bCls.getMethod("build").invoke(b);
+    }
+
+    private void addFencesInternal(List<Object> list, final PluginCall call) throws Exception {
+        Class<?> lsCls = Class.forName("com.google.android.gms.location.LocationServices");
+        Object client = lsCls.getMethod("getGeofencingClient", Context.class)
+                             .invoke(null, getContext());
+        if (list.isEmpty()) {
+            Object task = client.getClass()
+                    .getMethod("removeGeofences", PendingIntent.class)
+                    .invoke(client, geofenceIntent());
+            attachTaskListeners(task, call, "geofence_clear_failed");
+            return;
+        }
+        Class<?> reqCls = Class.forName("com.google.android.gms.location.GeofencingRequest");
+        Class<?> reqBCls = Class.forName("com.google.android.gms.location.GeofencingRequest$Builder");
+        Object rb = reqBCls.getDeclaredConstructor().newInstance();
+        int trig = reqCls.getField("INITIAL_TRIGGER_ENTER").getInt(null);
+        reqBCls.getMethod("setInitialTrigger", int.class).invoke(rb, trig);
+        reqBCls.getMethod("addGeofences", List.class).invoke(rb, list);
+        Object req = reqBCls.getMethod("build").invoke(rb);
+        Object task = client.getClass()
+                .getMethod("addGeofences", reqCls, PendingIntent.class)
+                .invoke(client, req, geofenceIntent());
+        attachTaskListeners(task, call, "geofence_add_failed");
+    }
+
+    private void attachTaskListeners(Object task, final PluginCall call, final String failReason)
+            throws Exception {
+        Class<?> okCls = Class.forName("com.google.android.gms.tasks.OnSuccessListener");
+        Class<?> failCls = Class.forName("com.google.android.gms.tasks.OnFailureListener");
+        final boolean[] done = { false };
+        InvocationHandler h = new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) {
+                if (!done[0]) {
+                    done[0] = true;
+                    call.resolve(ok());
+                }
+                return null;
+            }
+        };
+        Object onOk = Proxy.newProxyInstance(okCls.getClassLoader(), new Class<?>[] { okCls }, h);
+        Object onFail = Proxy.newProxyInstance(failCls.getClassLoader(), new Class<?>[] { failCls },
+            new InvocationHandler() {
+                @Override
+                public Object invoke(Object proxy, Method method, Object[] args) {
+                    if (!done[0]) {
+                        done[0] = true;
+                        call.resolve(fail(failReason));
+                    }
+                    return null;
+                }
+            });
+        task.getClass().getMethod("addOnSuccessListener", okCls).invoke(task, onOk);
+        task.getClass().getMethod("addOnFailureListener", failCls).invoke(task, onFail);
+    }
+
+    /** Replace ALL native geofences with the app's current list. */
+    @PluginMethod
+    public void syncGeofences(PluginCall call) {
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)
+                && !granted(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            call.resolve(fail("no_location"));
+            return;
+        }
+        try {
+            List<Object> list = new ArrayList<>();
+            JSONObject names = new JSONObject();
+            JSArray fences = call.getArray("fences");
+            if (fences != null) {
+                for (int i = 0; i < fences.length(); i++) {
+                    JSONObject f = (JSONObject) fences.get(i);
+                    if (f == null) continue;
+                    String id = f.optString("id");
+                    double lat = f.optDouble("lat", Double.NaN);
+                    double lon = f.optDouble("lon", Double.NaN);
+                    if (id.isEmpty() || Double.isNaN(lat) || Double.isNaN(lon)) continue;
+                    float radius = (float) f.optDouble("radius", 250);
+                    list.add(buildGeofence(id, lat, lon, Math.max(150f, radius)));
+                    names.put(id, f.optString("name", id));
+                    if (list.size() >= 90) break;   // GMS hard cap is 100/app
+                }
+            }
+            getContext().getSharedPreferences(FridayGeofenceReceiver.PREFS, Context.MODE_PRIVATE)
+                .edit().putString("map", names.toString()).apply();
+            addFencesInternal(list, call);
+        } catch (ClassNotFoundException e) {
+            call.resolve(fail("gms_missing"));
+        } catch (SecurityException e) {
+            call.resolve(fail("no_location"));
+        } catch (Exception e) {
+            call.resolve(fail(e.getMessage() != null ? e.getMessage() : "error"));
+        }
+    }
+
+    /** Append one fence (created moments ago) without disturbing the rest. */
+    @PluginMethod
+    public void addGeofence(PluginCall call) {
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)
+                && !granted(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            call.resolve(fail("no_location"));
+            return;
+        }
+        try {
+            String id = call.getString("id", "");
+            Double lat = call.getDouble("lat");
+            Double lon = call.getDouble("lon");
+            if (id.isEmpty() || lat == null || lon == null) {
+                call.resolve(fail("bad_args"));
+                return;
+            }
+            double radiusD = radiusOf(call);
+            List<Object> one = new ArrayList<>();
+            one.add(buildGeofence(id, lat, lon, Math.max(150f, (float) radiusD)));
+
+            SharedPreferences p = getContext().getSharedPreferences(
+                    FridayGeofenceReceiver.PREFS, Context.MODE_PRIVATE);
+            JSONObject names = new JSONObject(p.getString("map", "{}"));
+            names.put(id, call.getString("name", id));
+            p.edit().putString("map", names.toString()).apply();
+
+            addFencesInternal(one, call);
+        } catch (ClassNotFoundException e) {
+            call.resolve(fail("gms_missing"));
+        } catch (SecurityException e) {
+            call.resolve(fail("no_location"));
+        } catch (Exception e) {
+            call.resolve(fail(e.getMessage() != null ? e.getMessage() : "error"));
+        }
+    }
+
+    private double radiusOf(PluginCall call) {
+        try {
+            Double d = call.getDouble("radius");
+            return d != null ? d : 250.0;
+        } catch (Exception e) { return 250.0; }
+    }
+
+    /* ============ NOTIFICATION REPLY (RemoteInput) ============ */
+    /** Answers a real notification (WhatsApp/Telegram/...) through its own
+        quick-reply action - the posted reply originates from the target app. */
+    @PluginMethod
+    public void replyNotification(PluginCall call) {
+        String app = call.getString("app", "");
+        String text = call.getString("text", "");
+        if (text.isEmpty()) { call.resolve(fail("empty")); return; }
+        if (!FridayNotificationService.isEnabled()) {
+            call.resolve(fail("no_listener"));
+            return;
+        }
+        int res = FridayNotificationService.reply(getContext(), app, text);
+        if (res == 1) {
+            JSObject r = ok();
+            r.put("app", app);
+            call.resolve(r);
+        } else if (res == 0) {
+            call.resolve(fail("not_found"));
+        } else {
+            call.resolve(fail("cannot_reply"));
+        }
+    }
+
+    /* ============ ACCESSIBILITY v2 (tap / scroll / type) ============ */
+    @PluginMethod
+    public void tapText(PluginCall call) {
+        String t = call.getString("text", "");
+        if (t.isEmpty()) { call.resolve(fail("empty")); return; }
+        boolean done = FridayAccessibility.tapText(t);
+        call.resolve(done ? ok()
+                : fail(FridayAccessibility.isEnabled() ? "not_found" : "accessibility_off"));
+    }
+
+    @PluginMethod
+    public void scrollScreen(PluginCall call) {
+        String dir = call.getString("dir", "down");
+        boolean done = FridayAccessibility.scrollScreen(dir);
+        call.resolve(done ? ok()
+                : fail(FridayAccessibility.isEnabled() ? "not_scrollable" : "accessibility_off"));
+    }
+
+    @PluginMethod
+    public void typeText(PluginCall call) {
+        String t = call.getString("text", "");
+        boolean done = FridayAccessibility.typeText(t);
+        call.resolve(done ? ok()
+                : fail(FridayAccessibility.isEnabled() ? "no_input_focused" : "accessibility_off"));
     }
 }
