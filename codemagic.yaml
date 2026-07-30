@@ -1,4 +1,3 @@
-
 workflows:
   friday-android:
     name: FRIDAY OS — Android APK
@@ -66,7 +65,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - CHANGE_ME@example.com
+          - adminschool8@gmail.com
         notify:
           success: true
           failure: true
