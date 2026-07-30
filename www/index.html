@@ -32,7 +32,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v6.0</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v7.0</span></div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
 
@@ -164,13 +164,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
         <span>Chat</span>
       </button>
-      <button class="nav-btn" data-panel="tools" aria-label="Tools">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
-        <span>Tools</span>
-      </button>
-      <button class="nav-btn" data-panel="skills" aria-label="Skills">
+      <button class="nav-btn" data-panel="activity" aria-label="Activity">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        <span>Skills</span>
+        <span>Activity</span>
       </button>
       <button class="nav-btn" data-panel="settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -180,174 +176,46 @@
 
     <!-- ====== PANELS ====== -->
 
-    <!-- Tools Panel (v2+v3) -->
-    <div class="panel" id="toolsPanel">
+    <!-- Activity Panel -->
+    <div class="panel" id="activityPanel">
       <div class="panel-header">
-        <h2>🛠️ Tools</h2>
-        <button class="panel-close" data-close="tools">✕</button>
+        <h2>⚡ Activity</h2>
+        <button class="panel-close" data-close="activity">✕</button>
       </div>
       <div class="panel-content">
-        <div class="tools-grid">
-          <!-- v2 Tools -->
-          <div class="tool-card" data-tool="camera">
-            <div class="tool-icon">📷</div>
-            <div class="tool-name">Camera Vision</div>
-            <div class="tool-desc">See & analyze images</div>
-          </div>
-          <div class="tool-card" data-tool="ocr">
-            <div class="tool-icon">📄</div>
-            <div class="tool-name">OCR Scanner</div>
-            <div class="tool-desc">Extract text from images</div>
-          </div>
-          <div class="tool-card" data-tool="qr">
-            <div class="tool-icon">🔳</div>
-            <div class="tool-name">QR Scanner</div>
-            <div class="tool-desc">Scan codes instantly</div>
-          </div>
-          <div class="tool-card" data-tool="search">
-            <div class="tool-icon">🌐</div>
-            <div class="tool-name">Web Search</div>
-            <div class="tool-desc">Search the internet</div>
-          </div>
-          <div class="tool-card" data-tool="weather">
-            <div class="tool-icon">🌤️</div>
-            <div class="tool-name">Weather</div>
-            <div class="tool-desc">Current conditions</div>
-          </div>
-          <div class="tool-card" data-tool="news">
-            <div class="tool-icon">📰</div>
-            <div class="tool-name">News</div>
-            <div class="tool-desc">Latest headlines</div>
-          </div>
-          <div class="tool-card" data-tool="translate">
-            <div class="tool-icon">🌍</div>
-            <div class="tool-name">Translator</div>
-            <div class="tool-desc">Translate languages</div>
-          </div>
-          <div class="tool-card" data-tool="currency">
-            <div class="tool-icon">💱</div>
-            <div class="tool-name">Currency</div>
-            <div class="tool-desc">Convert currencies</div>
-          </div>
-          <div class="tool-card" data-tool="location">
-            <div class="tool-icon">📍</div>
-            <div class="tool-name">Location</div>
-            <div class="tool-desc">GPS & maps</div>
-          </div>
-          <!-- v3 Tools -->
-          <div class="tool-card" data-tool="reminders">
-            <div class="tool-icon">⏰</div>
-            <div class="tool-name">Reminders</div>
-            <div class="tool-desc">Set & manage alerts</div>
-          </div>
-          <div class="tool-card" data-tool="calendar">
-            <div class="tool-icon">📅</div>
-            <div class="tool-name">Calendar</div>
-            <div class="tool-desc">Events & schedules</div>
-          </div>
-          <div class="tool-card" data-tool="notes">
-            <div class="tool-icon">📝</div>
-            <div class="tool-name">Notes</div>
-            <div class="tool-desc">Save & organize notes</div>
-          </div>
-          <div class="tool-card" data-tool="contacts">
-            <div class="tool-icon">📇</div>
-            <div class="tool-name">Contacts</div>
-            <div class="tool-desc">Address book</div>
-          </div>
-          <div class="tool-card" data-tool="battery">
-            <div class="tool-icon">🔋</div>
-            <div class="tool-name">Battery</div>
-            <div class="tool-desc">Battery status</div>
-          </div>
-          <div class="tool-card" data-tool="calculator">
-            <div class="tool-icon">🔢</div>
-            <div class="tool-name">Calculator</div>
-            <div class="tool-desc">Math operations</div>
-          </div>
-          <!-- v4 Tools -->
-          <div class="tool-card" data-tool="coder">
-            <div class="tool-icon">💻</div>
-            <div class="tool-name">Coder</div>
-            <div class="tool-desc">Write & debug code</div>
-          </div>
-          <div class="tool-card" data-tool="planner">
-            <div class="tool-icon">📋</div>
-            <div class="tool-name">Planner</div>
-            <div class="tool-desc">Task management</div>
-          </div>
-          <div class="tool-card" data-tool="researcher">
-            <div class="tool-icon">🔬</div>
-            <div class="tool-name">Research</div>
-            <div class="tool-desc">Deep research assistant</div>
-          </div>
-          <div class="tool-card" data-tool="writer">
-            <div class="tool-icon">✍️</div>
-            <div class="tool-name">Writer</div>
-            <div class="tool-desc">Draft & edit content</div>
-          </div>
+        <div class="act-hint">Everything here is created by voice. Just tell FRIDAY what you want.</div>
+
+        <div class="act-section">
+          <h3>⏰ Alarms</h3>
+          <div id="alarmsList" class="items-list"></div>
+          <p class="hint">Say: <em>"set an alarm for 5 pm"</em> or <em>"wake me at 6:30 every weekday"</em></p>
+        </div>
+
+        <div class="act-section">
+          <h3>↺ Routines</h3>
+          <div id="routinesList" class="items-list"></div>
+          <p class="hint">Say: <em>"good morning"</em> or <em>"when I say bedtime tell me the weather"</em></p>
+        </div>
+
+        <div class="act-section">
+          <h3>◎ Locations</h3>
+          <div id="geofenceList" class="items-list"></div>
+          <p class="hint">Say: <em>"remind me when I get home"</em></p>
+        </div>
+
+        <div class="act-section">
+          <h3>≡ Recent activity</h3>
+          <div id="runLog" class="items-list"></div>
+        </div>
+
+        <div class="act-section">
+          <h3>◈ What I know</h3>
+          <div id="factsList" class="items-list"></div>
+          <p class="hint">Say: <em>"my name is ..."</em> or <em>"I live in ..."</em> and I will remember.</p>
         </div>
       </div>
     </div>
 
-    <!-- Skills Panel (v5) -->
-    <div class="panel" id="skillsPanel">
-      <div class="panel-header">
-        <h2>⭐ Skills & Versions</h2>
-        <button class="panel-close" data-close="skills">✕</button>
-      </div>
-      <div class="panel-content">
-        <div class="version-badge">v1 — Foundation</div>
-        <div class="skills-grid skills-v1">
-          <div class="skill-card active-skill"><div class="skill-icon">💬</div><div class="skill-name">AI Chat</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🎤</div><div class="skill-name">Voice In</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🔊</div><div class="skill-name">Voice Out</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🧠</div><div class="skill-name">Memory</div><div class="skill-status">✅</div></div>
-        </div>
-        <div class="version-badge">v2 — Enhanced Senses</div>
-        <div class="skills-grid skills-v2">
-          <div class="skill-card active-skill"><div class="skill-icon">📷</div><div class="skill-name">Vision</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📄</div><div class="skill-name">OCR</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🌐</div><div class="skill-name">Search</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🌤️</div><div class="skill-name">Weather</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📰</div><div class="skill-name">News</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🌍</div><div class="skill-name">Translate</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">💱</div><div class="skill-name">Currency</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📍</div><div class="skill-name">Location</div><div class="skill-status">✅</div></div>
-        </div>
-        <div class="version-badge">v3 — Smart Integration</div>
-        <div class="skills-grid skills-v3">
-          <div class="skill-card active-skill"><div class="skill-icon">⏰</div><div class="skill-name">Reminders</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📅</div><div class="skill-name">Calendar</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📝</div><div class="skill-name">Notes</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📇</div><div class="skill-name">Contacts</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🔋</div><div class="skill-name">Battery</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🔔</div><div class="skill-name">Notify</div><div class="skill-status">✅</div></div>
-        </div>
-        <div class="version-badge">v4 — AI Agents</div>
-        <div class="skills-grid skills-v4">
-          <div class="skill-card active-skill"><div class="skill-icon">🤖</div><div class="skill-name">Agents</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">💻</div><div class="skill-name">Coder</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📋</div><div class="skill-name">Planner</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🔬</div><div class="skill-name">Research</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">✍️</div><div class="skill-name">Writer</div><div class="skill-status">✅</div></div>
-        </div>
-        <div class="version-badge">v5 — Futuristic UI</div>
-        <div class="skills-grid skills-v5">
-          <div class="skill-card active-skill"><div class="skill-icon">🌊</div><div class="skill-name">Holo UI</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">📊</div><div class="skill-name">Dashboard</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">🎭</div><div class="skill-name">Themes</div><div class="skill-status">✅</div></div>
-          <div class="skill-card active-skill"><div class="skill-icon">✨</div><div class="skill-name">Particles</div><div class="skill-status">✅</div></div>
-        </div>
-        <div class="version-badge coming">v6 — Ecosystem (Coming Soon)</div>
-        <div class="version-badge coming">v7 — Cross-Device (Coming Soon)</div>
-        <div class="version-badge coming">v8 — Autonomous (Coming Soon)</div>
-        <div class="version-badge coming">v9 — Neural (Coming Soon)</div>
-        <div class="version-badge coming">v10 — FRIDAY Prime (Coming Soon)</div>
-      </div>
-    </div>
-
-    <!-- Settings Panel -->
     <div class="panel" id="settingsPanel">
       <div class="panel-header">
         <h2>⚙️ Settings</h2>
@@ -454,6 +322,32 @@
           </div>
         </div>
         <div class="settings-group">
+          <h3>◉ Phone Integration</h3>
+          <div class="setting-item">
+            <label>Run in background</label>
+            <div class="toggle-switch"><input type="checkbox" id="backgroundService" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Start on boot</label>
+            <div class="toggle-switch"><input type="checkbox" id="bootStart"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Announce notifications</label>
+            <div class="toggle-switch"><input type="checkbox" id="announceNotifications" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Floating bubble</label>
+            <div class="toggle-switch"><input type="checkbox" id="bubbleEnabled"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item btn-row">
+            <button class="tool-add-btn" id="setupBtn">Run Setup</button>
+            <button class="tool-add-btn" id="syncContactsBtn">Sync Contacts</button>
+          </div>
+          <p class="hint">These only work in the installed APK. Tap <strong>Run Setup</strong> after installing to grant every permission.</p>
+          <div id="capsList" class="caps-list"></div>
+        </div>
+
+        <div class="settings-group">
           <h3>🧠 Memory & Data</h3>
           <div class="setting-item">
             <label>Save Conversations</label>
@@ -476,8 +370,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">6.0.0</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V6-OFFLINE</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">7.0.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7-AUTOMATION</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -626,5 +520,5 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a230ec46dcb3a7aa',t:'MTc4NTM3ODQzMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a23184a5ea673e74',t:'MTc4NTM4NDY3NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
