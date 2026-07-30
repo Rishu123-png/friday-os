@@ -10,6 +10,7 @@
    100% on-device. No Firebase, no cloud, no account. */
 
 import { KEYS, getList, saveList, addItem, getSetting } from './store.js';
+import { semanticSearch } from './nlu.js';
 
 const FACTS = 'friday_facts';
 const PATTERNS = 'friday_patterns';
@@ -58,7 +59,8 @@ const FACT_RULES = [
   { re: /\bmy favou?rite ([a-z\s]{2,20}) is ([a-z0-9\s]{2,30})\b/i,
     key: m => 'fav.' + m[1].trim().replace(/\s+/g, '_'), label: m => 'Favourite ' + m[1], val: m => m[2] },
   { re: /\bi (?:usually|always|normally) ([a-z0-9\s:.]{4,50})/i, key: 'habit.stated',  label: 'You usually', multi: true },
-  { re: /\bremember (?:that )?(.{4,120})/i,                    key: 'note.explicit',  label: 'You told me', multi: true }
+  { re: /^(?!.*\b(?:do|did|can|could|will|would)\s+you\b)(?:please\s+)?remember (?:that |this )?(.{4,120})/i,
+    key: 'note.explicit', label: 'You told me', multi: true }
 ];
 
 const clean = s => String(s).trim().replace(/[.,!?;]+$/, '').replace(/\s+/g, ' ');
@@ -233,23 +235,23 @@ export function buildContext({ maxFacts = 14, maxPatterns = 4 } = {}) {
 
 /* ================= 5. SEARCH ================= */
 export function recall(query, limit = 6) {
-  const q = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  if (!q.length) return [];
-  const scored = [];
+  const docs = [];
+  allFacts().forEach(f => docs.push({ kind: 'fact', text: `${f.label}: ${f.value}`, boost: 1.6 }));
+  getList(KEYS.NOTES).forEach(n => docs.push({ kind: 'note', text: n.text, boost: 1.3 }));
+  episodes().slice(0, 500)
+    .filter(e => e.role === 'user' && e.text.length > 8 &&
+      !/^(do you remember|what did i say|recall|remind me what|what do you know)/i.test(e.text))
+    .forEach(e => docs.push({ kind: 'episode', text: e.text, ts: e.ts, boost: 1 }));
 
-  allFacts().forEach(f => {
-    const hay = (f.label + ' ' + f.value).toLowerCase();
-    const s = q.reduce((a, w) => a + (hay.includes(w) ? 2 : 0), 0);
-    if (s) scored.push({ score: s, kind: 'fact', text: `${f.label}: ${f.value}` });
-  });
-
-  episodes().slice(0, 400).forEach(e => {
-    const hay = e.text.toLowerCase();
-    const s = q.reduce((a, w) => a + (hay.includes(w) ? 1 : 0), 0);
-    if (s) scored.push({ score: s, kind: 'episode', text: e.text, ts: e.ts });
-  });
-
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+  if (!docs.length) return [];
+  const hits = semanticSearch(query, docs, limit * 2);
+  // apply kind boost then dedupe by text
+  const seen = new Set();
+  return hits
+    .map(h => ({ ...h, score: h.score * (h.boost || 1) }))
+    .sort((a, b) => b.score - a.score)
+    .filter(h => { const k = h.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+    .slice(0, limit);
 }
 
 /* ================= 6. STATS ================= */
