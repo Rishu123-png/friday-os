@@ -302,6 +302,23 @@ export async function tapText(text) { return call('tapText', { text }); }
 export async function scrollScreen(dir = 'down') { return call('scrollScreen', { dir }); }
 export async function typeText(text) { return call('typeText', { text }); }
 
+/* ================= SECURITY GUARD ================= */
+/** Full on-device device-hygiene audit. */
+export async function securityAudit() { return call('securityAudit'); }
+
+/** Fires the moment any app gets installed outside the Play Store. */
+export function onSecurityAlert(cb) {
+  const p = plugin();
+  if (!p || !p.addListener) return () => {};
+  const sub = p.addListener('securityAlert', ev => cb(ev));
+  return () => { try { sub.remove && sub.remove(); } catch (_) {} }
+}
+
+/* ================= NETWORK RECON (own network only) ================= */
+export async function wifiAudit() { return call('wifiAudit'); }
+export async function lanScan() { return call('lanScan'); }
+export async function portScan(host) { return call('portScan', { host }); }
+
 /* ================= CAPABILITY REPORT ================= */
 /** What actually works on this device right now */
 export async function capabilities() {
