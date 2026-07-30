@@ -20,6 +20,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
 import android.provider.ContactsContract;
+import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.provider.Telephony;
 import android.telephony.SmsManager;
@@ -507,8 +508,7 @@ public class FridayNative extends Plugin {
             call.resolve(r);
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
-
-    @PluginMethod
+@PluginMethod
     public void getStorageInfo(PluginCall call) {
         try {
             StatFs s = new StatFs(Environment.getDataDirectory().getPath());
@@ -551,6 +551,92 @@ public class FridayNative extends Plugin {
         call.resolve(ok());
     }
 
+    /* ============ SYSTEM ALARM (real Clock app) ============ */
+    @PluginMethod
+    public void setSystemAlarm(PluginCall call) {
+        int hour = call.getInt("hour", 7);
+        int minute = call.getInt("minute", 0);
+        String label = call.getString("label", "FRIDAY");
+        String repeat = call.getString("repeat", "once");
+        try {
+            Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+            i.putExtra(AlarmClock.EXTRA_HOUR, hour);
+            i.putExtra(AlarmClock.EXTRA_MINUTES, minute);
+            i.putExtra(AlarmClock.EXTRA_MESSAGE, label);
+            i.putExtra(AlarmClock.EXTRA_SKIP_UI, true);
+            java.util.ArrayList<Integer> days = new java.util.ArrayList<>();
+            if ("daily".equals(repeat)) {
+                for (int d = 1; d <= 7; d++) days.add(d);
+            } else if ("weekdays".equals(repeat)) {
+                days.add(java.util.Calendar.MONDAY); days.add(java.util.Calendar.TUESDAY);
+                days.add(java.util.Calendar.WEDNESDAY); days.add(java.util.Calendar.THURSDAY);
+                days.add(java.util.Calendar.FRIDAY);
+            } else if ("weekends".equals(repeat)) {
+                days.add(java.util.Calendar.SATURDAY); days.add(java.util.Calendar.SUNDAY);
+            } else if (repeat.matches("[0-6](,[0-6])*")) {
+                for (String d : repeat.split(",")) days.add(Integer.parseInt(d) + 1);
+            }
+            if (!days.isEmpty()) i.putExtra(AlarmClock.EXTRA_DAYS, days);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(ok());
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    @PluginMethod
+    public void setSystemTimer(PluginCall call) {
+        int seconds = call.getInt("seconds", 60);
+        String label = call.getString("label", "FRIDAY timer");
+        try {
+            Intent i = new Intent(AlarmClock.ACTION_SET_TIMER);
+            i.putExtra(AlarmClock.EXTRA_LENGTH, seconds);
+            i.putExtra(AlarmClock.EXTRA_MESSAGE, label);
+            i.putExtra(AlarmClock.EXTRA_SKIP_UI, true);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(ok());
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    @PluginMethod
+    public void showAlarms(PluginCall call) {
+        try {
+            Intent i = new Intent(AlarmClock.ACTION_SHOW_ALARMS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(ok());
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    /* ============ WHATSAPP SEND ============ */
+    @PluginMethod
+    public void whatsappSend(PluginCall call) {
+        String number = call.getString("number", "").replaceAll("[^0-9]", "");
+        String message = call.getString("message", "");
+        boolean autoSend = call.getBoolean("autoSend", true);
+        try {
+            if (number.length() == 10) number = "91" + number;
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setData(Uri.parse("https://api.whatsapp.com/send?phone=" + number
+                    + "&text=" + Uri.encode(message)));
+            i.setPackage("com.whatsapp");
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try { getContext().startActivity(i); }
+            catch (Exception noWa) {
+                Intent w = new Intent(Intent.ACTION_VIEW);
+                w.setData(Uri.parse("https://api.whatsapp.com/send?phone=" + number
+                        + "&text=" + Uri.encode(message)));
+                w.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(w);
+            }
+            if (autoSend) FridayAccessibility.requestAutoSend();
+            JSObject r = ok();
+            r.put("autoSend", autoSend && FridayAccessibility.isEnabled());
+            call.resolve(r);
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    @PluginMethod
     /* ============ CAPABILITIES ============ */
     @PluginMethod
     public void capabilities(PluginCall call) {
