@@ -38,6 +38,7 @@ PERMS = [
     "android.permission.FLASHLIGHT",
     "android.permission.QUERY_ALL_PACKAGES",
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
 ]
 
 QUERIES = """    <queries>
@@ -103,6 +104,35 @@ SERVICES = """
                 <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".FridayGeofenceReceiver"
+            android:enabled="true"
+            android:exported="false"/>
+
+        <receiver
+            android:name=".FridayWidgetProvider"
+            android:exported="false"
+            android:label="FRIDAY Brief"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/friday_widget_info"/>
+        </receiver>
+
+        <service
+            android:name=".FridayTileService"
+            android:exported="true"
+            android:label="FRIDAY"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE"/>
+            </intent-filter>
+        </service>
 """
 
 
