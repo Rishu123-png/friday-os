@@ -44,6 +44,8 @@ QUERIES = """    <queries>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="sms"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
+        <package android:name="com.whatsapp"/>
+        <package android:name="com.whatsapp.w4b"/>
     </queries>
 """
 
