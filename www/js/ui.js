@@ -41,11 +41,16 @@ export function showView(name) {
 
 /* ---------- Panels ---------- */
 export function openPanel(name) {
+  const first = !anyPanelOpen();
   closeAllPanels();
   const id = name.startsWith('sub-') ? `#${name.slice(4)}SubPanel` : `#${name}Panel`;
   const el = $(id);
-  if (el) { el.classList.add('open'); return true; }
-  return false;
+  if (!el) return false;
+  // one history entry per "panel session" so the back button/gesture
+  // closes the panel instead of leaving the app (popstate in app.js)
+  if (first) { try { history.pushState({ fridayPanel: 1 }, ''); } catch (_) {} }
+  el.classList.add('open');
+  return true;
 }
 
 export function closePanel(name) {
