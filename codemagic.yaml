@@ -1,8 +1,8 @@
 workflows:
   friday-android:
-    name: FRIDAY OS — Android APK
+    name: FRIDAY OS - Android APK
     max_build_duration: 60
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
 
     environment:
       node: 20
@@ -29,7 +29,11 @@ workflows:
       - name: Create Android platform
         script: |
           if [ ! -d "android" ]; then npx cap add android; fi
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -z "$SDK" ]; then SDK="$HOME/programs/android-sdk-macosx"; fi
+          echo "Using Android SDK at: $SDK"
+          echo "sdk.dir=$SDK" > android/local.properties
+          cat android/local.properties
 
       - name: Copy web assets into native project
         script: npx cap sync android
