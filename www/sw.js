@@ -1,13 +1,13 @@
 /* FRIDAY OS — Service Worker v6
    Resilient precache: one missing file never kills the whole cache. */
 
-const CACHE = 'friday-os-v6-1';
+const CACHE = 'friday-os-v7-1';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
   './js/app.js', './js/store.js', './js/brain.js', './js/nlp.js',
   './js/ai.js', './js/api.js', './js/device.js', './js/voice.js', './js/ui.js',
-  './js/vision.js', './js/templates.js',
+  './js/vision.js', './js/templates.js', './js/memory.js', './js/proactive.js', './js/nlu.js', './js/automation.js', './js/native.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
