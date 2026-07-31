@@ -262,3 +262,36 @@ export async function quickTranslate(text, targetName) {
     return { ok: true, text: t };
   } catch (e) { return { ok: false, reason: 'network' }; }
 }
+
+/* ---------- v7.6: Perplexity-lite - web-grounded answers with sources ---------- */
+/** Gather: wiki summary + top news headlines + links, all keyless. */
+export async function deepResearch(query) {
+  const out = { summary: null, headlines: [], sources: [] };
+  try {
+    const w = await wikiSummary(query).catch(() => null);
+    if (w && w.extract) {
+      out.summary = w.extract;
+      if (w.url) out.sources.push({ title: 'Wikipedia', url: w.url });
+    }
+  } catch (_) {}
+  try {
+    const rss = 'https://news.google.com/rss/search?q=' + encodeURIComponent(query)
+      + '&hl=en-IN&gl=IN&ceid=IN:en';
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 9000);
+    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(rss), { signal: ctrl.signal });
+    clearTimeout(to);
+    const xml = await r.text();
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const items = [...doc.querySelectorAll('item')].slice(0, 4);
+    for (const it of items) {
+      const title = it.querySelector('title')?.textContent || '';
+      const link = it.querySelector('link')?.textContent || '';
+      if (title) {
+        out.headlines.push(title);
+        if (link && out.sources.length < 4) out.sources.push({ title: title.slice(0, 60), url: link });
+      }
+    }
+  } catch (_) {}
+  return out;
+}
