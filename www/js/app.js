@@ -1159,8 +1159,6 @@ function nativeOnly(what) {
 
 /* ================= v7.3 GUARDIAN HELPERS ================= */
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 /* Tap something on screen with patience: apps take seconds to open. */
 async function tapRetry(label, tries = 4, gapMs = 1100) {
   for (let i = 0; i < tries; i++) {
