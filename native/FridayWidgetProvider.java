@@ -21,12 +21,46 @@ public class FridayWidgetProvider extends AppWidgetProvider {
     public static final String PREFS = "FridayWidget";
     public static final String KEY_TEXT = "text";
     public static final String KEY_META = "meta";
+    /* v7.5: steps line, written by FridaySensors into the "friday_health" file */
+    private static final String HEALTH = "friday_health";
+    private static final String KEY_STEPS_TODAY = "widget_steps_today";
+    private static final String KEY_STEPS_DATE = "widget_steps_date";
+
+    /** Called by FridaySensors whenever the step count moves. */
+    public static void pushSteps(Context ctx, int steps) {
+        try {
+            String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            ctx.getSharedPreferences(HEALTH, Context.MODE_PRIVATE).edit()
+               .putInt(KEY_STEPS_TODAY, steps)
+               .putString(KEY_STEPS_DATE, today)
+               .apply();
+            AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
+            int[] ids = mgr.getAppWidgetIds(
+                    new ComponentName(ctx, FridayWidgetProvider.class));
+            if (ids.length > 0) new FridayWidgetProvider().onUpdate(ctx, mgr, ids);
+        } catch (Exception ignored) {}
+    }
 
     @Override
     public void onUpdate(Context ctx, AppWidgetManager mgr, int[] ids) {
         SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String text = p.getString(KEY_TEXT, "Say \"Hey Friday\"");
         String meta = p.getString(KEY_META, "");
+
+        /* v7.5: append today's steps to the meta line */
+        try {
+            SharedPreferences h = ctx.getSharedPreferences(HEALTH, Context.MODE_PRIVATE);
+            String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            if (today.equals(h.getString(KEY_STEPS_DATE, ""))) {
+                int steps = h.getInt(KEY_STEPS_TODAY, 0);
+                if (steps > 0) {
+                    String stepLine = String.format(java.util.Locale.US, "%,d steps", steps);
+                    meta = meta.isEmpty() ? stepLine : meta + " - " + stepLine;
+                }
+            }
+        } catch (Exception ignored) {}
 
         for (int id : ids) {
             try {
