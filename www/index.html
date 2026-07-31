@@ -32,7 +32,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v7.4.2</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v7.6</span></div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
 
@@ -372,6 +372,14 @@
             <div class="toggle-switch"><input type="checkbox" id="bubbleEnabled"><span class="toggle-slider"></span></div>
           </div>
           <div class="setting-item">
+            <label>Hindi UI (Hinglish screens)</label>
+            <div class="toggle-switch"><input type="checkbox" id="hindiUI"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Battery full alert</label>
+            <div class="toggle-switch"><input type="checkbox" id="batteryWarnFull"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
             <label>WhatsApp country code</label>
             <input type="text" id="waCC" placeholder="91" maxlength="4" inputmode="numeric">
           </div>
@@ -407,8 +415,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">7.4.2</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7.4.2-BLACKBOX</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">7.6.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V7.6-APEX</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -616,7 +624,14 @@
     });
     var last = null;
     try { last = localStorage.getItem('friday_last_crash'); } catch (e) {}
-    if (last) show('(previous run crashed)\n' + last);
+    if (last) {
+      show('(previous run crashed)\n' + last);
+      /* v7.4.3: it is only history - fade it away once the app boots fine */
+      setTimeout(function () {
+        var d = document.getElementById('__blackbox');
+        if (d && window.__booted) d.style.display = 'none';
+      }, 10000);
+    }
     try { localStorage.removeItem('friday_last_crash'); } catch (e) {}
     setTimeout(function () {
       if (!window.__booted) show('Boot stuck at stage: ' + window.__stage + '\n(loading screen shown > 20 seconds)');
@@ -624,5 +639,5 @@
   })();
   </script>
   <script type="module" src="js/app.js"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a23dcbd1bbcfa79e',t:'MTc4NTUxMzQxOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
