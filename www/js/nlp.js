@@ -69,7 +69,54 @@ export function parseTime(text) {
   const t = text.toLowerCase();
   const now = new Date();
 
-  // "in X minutes" / "for X minutes" / "after X hours" / bare "5 minutes"
+  /* ---- v7.6: Hindi time brain - kal / parso / aaj / subah-shaam-raat / baje ----
+     "kal 5 baje yaad dilana" must just work. */
+  const HINDI_DOW = {
+    somvaar: 1, mangalvaar: 2, budhvaar: 3, guruvar: 4, shukravaar: 5,
+    shanivaar: 6, ravivaar: 0, itvar: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6, sunday: 0
+  };
+  const mkDay = (t0) => {
+    let m = t0.match(/\b(agle|agla|next)\s+([a-z]+)/);
+    if (m && HINDI_DOW[m[2]] != null) return { name: m[2], matched: m[0], dow: HINDI_DOW[m[2]] };
+    m = t0.match(/\b(somvaar|mangalvaar|budhvaar|guruvar|shukravaar|shanivaar|ravivaar|itvar)\b/);
+    if (m) return { name: m[1], matched: m[0], dow: HINDI_DOW[m[1]] };
+    return null;
+  };
+  const dowHit = mkDay(t);
+  const dayWord = t.match(/\b(kal\s+kal|parso|aaj|kal)\b/);
+  const baje = t.match(/\b(subah|shaam|raat|dopahar)?\s*(saade\s+)?(\d{1,2})\s*(?:baj\s*ke|baje)\b/);
+
+  if (dowHit || dayWord || baje) {
+    const d = new Date(now);
+    const bits = [];
+    if (dowHit) {
+      const diff = (dowHit.dow - d.getDay() + 7) % 7 || 7;
+      d.setDate(d.getDate() + diff);
+      bits.push(dowHit.matched);
+    }
+    if (dayWord) {
+      if (/kal\s+kal|parso/.test(dayWord[1])) d.setDate(now.getDate() + 2);
+      else if (dayWord[1] === 'kal') d.setDate(now.getDate() + 1);
+      bits.push(dayWord[0]);
+    }
+    if (baje) {
+      const word = baje[1] || '';
+      let hh = parseInt(baje[3], 10);
+      if ((word === 'shaam' || word === 'raat') && hh < 12) hh += 12;
+      else if (word === 'dopahar') hh = hh === 12 ? 12 : (hh <= 3 ? hh + 12 : hh);
+      else if (!word && hh <= 6) hh += 12;            // "5 baje" -> evening by convention
+      d.setHours(hh % 24, baje[2] ? 30 : 0, 0, 0);
+      bits.push(baje[0]);
+    } else {
+      d.setHours(9, 0, 0, 0);
+    }
+    /* time already passed today and user gave no future day word -> next day */
+    if (!dayWord && !dowHit && d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
+    if (dayWord && dayWord[1] === 'aaj' && d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
+    return { date: d, matched: bits.join(' ') || 'hindi-time' };
+  }
+
   const rel = t.match(/\b(?:in|for|after)?\s*(\d+|[a-z]+)\s*(sec|second|min|minute|hour|hr|day|week)s?\b/);
   if (rel) {
     const n = wordToNum(rel[1]);
