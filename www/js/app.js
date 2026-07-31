@@ -19,6 +19,8 @@ import * as NAT from './native.js';
 import * as CODER from './coder.js';
 import * as VAULT from './vault.js';
 import * as HACKER from './hacker.js';
+import * as HEALTH from './health.js';
+import * as I18N from './i18n.js';
 import { humanTime, parseTime, pick } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -31,15 +33,8 @@ const state = {
 
 /* ================= BOOT ================= */
 async function boot() {
-  const steps = [
-    ['Loading core systems', 12],
-    ['Initializing intent engine', 28],
-    ['Calibrating voice modules', 44],
-    ['Mounting memory banks', 60],
-    ['Loading personality matrix', 76],
-    ['Establishing links', 90],
-    ['FRIDAY OS online', 100]
-  ];
+  const pcts = [12, 28, 44, 60, 76, 90, 100];
+  const steps = I18N.bootSteps().map((txt, i) => [txt, pcts[i]]);
   const bar = $('.boot-progress-bar'), status = $('.boot-status');
   for (const [txt, pct] of steps) {
     window.__stage = 'boot:' + txt;
@@ -83,12 +78,21 @@ async function init() {
       $('#micButton').classList.remove('listening');
       const msgs = {
         'no-speech': 'Didn\'t catch that. Tap to retry.',
-        'not-allowed': 'Microphone blocked. Enable it in settings.',
-        'mic-denied': 'Microphone blocked.',
+        'not-allowed': 'Mic off: Settings > Apps > FRIDAY OS > Permissions > Microphone > Allow',
+        'mic-denied': 'Mic off: Settings > Apps > FRIDAY OS > Permissions > Microphone > Allow',
         'unsupported': 'Voice not supported in this browser.',
-        'network': 'Voice needs internet. Type instead.'
+        'network': 'Voice needs internet. Type instead.',
+        'server': 'Speech service hiccup. Try again.',
+        'client': 'Voice engine glitch. Tap to retry.',
+        'audio': 'Mic busy in another app. Close it and retry.',
+        'busy': 'Voice engine busy. One moment...',
+        'unknown': 'Voice error. Tap to retry.'
       };
-      setStatus(msgs[err] || 'Voice error. Tap to retry.');
+      const txt = msgs[err] || msgs.unknown;
+      setStatus(txt, err === 'not-allowed' || err === 'mic-denied');
+      if (err === 'not-allowed' || err === 'mic-denied') {
+        addMsg('ai', '**Microphone is off for me.** Fix: Settings → Apps → FRIDAY OS → Permissions → Microphone → **Allow**. Then tap the mic again.', { proactive: true });
+      }
     },
     onWake: () => { D.buzz(); U.toast('Yes?', '🎙️', 1400); setStatus('Listening...', true); }
   });
@@ -107,7 +111,7 @@ async function init() {
   // greeting
   const p = AI.persona();
   const hour = new Date().getHours();
-  const tod = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const tod = I18N.greetWord(hour) || (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
   const learnedName = MEM.getFact('user.name');
   if (learnedName && !S.getSetting('userName')) S.setSetting('userName', learnedName);
   const name = S.getSetting('userName') || learnedName || p.address;
@@ -224,6 +228,14 @@ async function handleInput(text, opts = {}) {
     if (kind === 'vault_pin') return handleVaultPin(text);
     if (kind === 'password_check_text') return auditPassword(text.replace(/["']/g, '').trim());
     if (kind === 'phish_link') return judgeLink(text);
+    if (kind === 'quiz_answer') return quizAnswer(text);
+    if (kind === 'voice_note') {
+      S.addItem(KEYS.NOTES, { text: '🎙 ' + text, created: Date.now() });
+      refresh('notes');
+      return reply(`Voice note saved: "${text}"`);
+    }
+    if (kind === 'med_times') return createMedAlarms(text);
+    if (kind === 'wifi_qr_pass') return finishWifiQr(text);
   }
 
   // 1) OFFLINE INTENT ENGINE
@@ -579,14 +591,399 @@ async function runAction(a, hit) {
       if (!NAT.isNative()) { reply(nativeOnly('notification reading')); return true; }
       const caps = await NAT.capabilities();
       if (!caps.notifications) {
-        reply('I need notification access first. Opening settings - find FRIDAY and enable it.');
+        reply('I need notification access first. Opening settings - turn FRIDAY on, then ask me again.');
         NAT.openSpecialSetting('notification_listener');
         return true;
       }
-      if (!recentNotifs.length) { reply('Nothing new.'); return true; }
-      const lines = recentNotifs.slice(0, 5)
+      // v7.4.3: read the real shade, not just events seen since app start
+      let items = [];
+      try {
+        const r = await NAT.getActiveNotifications();
+        if (r && r.ok && Array.isArray(r.items)) items = r.items;
+      } catch (e) {}
+      if (!items.length) items = recentNotifs;
+      if (!items.length) { reply('Your notification shade is empty. Nothing to read.'); return true; }
+      const lines = items.slice(0, 5)
         .map(n => `${NAT.friendlyApp(n.pkg)} - ${n.title}: ${n.text}`.slice(0, 120));
-      reply(`${recentNotifs.length} recent:\n` + lines.map(l => '\u2022 ' + l).join('\n'));
+      reply(`${items.length} in your shade:\n` + lines.map(l => '\u2022 ' + l).join('\n'));
+      return true;
+    }
+
+    /* ================= v7.5 TITAN ================= */
+
+    case 'steps': {
+      if (!NAT.isNative()) { reply(nativeOnly('step counting')); return true; }
+      await HEALTH.ensureSteps();
+      const st = await HEALTH.getSteps();
+      if (!st) {
+        reply('Step sensor needs the Physical Activity permission. Say "permissions" or allow it when asked, then try again.');
+        NAT.requestAll();
+        return true;
+      }
+      const goal = HEALTH.stepsGoal();
+      const avg = HEALTH.weeklyAverage(st.days);
+      reply(`👟 **${st.today.toLocaleString()} steps** today (${HEALTH.stepsVerdict(st.today, goal)})`
+        + (avg ? `\nWeekly average: ${avg.toLocaleString()}/day.` : ''));
+      return true;
+    }
+
+    case 'step_goal': {
+      if (!a.goal) { reply('Say it with a number: "steps goal 8000" or "steps goal 10000".'); return true; }
+      const g = HEALTH.setStepsGoal(a.goal);
+      reply(`Step goal set to ${g.toLocaleString()} a day. I'll track your progress with the phone's step sensor.`);
+      return true;
+    }
+
+    case 'health_summary': {
+      if (!NAT.isNative()) { reply(nativeOnly('health summary')); return true; }
+      const st = await HEALTH.getSteps();
+      if (!st) { reply('No health data yet. Walk a little with the phone and ask again.'); return true; }
+      const series = HEALTH.weekSeries(st.days);
+      const bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇'];
+      const max = Math.max(1, ...series.map(x => x.steps));
+      const chart = series.map(x => `${x.day} ${bars[Math.min(6, Math.round(x.steps / max * 6))]} ${x.steps.toLocaleString()}`).join('\n');
+      reply(`**Weekly health**\n${chart}\n\nAverage: ${HEALTH.weeklyAverage(st.days).toLocaleString()} steps/day - goal ${HEALTH.stepsGoal().toLocaleString()}.`);
+      return true;
+    }
+
+    case 'health_sync': {
+      if (!NAT.isNative()) { reply(nativeOnly('Health Connect')); return true; }
+      const st = await NAT.hcStatus();
+      if (!st || !st.ok) { reply('Health Connect is not available in this build. Your own step sensor keeps working regardless.'); return true; }
+      const r = await NAT.hcReadSteps(1);
+      if (!r.ok && r.reason === 'hc_permission') {
+        reply('Opening Health Connect - find FRIDAY and allow Steps. Then say "health connect" again.');
+        NAT.hcOpenSettings();
+        return true;
+      }
+      if (!r.ok) {
+        reply('Health Connect is not set up on this phone. Opening its store page - or just use my built-in step counter, it needs no setup.');
+        NAT.hcOpenSettings();
+        return true;
+      }
+      reply(`Health Connect says ${Number(r.steps || 0).toLocaleString()} steps today. My own sensor tracks you even without it - say "my steps".`);
+      return true;
+    }
+
+    case 'water_plan': {
+      const h = Math.max(1, Math.min(6, a.hours || 2));
+      const times = [];
+      for (let t = 8 * 60; t <= 22 * 60; t += h * 60) {
+        times.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'));
+      }
+      for (const tm of times) AUTO.addAlarm({ time: tm, label: '💧 Drink water', repeat: 'daily' });
+      refresh('alarms');
+      D.notifyPermission();
+      reply(`💧 Water plan armed - every ${h} hour${h === 1 ? '' : 's'} from 8 AM to 10 PM (${times.length} alarms daily). Stay hydrated, boss.`);
+      return true;
+    }
+
+    case 'med_plan': {
+      state.expect = 'med_times';
+      reply('What times? Say like: **medicine 8am 2pm 8pm** and I will set daily alarms.');
+      return true;
+    }
+
+    case 'eye_break': {
+      const label = '👁 Eye break';
+      if (a.on === false) {
+        const gone = AUTO.alarms().filter(al => al.label === label);
+        gone.forEach(al => AUTO.deleteAlarm(al.id));
+        refresh('alarms');
+        reply(`Eye-break alarms off (${gone.length} removed).`);
+        return true;
+      }
+      const times = [];
+      for (let t = 9 * 60; t <= 18 * 60; t += 60) {
+        times.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'));
+      }
+      for (const tm of times) AUTO.addAlarm({ time: tm, label, repeat: 'daily' });
+      refresh('alarms');
+      reply('👁 Eye breaks on - hourly from 9 to 6. 20-20-20 rule: every alarm, look at something 20 feet away for 20 seconds.');
+      return true;
+    }
+
+    case 'focus_mode': {
+      if (a.off) {
+        await HEALTH.stopFocus();
+        reply('Focus mode off. Notifications are back. Well done.');
+        return true;
+      }
+      const mins = a.minutes || 25;
+      await HEALTH.startFocus(mins, () => {
+        addMsg('ai', `⏱ Focus session done (${mins} min). Take a breath - you earned it.`, { proactive: true });
+        V.speak(`Focus session complete. Well done, ${S.getSetting('userName') || 'boss'}.`);
+      });
+      reply(`⏱ **Focus mode: ${mins} minutes.** Do Not Disturb is ON, my announcements are muted. Go.`);
+      return true;
+    }
+
+    case 'screen_time': {
+      if (!NAT.isNative()) { reply(nativeOnly('screen time report')); return true; }
+      const days = a.days || 1;
+      const r = await NAT.getUsageStats(days);
+      if (!r || !r.ok) {
+        reply('I need Usage Access for that. Opening settings - find FRIDAY and allow "Usage access".');
+        NAT.openSpecialSetting('usage_access');
+        return true;
+      }
+      const items = (r.items || []).slice(0, 5);
+      const lines = items.map(i => `\u2022 **${i.label}** - ${Math.floor(i.minutes / 60) ? Math.floor(i.minutes / 60) + 'h ' : ''}${i.minutes % 60}m`).join('\n');
+      const tot = Math.round(r.totalMinutes || 0);
+      reply(`📱 Screen time${days > 1 ? ' (7 days)' : ' today'}: **${Math.floor(tot / 60)}h ${tot % 60}m** total.\n${lines}\n\n${HEALTH.screenTimeVerdict(tot, days)}`);
+      return true;
+    }
+
+    case 'battery_guard': {
+      if (a.kind === 'low') {
+        S.setSetting('batteryWarnLow', a.level || 20);
+        reply(`Battery guard: I'll warn you when the battery drops to ${a.level || 20}%, even in the background.`);
+      } else {
+        S.setSetting('batteryWarnFull', a.on !== false);
+        reply(a.on === false ? 'Full-battery alert off.' : 'I will tell you the moment the battery hits 100%. Unplug early, battery stays young.');
+      }
+      HEALTH.startBatteryGuard(msg => V.speak(msg));
+      return true;
+    }
+
+    case 'find_phone': {
+      if (!NAT.isNative()) { reply(nativeOnly('find my phone')); return true; }
+      if (a.on === false) {
+        await NAT.phoneFinder(false);
+        reply('Alarm stopped. Found it, good.');
+        return true;
+      }
+      const r = await NAT.phoneFinder(true);
+      reply(r.ok ? '🔊 Ringing at FULL VOLUME. Say "stop ringing" when you have it.' : 'Could not ring this phone right now.');
+      return true;
+    }
+
+    case 'whatsapp_schedule': {
+      if (!a.name || !a.msg) { reply('Say it like: "schedule whatsapp to mummy at 9pm saying happy birthday".'); return true; }
+      if (!a.time) { reply('Tell me when - "tomorrow 9am", "kal 8 baje", "at 9pm".'); return true; }
+      const item = S.addItem(KEYS.REMINDERS, {
+        text: `💬 WhatsApp ${a.name}: ${a.msg}`,
+        due: a.time, done: false,
+        wa: { name: a.name, msg: a.msg }
+      });
+      scheduleReminder(item);
+      refresh('reminders');
+      reply(`Scheduled - at ${humanTime(new Date(a.time))} I'll open WhatsApp and send "${a.msg}" to ${a.name}. (Works best when the phone is unlocked - I press the send button for you.)`);
+      return true;
+    }
+
+    case 'quick_translate': {
+      const r = await API.quickTranslate(a.text, a.lang);
+      if (!r.ok) {
+        reply('Opening the translator panel instead.');
+        U.openPanel('sub-translate');
+        prefillPanel('sub-translate', a.text);
+        return true;
+      }
+      reply(`🌐 "${a.text}" → **${r.text}** (${a.lang})`);
+      return true;
+    }
+
+    case 'wifi_qr': {
+      if (!NAT.isNative()) { reply(nativeOnly('wifi QR')); return true; }
+      const w = await NAT.wifiAudit();
+      if (!w || !w.ok || !w.ssid) { reply('You are not on WiFi right now. Connect first, then ask me.'); return true; }
+      state.wifiQr = { ssid: w.ssid, enc: w.security || 'WPA' };
+      state.expect = 'wifi_qr_pass';
+      reply(`WiFi **${w.ssid}** found. TYPE its password and I'll make the QR (I use it once and forget it).`);
+      return true;
+    }
+
+    case 'summarize_link': {
+      if (!a.url) { reply('Give me the full link to summarize.'); return true; }
+      thinking(true);
+      try {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 14000);
+        const r = await fetch('https://r.jina.ai/' + a.url, { signal: ctrl.signal });
+        clearTimeout(to);
+        const txt = (await r.text()).slice(0, 4500);
+        if (!txt || txt.length < 80) throw new Error('empty');
+        if (AI.hasGroq()) {
+          const g = await AI.callGroq([
+            { role: 'system', content: 'Summarize in 5 short bullet points, plain words, no fluff.' },
+            { role: 'user', content: txt }
+          ], { maxTokens: 300 });
+          reply('📝 **Summary:**\n' + String(g || '').trim());
+        } else {
+          const first = txt.split(/(?<=[.!?])\s+/).slice(0, 4).join(' ');
+          reply('📝 **Local summary:**\n' + first.slice(0, 700) + '\n\n(Add a free Groq key in Settings for smarter summaries.)');
+        }
+      } catch (e) {
+        reply('Could not read that link (blocked or offline). Open it once in the browser and try again.');
+      }
+      thinking(false);
+      return true;
+    }
+
+    case 'pocket_guard': {
+      if (!NAT.isNative()) { reply(nativeOnly('pocket guard')); return true; }
+      if (a.on === false) {
+        await HEALTH.stopPocketAlarm();
+        reply('Pocket guard disarmed.');
+        return true;
+      }
+      const okArm = await HEALTH.setPocketGuard(true);
+      reply(okArm
+        ? '🛡 Pocket guard ARMED. If the phone moves for more than a second, a loud alarm fires - works with the screen off. Say "pocket mode off" when you pick it up.'
+        : 'This phone has no motion sensor available for pocket guard.');
+      return true;
+    }
+
+    case 'backup_data': {
+      try {
+        D.download(`friday-backup-${Date.now()}.json`, JSON.stringify(S.exportAll(), null, 2));
+        reply('Backup downloaded - reminders, memory, notes, settings (API keys are never exported, on purpose).');
+      } catch (e) {
+        D.copy(JSON.stringify(S.exportAll()));
+        reply('Backup copied to clipboard - paste it anywhere to keep it safe.');
+      }
+      return true;
+    }
+
+    case 'voice_note': {
+      reply('Go ahead - I am listening for your note.');
+      state.expect = 'voice_note';
+      setTimeout(() => { if (!state.listening) V.listen(); }, 700);
+      return true;
+    }
+
+    case 'hindi_ui': {
+      S.setSetting('hindiUI', a.on);
+      I18N.applyHindiUI();
+      reply(a.on
+        ? 'Hindi UI on - screens, buttons aur boot ab Hinglish mein dikhenge. Voice replies stay the same.'
+        : 'English UI on. Everything back to English.');
+      return true;
+    }
+
+    /* ================= v7.6 APEX ================= */
+
+    case 'screen_read': {
+      if (!NAT.isNative()) { reply(nativeOnly('screen reading')); return true; }
+      const r = await NAT.readScreenText();
+      if (!r || !r.ok) {
+        reply('I need the FRIDAY Control accessibility service for this. Opening settings - turn it on.');
+        NAT.openSpecialSetting('accessibility');
+        return true;
+      }
+      const text = (r.text || '').trim();
+      if (!text) { reply('The screen reads empty - this app may block screen reading.'); return true; }
+      if (a.mode === 'translate') {
+        const tr = await API.quickTranslate(text.slice(0, 450),
+          /[ऀ-ॿ]/.test(text) ? 'english' : 'hindi');
+        reply(tr.ok ? '🌐 Screen, translated:\n' + tr.text : 'Translation needs internet. Screen stays as-is.');
+        return true;
+      }
+      if (a.mode === 'summarize' && AI.hasGroq()) {
+        const g = await AI.callGroq([
+          { role: 'system', content: 'Summarize this phone screen content in 3 short useful lines.' },
+          { role: 'user', content: text.slice(0, 3500) }
+        ], { maxTokens: 220 });
+        reply('📱 Screen summary:\n' + String(g || '').trim());
+        return true;
+      }
+      const clean = text.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 14).join('. ').slice(0, 700);
+      reply('📱 On your screen:\n' + clean);
+      return true;
+    }
+
+    case 'eyes': {
+      reply('Looking through the camera... one second.');
+      thinking(true);
+      const r = await VIS.lookAround(a.question, () => {});
+      thinking(false);
+      if (!r.ok) {
+        reply(r.reason === 'camera_blocked'
+          ? 'Camera is blocked for me. Settings > Apps > FRIDAY OS > Permissions > Camera > Allow, then try again.'
+          : 'The camera is not available right now.');
+        return true;
+      }
+      reply('📷 ' + r.text);
+      return true;
+    }
+
+    case 'deep_ask': {
+      const q = a.query || '';
+      if (!q) { reply('Research what? Try: "latest news on ISRO" or "research electric cars India".'); return true; }
+      thinking(true);
+      const data = await API.deepResearch(q);
+      let answer = '';
+      if (AI.hasGroq() && (data.summary || data.headlines.length)) {
+        const g = await AI.callGroq([
+          { role: 'system', content: 'Answer using ONLY the given material, in 4-6 short lines, plain words, no made-up facts.' },
+          { role: 'user', content: 'Question: ' + q + '\n\nMaterial:\n' +
+              (data.summary || '') + '\n' + data.headlines.join('\n') }
+        ], { maxTokens: 350 });
+        answer = String(g || '').trim();
+      } else if (data.summary) {
+        answer = data.summary.split(/(?<=[.!?])\s+/).slice(0, 3).join(' ');
+        if (data.headlines.length) answer += '\n\nLatest:\n' + data.headlines.slice(0, 3).map(h => '\u2022 ' + h).join('\n');
+      }
+      thinking(false);
+      if (!answer) { reply('Nothing solid found on that. Try different words or check internet.'); return true; }
+      addMsg('ai', '🔎 **' + q + '**\n' + answer, data.sources[0] ? { link: data.sources[0].url } : {});
+      V.speak(answer.slice(0, 320));
+      return true;
+    }
+
+    case 'yt_play': {
+      if (!a.query) { reply('Play what? "play kesariya on youtube".'); return true; }
+      if (NAT.isNative()) {
+        await NAT.openUrl('https://www.youtube.com/results?search_query=' + encodeURIComponent(a.query));
+        reply(`🎵 YouTube is open with "${a.query}" - tap the first video. (Auto-tapping titles is unreliable, you pick the good one.)`);
+      } else {
+        reply(nativeOnly('YouTube play'));
+      }
+      return true;
+    }
+
+    case 'uni_search': {
+      const q = (a.query || '').toLowerCase();
+      if (!q) { reply('Search what? "find everything about ramesh".'); return true; }
+      const inS = v => String(v || '').toLowerCase().includes(q);
+      const hits = [];
+      S.getList(KEYS.CONTACTS).filter(c => inS(c.name) || inS(c.phone)).slice(0, 3)
+        .forEach(c => hits.push('👤 Contact: **' + c.name + '** ' + (c.phone || '')));
+      S.getList(KEYS.NOTES).filter(n => inS(n.text)).slice(0, 3)
+        .forEach(n => hits.push('📝 Note: ' + n.text.slice(0, 60)));
+      S.getList(KEYS.REMINDERS).filter(r => !r.done && inS(r.text)).slice(0, 3)
+        .forEach(r => hits.push('⏰ Reminder: ' + r.text));
+      S.getList(KEYS.TASKS).filter(t => !t.done && inS(t.text)).slice(0, 3)
+        .forEach(t => hits.push('✅ Task: ' + t.text));
+      recentNotifs.filter(n => inS(n.title) || inS(n.text)).slice(0, 3)
+        .forEach(n => hits.push('🔔 ' + (n.title || '') + ': ' + (n.text || '').slice(0, 50)));
+      if (NAT.isNative() && NAT.getRecentSMS) {
+        try {
+          const r = await NAT.getRecentSMS(100);
+          if (r && r.ok && r.messages) {
+            r.messages.filter(m => inS(m.body) || inS(m.from)).slice(0, 3)
+              .forEach(m => hits.push('💬 SMS from ' + m.from + ': ' + m.body.slice(0, 60)));
+          }
+        } catch (e) {}
+      }
+      reply(hits.length
+        ? `**Everything I have on "${a.query}":**\n` + hits.join('\n')
+        : `Nothing found about "${a.query}" - checked contacts, notes, reminders, tasks, notifications${NAT.isNative() ? ', SMS' : ''}.`);
+      return true;
+    }
+
+    case 'quiz': {
+      await startQuiz(a.topic || 'general knowledge');
+      return true;
+    }
+
+    case 'image_make': {
+      const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(a.prompt)
+        + '?width=768&height=768&nologo=true';
+      D.copy(url);
+      addMsg('ai', `🎨 **${a.prompt}**\n${url}\n\n(link copied - open to view, long-press to save)`, { link: url });
+      V.speak(`Image of ${a.prompt.slice(0, 60)} is ready, boss. Link is in the chat and copied.`);
       return true;
     }
 
@@ -852,6 +1249,11 @@ async function doBriefing() {
   bits.push(rem.length
     ? `You have ${rem.length} reminder${rem.length === 1 ? '' : 's'}. Next: ${rem[0].text}, ${humanTime(new Date(rem[0].due))}.`
     : 'No reminders scheduled.');
+
+  try {
+    const sb = await HEALTH.stepsBrief();
+    if (sb) bits.push(sb);
+  } catch (_) {}
 
   const tasks = S.getList(KEYS.TASKS).filter(t => !t.done);
   if (tasks.length) bits.push(`${tasks.length} open task${tasks.length === 1 ? '' : 's'}.`);
@@ -1450,6 +1852,39 @@ async function scanSmsForPhishing() {
   return true;
 }
 
+/* ---- v7.5 helpers ---- */
+/* "medicine 8am 2pm 8pm" -> up-to-5 daily alarms */
+function createMedAlarms(text) {
+  const times = [];
+  const rx = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/gi;
+  let m;
+  while ((m = rx.exec(text)) && times.length < 5) {
+    let hh = parseInt(m[1], 10) % 12;
+    if (m[3].toLowerCase() === 'pm') hh += 12;
+    const mm = String(m[2] || '00').padStart(2, '0');
+    times.push(String(hh).padStart(2, '0') + ':' + mm);
+  }
+  if (!times.length) { reply('No times heard - say like: "medicine 8am 2pm 8pm".'); return true; }
+  for (const tm of times) AUTO.addAlarm({ time: tm, label: '💊 Medicine time', repeat: 'daily' });
+  refresh('alarms');
+  D.notifyPermission();
+  reply(`💊 Medicine alarms set daily: ${times.join(', ')}. Health first, boss.`);
+  return true;
+}
+
+/* finish the wifi QR after the user TYPES the password (used once, then forgotten) */
+function finishWifiQr(pass) {
+  const meta = state.wifiQr;
+  state.wifiQr = null;
+  if (!meta) return true;
+  const raw = `WIFI:T:${meta.enc === 'open' ? 'nopass' : 'WPA'};S:${meta.ssid};P:${pass};;`;
+  const url = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(raw);
+  state.wifiQr = null;
+  D.copy(url);
+  reply(`📶 QR for **${meta.ssid}** is ready:\n${url}\n\nLink copied - open it in any browser and let people scan. Password used once and forgotten; nothing was stored.`);
+  return true;
+}
+
 async function runNetRecon() {
   if (!NAT.isNative()) { reply(nativeOnly('network recon')); return true; }
   addMsg('ai', '🛰 Recon running — auditing WiFi security and sweeping your network (~15 seconds)…');
@@ -1513,6 +1948,16 @@ async function initNative() {
   nativeCaps = await NAT.capabilities();
   if (!nativeCaps.native) return;
 
+  // v7.4.3: ask for the mic (etc.) ONCE, so the first mic tap never errors
+  try {
+    window.__stage = 'native:ask-permissions';
+    if (!S.getSetting('permsAsked')) {
+      const mic = await NAT.checkPermission('android.permission.RECORD_AUDIO');
+      if (!mic || !mic.granted) await NAT.requestAll();
+      S.setSetting('permsAsked', true);
+    }
+  } catch (e) { /* system dialog may not show yet - first mic tap asks again */ }
+
   // keep FRIDAY alive in the background
   if (S.getSetting('backgroundService') !== false) {
     window.__stage = 'native:foreground-service';
@@ -1542,6 +1987,14 @@ async function initNative() {
       NAT.onNotification(handleNotification);
     }
   } catch (e) { /* listener not enabled - not fatal */ }
+  // ---- v7.5 health wiring (all optional, all degrade silently) ----
+  try {
+    if (S.getSetting('stepsAuto') !== false) HEALTH.ensureSteps();
+    HEALTH.startBatteryGuard(msg => { if (!state.speaking) V.speak(msg); });
+    HEALTH.onPocketAlarm(() => {
+      addMsg('ai', '🚨 **Pocket guard triggered!** Your phone is moving. Say "pocket mode off" to disarm.', { proactive: true });
+    });
+  } catch (e) {}
   window.__stage = 'native:done';
   } catch (e) {
     window.__stage = 'native:failed';
@@ -1596,6 +2049,7 @@ function syncWidget() {
 function handleNotification(n) {
   recentNotifs.unshift(n);
   recentNotifs = recentNotifs.slice(0, 40);
+  if (HEALTH.inFocus()) return;   // focus mode: collect silently, announce nothing
 
   const allow = S.getSetting('announceApps') || NAT.ANNOUNCE_DEFAULTS;
   if (!allow.includes(n.pkg)) return;
@@ -1828,7 +2282,22 @@ function scheduleReminder(item) {
   const delay = item.due - Date.now();
   if (delay < 0 || delay > 2 ** 31 - 1) return;
   clearTimeout(timers.get(item.id));
-  timers.set(item.id, setTimeout(() => {
+  timers.set(item.id, setTimeout(async () => {
+    if (item.wa) {
+      try {
+        const c = await NAT.findContact(item.wa.name);
+        const num = c && (c.phone || c.number);
+        if (num) {
+          const r = await NAT.whatsappSend(num, item.wa.msg, true);
+          D.notify('FRIDAY', (r && r.ok ? 'WhatsApp sent to ' : 'Could not send WhatsApp to ') + item.wa.name, item.id);
+        } else {
+          D.notify('FRIDAY', 'No number saved for ' + item.wa.name, item.id);
+        }
+      } catch (e) { D.notify('FRIDAY', 'Scheduled WhatsApp failed', item.id); }
+      S.updateItem(KEYS.REMINDERS, item.id, { done: true });
+      refresh('reminders');
+      return;
+    }
     D.buzz();
     D.notify('FRIDAY — Reminder', item.text, item.id);
     U.toast(item.text, '⏰', 6000);
@@ -2301,6 +2770,8 @@ function bindEvents() {
   bind('#bootStart', 'bootStart', 'change', 'checked');
   bind('#announceNotifications', 'announceNotifications', 'change', 'checked');
   bind('#bubbleEnabled', 'bubbleEnabled', 'change', 'checked');
+  bind('#hindiUI', 'hindiUI', 'change', 'checked');
+  bind('#batteryWarnFull', 'batteryWarnFull', 'change', 'checked');
   bind('#waCC', 'waCountryCode', 'input');
   bind('#bargeIn', 'bargeIn', 'change', 'checked');
   bind('#streamingTts', 'streamingTts', 'change', 'checked');
@@ -2379,6 +2850,7 @@ function onSettingChange(key, v) {
   if (key === 'backgroundService' && NAT.isNative()) v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
   if (key === 'bootStart' && NAT.isNative()) NAT.setBootStart(v);
   if (key === 'bubbleEnabled' && NAT.isNative()) runAction({ type: 'bubble', on: v }, {});
+  if (key === 'hindiUI') I18N.applyHindiUI();
   if (key === 'personality') { const p = AI.persona(); U.toast(`Now running as ${p.name}`, '🤖'); }
 }
 
@@ -2402,6 +2874,8 @@ function syncSettingsUI() {
   set('#bootStart', S.getSetting('bootStart'), 'checked');
   set('#announceNotifications', S.getSetting('announceNotifications'), 'checked');
   set('#bubbleEnabled', S.getSetting('bubbleEnabled'), 'checked');
+  set('#hindiUI', S.getSetting('hindiUI'), 'checked');
+  set('#batteryWarnFull', S.getSetting('batteryWarnFull'), 'checked');
   set('#waCC', S.getSetting('waCountryCode') || '91');
   set('#bargeIn', S.getSetting('bargeIn') !== false, 'checked');
   set('#streamingTts', S.getSetting('streamingTts') !== false, 'checked');
@@ -2425,3 +2899,49 @@ else boot();
 
 // expose for debugging
 window.FRIDAY = { state, handleInput, S, API, AI };
+
+/* ================= v7.6 QUIZ ENGINE ================= */
+async function startQuiz(topic) {
+  if (!AI.hasGroq()) {
+    reply('Quiz master needs the cloud brain - paste the free Groq key in Settings once, then ask again.');
+    return;
+  }
+  thinking(true);
+  let qs = null;
+  try {
+    const out = await AI.callGroq([
+      { role: 'system', content: 'You write school quizzes. Reply ONLY a JSON array of exactly 5 objects like [{"q":"question","a":"answer"}]. Short factual questions, one-line answers, mixed difficulty.' },
+      { role: 'user', content: 'Quiz topic: ' + topic }
+    ], { maxTokens: 700 });
+    const m = String(out || '').match(/\[[\s\S]*\]/);
+    qs = m ? JSON.parse(m[0]) : null;
+  } catch (e) {}
+  thinking(false);
+  if (!qs || !qs.length) { reply('Could not build a quiz on that. Try "quiz me on photosynthesis" or "quiz me on Indian history".'); return; }
+  state.quiz = { topic, qs: qs.slice(0, 5), i: 0, score: 0 };
+  reply(`📝 **Quiz: ${topic}** - 5 questions, answer in one line.\\n\\n**Q1.** ${state.quiz.qs[0].q}`);
+  state.expect = 'quiz_answer';
+}
+
+function quizAnswer(text) {
+  const qz = state.quiz;
+  if (!qz) return true;
+  const cur = qz.qs[qz.i];
+  const expected = String(cur.a || '').toLowerCase();
+  const got = text.toLowerCase();
+  const key = expected.split(/[,;(]/)[0].trim();
+  const words = key.split(/\s+/).filter(w => w.length > 3);
+  const hits = words.filter(w => got.includes(w)).length;
+  const good = (key && got.includes(key)) || (words.length && hits >= Math.max(1, Math.ceil(words.length * 0.6)));
+  if (good) qz.score++;
+  qz.i++;
+  if (qz.i >= qz.qs.length) {
+    state.quiz = null;
+    reply(`🏁 Quiz finished! Score: **${qz.score}/${qz.qs.length}**` +
+      (qz.score === qz.qs.length ? ' - PERFECT. Subject mastered, boss.' :
+       qz.score >= 3 ? ' - solid. One more round?' : ' - keep practicing, you will get there.'));
+    return true;
+  }
+  reply(`${good ? '✅ Correct!' : '❌ Answer: **' + cur.a + '**'}\\n\\n**Q${qz.i + 1}.** ${qz.qs[qz.i].q}\\n\\n(Score: ${qz.score})`);
+  return true;
+}
