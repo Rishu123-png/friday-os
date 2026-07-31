@@ -287,3 +287,16 @@ test('every web module parses as a real ES module', () => {
     assert.ok(mod, f + ' must parse');
   }
 });
+
+test('read_notifications catches real phrasings', () => {
+  const hits = ['see notification', 'see notifications', 'read notification',
+    'check my notifications', 'show notifications', 'any notifications',
+    'what notifications came', 'koi notification aayi', 'notifications padho',
+    'meri notifications dikhao'.replace('meri ','my ')];
+  for (const q of hits) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'read_notifications', 'missed: ' + q + ' -> ' + (r && r.intent));
+  }
+  const nav = resolve('open notifications');
+  assert.ok(nav && nav.intent === 'nav_gesture', 'open notifications must stay a nav gesture');
+});
