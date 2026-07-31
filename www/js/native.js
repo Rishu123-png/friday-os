@@ -21,6 +21,12 @@ function plugin() {
   return c && c.Plugins ? c.Plugins.FridayNative : null;
 }
 
+/** Named-plugin access (FridaySensors / FridayHealthConnect / ...). */
+function pluginNamed(name) {
+  const c = CAP();
+  return c && c.Plugins ? c.Plugins[name] || null : null;
+}
+
 const WEB = (reason = 'web') => ({ ok: false, reason });
 
 async function call(method, args = {}) {
@@ -155,6 +161,34 @@ export async function startNotificationListener() {
 }
 export async function getActiveNotifications() {
   return call('getActiveNotifications');
+}
+
+export async function getUsageStats(days = 1) {
+  return call('getUsageStats', { days });
+}
+export async function phoneFinder(on = true) {
+  return call('phoneFinder', { enabled: on });
+}
+export async function hcStatus() {
+  try {
+    const p = pluginNamed('FridayHealthConnect');
+    if (!p) return { ok: false, reason: 'not_native' };
+    return await p.status();
+  } catch (e) { return { ok: false, reason: e.message }; }
+}
+export async function hcOpenSettings() {
+  try {
+    const p = pluginNamed('FridayHealthConnect');
+    if (!p) return { ok: false, reason: 'not_native' };
+    return await p.openSettings();
+  } catch (e) { return { ok: false, reason: e.message }; }
+}
+export async function hcReadSteps(days = 1) {
+  try {
+    const p = pluginNamed('FridayHealthConnect');
+    if (!p) return { ok: false, reason: 'not_native' };
+    return await p.readSteps({ days });
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 /* Apps worth announcing — everything else stays silent */
