@@ -1,3 +1,4 @@
+
 /* FRIDAY OS — unit tests. Run: npm test (node --test)
    Pure-function coverage for the offline engine: NLP, intents, alarms,
    memory extraction, templates. No DOM, no network. */
@@ -360,4 +361,44 @@ test('pay reminders (no banking!) work + land in reminders list', () => {
   assert.ok(/Pay ramesh/.test(p.action.item.text) && p.action.item.text.includes('500'));
   const l = resolve('my payments');
   assert.ok(l && l.intent === 'pay_list');
+});
+
+/* ================= v7.6 APEX ================= */
+
+test('hindi time brain: kal / parso / agle-somvaar / baje', () => {
+  const kal5 = parseTime('kal 5 baje yaad dilana');
+  assert.ok(kal5, 'kal 5 baje');
+  assert.equal(kal5.date.getHours(), 17);
+  assert.ok(kal5.date.getDate() !== new Date().getDate(), 'kal must be tomorrow');
+  const parso = parseTime('parso meeting');
+  assert.ok(parso && Math.round((parso.date - Date.now()) / 86400000) >= 1);
+  const somvaar = parseTime('agle somvaar ko 10 baje');
+  assert.ok(somvaar && somvaar.date.getDay() === 1 && somvaar.date.getHours() === 10);
+  const raat = parseTime('raat 9 baje call karo');
+  assert.ok(raat && raat.date.getHours() === 21);
+  const shaam = parseTime('shaam 6 baje pani');
+  assert.ok(shaam && shaam.date.getHours() === 18);
+});
+
+test('apex intents route correctly', () => {
+  const cases = [
+    ["what's on my screen", 'screen_read'], ['read this screen', 'screen_read'],
+    ['translate the screen', 'screen_read'], ['what do you see', 'eyes'],
+    ['ye kya hai', 'eyes'], ['research electric cars india', 'deep_ask'],
+    ['latest news on ISRO', 'deep_ask'], ['play kesariya on youtube', 'yt_play'],
+    ['youtube pe bella ciao chalao', 'yt_play'],
+    ['find everything about ramesh', 'uni_search'],
+    ['quiz me on photosynthesis', 'quiz'],
+    ['make an image of a robot dog', 'image_make']
+  ];
+  for (const [q, id] of cases) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === id, 'missed: ' + q + ' -> ' + (r && r.intent));
+  }
+  const sr = resolve('translate the screen');
+  assert.equal(sr.action.mode, 'translate');
+  const yt = resolve('play kesariya on youtube');
+  assert.ok(yt.action.query.includes('kesariya'));
+  const im = resolve('make an image of a robot dog');
+  assert.ok(im.action.prompt.includes('robot dog'));
 });
