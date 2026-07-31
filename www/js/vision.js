@@ -91,3 +91,52 @@ export function toImage(dataUrl) {
     img.src = dataUrl;
   });
 }
+
+/* ---------- v7.6: camera eyes ----------+ */
+import { hasGroq, callGroqVision } from './ai.js';
+
+/** Grab one frame from the rear camera -> jpeg dataURL (1280px wide). */
+export async function snapPhoto() {
+  if (!navigator.mediaDevices?.getUserMedia) return null;
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false
+    });
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    await new Promise(r => setTimeout(r, 700));   // let exposure settle
+    const w = video.videoWidth || 1280, h = video.videoHeight || 720;
+    const scale = Math.min(1, 1280 / w);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } catch (e) { return null; }
+  finally { try { stream && stream.getTracks().forEach(t => t.stop()); } catch (_) {} }
+}
+
+/** Look around and answer: Groq vision when keyed, on-device objects otherwise. */
+export async function lookAround(question, onProgress) {
+  const photo = await snapPhoto();
+  if (!photo) return { ok: false, reason: 'camera_blocked' };
+  if (hasGroq()) {
+    const r = await callGroqVision(photo, question);
+    if (r.ok) return { ok: true, text: r.text, via: 'cloud' };
+  }
+  const img = toImage(photo);
+  await new Promise(r => { img.onload = r; img.onerror = r; });
+  const objects = await detectObjects(img, onProgress).catch(() => []);
+  const scene = describeScene(objects);
+  return {
+    ok: true,
+    via: 'local',
+    text: (objects && objects.length)
+      ? 'I can see ' + scene + '. (Add a free Groq key in Settings and I can answer detailed questions about the scene.)'
+      : 'Nothing clear detected. (Add a free Groq key in Settings for real scene understanding.)'
+  };
+}
