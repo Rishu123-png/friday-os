@@ -2,7 +2,11 @@ package com.rishu.fridayos;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AppOpsManager;
+import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.app.PendingIntent;
 import android.content.SharedPreferences;
 import android.bluetooth.BluetoothAdapter;
@@ -103,6 +107,8 @@ public class FridayNative extends Plugin {
         };
         List<String> missing = new ArrayList<>();
         for (String p : perms) if (!granted(p)) missing.add(p);
+        if (Build.VERSION.SDK_INT >= 29 && !granted(Manifest.permission.ACTIVITY_RECOGNITION))
+            missing.add(Manifest.permission.ACTIVITY_RECOGNITION);
         if (!missing.isEmpty()) {
             getActivity().requestPermissions(missing.toArray(new String[0]), 9911);
         }
@@ -146,6 +152,13 @@ public class FridayNative extends Plugin {
                 }
                 case "write_settings":
                     has = Settings.System.canWrite(ctx); break;
+                case "usage_access": {
+                    AppOpsManager aom = (AppOpsManager) ctx.getSystemService(Context.APP_OPS_SERVICE);
+                    int mode = aom.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                            android.os.Process.myUid(), ctx.getPackageName());
+                    has = (mode == AppOpsManager.MODE_ALLOWED);
+                    break;
+                }
             }
         } catch (Exception ignored) {}
         JSObject r = ok(); r.put("granted", has); call.resolve(r);
@@ -175,6 +188,8 @@ public class FridayNative extends Plugin {
                 case "write_settings":
                     i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
                             Uri.parse("package:" + ctx.getPackageName())); break;
+                case "usage_access":
+                    i = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS); break;
             }
             if (i == null) { call.resolve(fail("unknown")); return; }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -320,6 +335,154 @@ public class FridayNative extends Plugin {
         o.put("text", text == null ? "" : text);
         o.put("time", System.currentTimeMillis());
         notifyListeners("notificationPosted", o);
+    }
+
+    /* Read the notification SHADE on demand - not just events that arrived
+       while the app was running. "See my notifications" works right after
+       the app opens. Requires the listener to be enabled. */
+    @PluginMethod
+    public void getActiveNotifications(PluginCall call) {
+        try {
+            if (!FridayNotificationService.isEnabled()) { call.resolve(fail("listener_off")); return; }
+            android.service.notification.StatusBarNotification[] all = FridayNotificationService.active();
+            java.util.Arrays.sort(all, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
+            JSArray out = new JSArray();
+            int n = 0, ongoingKept = 0;
+            for (android.service.notification.StatusBarNotification sbn : all) {
+                if (sbn == null) continue;
+                String pkg = sbn.getPackageName();
+                if (pkg == null || pkg.equals(getContext().getPackageName())) continue;
+                Notification notif = sbn.getNotification();
+                if (notif == null) continue;
+                if ((notif.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+                android.os.Bundle ex = notif.extras;
+                if (ex == null) continue;
+                CharSequence t = ex.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence x = ex.getCharSequence(Notification.EXTRA_TEXT);
+                String title = t == null ? "" : t.toString();
+                String text  = x == null ? "" : x.toString();
+                if (title.isEmpty() && text.isEmpty()) continue;
+                boolean ongoing = (notif.flags & Notification.FLAG_ONGOING_EVENT) != 0;
+                if (ongoing && ongoingKept++ >= 2) continue;   // mostly silent junk - keep max 2
+                JSObject o = new JSObject();
+                o.put("pkg", pkg);
+                o.put("title", title);
+                o.put("text", text);
+                o.put("when", sbn.getPostTime());
+                o.put("ongoing", ongoing);
+                out.put(o);
+                if (++n >= 8) break;
+            }
+            JSObject r = ok(); r.put("items", out); r.put("count", out.length());
+            call.resolve(r);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /* ============ SCREEN EYES (v7.6) ============ */
+    @PluginMethod
+    public void readScreenText(PluginCall call) {
+        String txt = FridayAccessibility.dumpScreenText(4000);
+        if (txt == null) { call.resolve(fail("accessibility_off")); return; }
+        JSObject r = ok();
+        r.put("text", txt);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String url = call.getString("url", "");
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(ok());
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /* ============ SCREEN TIME (usage stats) ============ */
+    /** How much you used the phone: top apps + total minutes for the last N days.
+        Requires the Usage Access special permission. */
+    @PluginMethod
+    public void getUsageStats(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            AppOpsManager aom = (AppOpsManager) ctx.getSystemService(Context.APP_OPS_SERVICE);
+            int mode = aom.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(), ctx.getPackageName());
+            if (mode != AppOpsManager.MODE_ALLOWED) { call.resolve(fail("usage_access_off")); return; }
+
+            int days = Math.max(1, call.getInt("days", 1));
+            long end = System.currentTimeMillis();
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            cal.set(java.util.Calendar.MINUTE, 0);
+            cal.set(java.util.Calendar.SECOND, 0);
+            cal.add(java.util.Calendar.DAY_OF_YEAR, -(days - 1));
+            long begin = cal.getTimeInMillis();
+
+            UsageStatsManager usm = (UsageStatsManager) ctx.getSystemService(Context.USAGE_STATS_SERVICE);
+            java.util.Map<String, UsageStats> stats = usm.queryAndAggregateUsageStats(begin, end);
+            if (stats == null) stats = new java.util.HashMap<>();
+
+            java.util.List<UsageStats> list = new ArrayList<>(stats.values());
+            list.sort((a, b) -> Long.compare(b.getTotalTimeInForeground(), a.getTotalTimeInForeground()));
+
+            PackageManager pm = ctx.getPackageManager();
+            JSArray items = new JSArray();
+            long totalMs = 0;
+            int n = 0;
+            for (UsageStats u : list) {
+                long fg = u.getTotalTimeInForeground();
+                if (fg < 60000) continue;               // under a minute is noise
+                totalMs += fg;
+                if (n < 8) {
+                    String pkg = u.getPackageName();
+                    String label = pkg;
+                    try { label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))); }
+                    catch (Exception ignored) {}
+                    JSObject o = new JSObject();
+                    o.put("pkg", pkg);
+                    o.put("label", label);
+                    o.put("minutes", fg / 60000);
+                    items.put(o);
+                    n++;
+                }
+            }
+            JSObject r = ok();
+            r.put("items", items);
+            r.put("totalMinutes", totalMs / 60000);
+            r.put("days", days);
+            call.resolve(r);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /* ============ FIND MY PHONE ============ */
+    private static android.media.Ringtone finderRing = null;
+
+    @PluginMethod
+    public void phoneFinder(PluginCall call) {
+        boolean on = call.getBoolean("enabled", true);
+        try {
+            Context ctx = getContext();
+            if (!on) {
+                try { if (finderRing != null && finderRing.isPlaying()) finderRing.stop(); } catch (Throwable ignored) {}
+                finderRing = null;
+                call.resolve(ok());
+                return;
+            }
+            AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                int max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM);
+                am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0);
+            }
+            try { if (finderRing != null && finderRing.isPlaying()) { call.resolve(ok()); return; } } catch (Throwable ignored) {}
+            finderRing = android.media.RingtoneManager.getRingtone(ctx,
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM));
+            if (finderRing == null) { call.resolve(fail("no_ringtone")); return; }
+            finderRing.setStreamType(AudioManager.STREAM_ALARM);
+            finderRing.play();
+            call.resolve(ok());
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
     }
 
     /* ============ FOREGROUND SERVICE ============ */
@@ -530,6 +693,17 @@ public class FridayNative extends Plugin {
             BatteryManager bm = (BatteryManager) getContext().getSystemService(Context.BATTERY_SERVICE);
             JSObject r = ok();
             r.put("level", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+            boolean charging = false;
+            try {
+                android.content.IntentFilter f = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+                Intent bs = getContext().registerReceiver(null, f);
+                if (bs != null) {
+                    int st = bs.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                    charging = st == BatteryManager.BATTERY_STATUS_CHARGING
+                            || st == BatteryManager.BATTERY_STATUS_FULL;
+                }
+            } catch (Throwable ignored) {}
+            r.put("charging", charging);
             call.resolve(r);
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
