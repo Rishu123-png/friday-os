@@ -25,6 +25,7 @@ public class FridayNotificationService extends NotificationListenerService {
     private static long lastEmit = 0;
     private static String lastKey = "";
     private static boolean connected = false;
+    private static FridayNotificationService instance;
 
     /* ---- reply-target registry: package -> what's needed to answer ---- */
     private static final Map<String, ReplyTarget> REPLIES = new HashMap<>();
@@ -39,12 +40,25 @@ public class FridayNotificationService extends NotificationListenerService {
     public static void setPlugin(FridayNative p) { plugin = p; }
 
     @Override
-    public void onListenerConnected() { connected = true; }
+    public void onListenerConnected() { connected = true; instance = this; }
 
     @Override
-    public void onListenerDisconnected() { connected = false; }
+    public void onListenerDisconnected() { connected = false; instance = null; }
 
     public static boolean isEnabled() { return connected; }
+
+    /** Snapshot of what is sitting in the notification shade RIGHT NOW.
+     *  Safe to call anytime - empty array when the listener is off. */
+    public static StatusBarNotification[] active() {
+        try {
+            FridayNotificationService s = instance;
+            if (s == null) return new StatusBarNotification[0];
+            StatusBarNotification[] a = s.getActiveNotifications();
+            return a == null ? new StatusBarNotification[0] : a;
+        } catch (Throwable t) {
+            return new StatusBarNotification[0];
+        }
+    }
 
     /** 1 = sent, 2 = reply action refused/expired, 0 = nothing replyable found */
     public static int reply(Context ctx, String app, String text) {
