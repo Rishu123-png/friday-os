@@ -265,3 +265,36 @@ export function offlineReply(text, context = {}) {
     `I hear you. Offline mode handles tasks and commands well. Say "help" to see what I can do right now.`
   ]);
 }
+
+/* ---------- v7.6: vision Q&A (Groq multimodal, llama-4-scout) ---------- */
+const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+/** Ask about an image: (dataUrl or base64, question) -> {ok, text} */
+export async function callGroqVision(base64Image, question) {
+  if (!hasGroq()) return { ok: false, reason: 'no_key' };
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + getSetting('groqKey'),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: GROQ_VISION_MODEL,
+        max_tokens: 420,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: (question || 'Describe what you see') +
+                '. Answer in 3-5 short lines, plain words, practical.' },
+            { type: 'image_url', image_url: { url: base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image } }
+          ]
+        }]
+      })
+    });
+    if (!r.ok) return { ok: false, reason: 'http_' + r.status };
+    const j = await r.json();
+    const text = j.choices?.[0]?.message?.content;
+    return text ? { ok: true, text } : { ok: false, reason: 'empty' };
+  } catch (e) { return { ok: false, reason: 'network' }; }
+}
