@@ -268,3 +268,22 @@ test('hacker intents route correctly', () => {
   const sm = resolve('scan my sms for phishing links');
   assert.ok(sm && sm.intent === 'phish_sms');
 });
+
+/* Regression for the v7.3 stuck-boot: a duplicate top-level const slipped in
+   and killed the whole module graph on real WebViews. node --check (script
+   goal) misses this class of error, so parse every web module with the real
+   ES-module parser. */
+import vm from 'node:vm';
+import { readFileSync, readdirSync } from 'node:fs';
+
+test('every web module parses as a real ES module', () => {
+  const dir = new URL('../www/js/', import.meta.url);
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.js')) continue;
+    const src = readFileSync(new URL(f, dir), 'utf8');
+    let mod = null;
+    try { mod = new vm.SourceTextModule(src, { identifier: f }); }
+    catch (e) { assert.fail(f + ' failed ES-module parse: ' + e.message); }
+    assert.ok(mod, f + ' must parse');
+  }
+});
