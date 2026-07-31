@@ -235,3 +235,30 @@ export async function translate(text, from = 'auto', to = 'en') {
   if (!out) throw new Error('Translation failed');
   return out;
 }
+
+/* ---------- v7.5: quick inline translate (keyless MyMemory, 10k chars/day) ---------- */
+const TR_LANGS = {
+  hindi: 'hi', hinglish: 'hi', english: 'en', spanish: 'es', french: 'fr',
+  german: 'de', japanese: 'ja', arabic: 'ar', chinese: 'zh-CN', punjabi: 'pa',
+  tamil: 'ta', telugu: 'te', bengali: 'bn', urdu: 'ur', marathi: 'mr',
+  gujarati: 'gu', kannada: 'kn', malayalam: 'ml', russian: 'ru'
+};
+
+export async function quickTranslate(text, targetName) {
+  const target = TR_LANGS[String(targetName || '').toLowerCase()];
+  if (!target) return { ok: false, reason: 'lang' };
+  try {
+    const src = /[ऀ-ॿ]/.test(text) ? 'hi' : 'en';
+    if (src === target) return { ok: true, text };
+    const url = 'https://api.mymemory.translated.net/get?q='
+      + encodeURIComponent(String(text).slice(0, 450)) + '&langpair=' + src + '|' + target;
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 10000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(to);
+    const j = await r.json();
+    const t = j && j.responseData && j.responseData.translatedText;
+    if (!t) return { ok: false, reason: 'empty' };
+    return { ok: true, text: t };
+  } catch (e) { return { ok: false, reason: 'network' }; }
+}
