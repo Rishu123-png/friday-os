@@ -166,6 +166,12 @@ export async function getActiveNotifications() {
 export async function getUsageStats(days = 1) {
   return call('getUsageStats', { days });
 }
+export async function readScreenText() {
+  return call('readScreenText');
+}
+export async function openUrl(url) {
+  return call('openUrl', { url });
+}
 export async function phoneFinder(on = true) {
   return call('phoneFinder', { enabled: on });
 }
