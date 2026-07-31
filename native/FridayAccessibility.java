@@ -216,6 +216,35 @@ public class FridayAccessibility extends AccessibilityService {
         return null;
     }
 
+    /* v7.6: read the screen like Gemini Live's "see my screen" - dump all
+       visible text so the assistant can read/summarize/translate it. */
+    public static String dumpScreenText(int maxChars) {
+        try {
+            FridayAccessibility svc = instance;
+            if (svc == null) return null;
+            AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+            if (root == null) return null;
+            StringBuilder out = new StringBuilder();
+            collectText(root, out, 0);
+            String s = out.toString().replaceAll("(\\s*\\n){3,}", "\\n\\n").trim();
+            return s.length() > maxChars ? s.substring(0, maxChars) : s;
+        } catch (Throwable t) { return null; }
+    }
+
+    private static void collectText(AccessibilityNodeInfo n, StringBuilder out, int depth) {
+        if (n == null || depth > 14 || out.length() > 6000) return;
+        try {
+            CharSequence t = n.getText() != null ? n.getText() : n.getContentDescription();
+            if (t != null) {
+                String s = t.toString().trim();
+                if (!s.isEmpty() && !out.toString().endsWith(s + "\n")) {
+                    out.append(s).append('\n');
+                }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) collectText(n.getChild(i), out, depth + 1);
+        } catch (Throwable ignored) {}
+    }
+
     private static boolean clickNodeStatic(AccessibilityNodeInfo n) {
         AccessibilityNodeInfo cur = n;
         for (int i = 0; i < 5 && cur != null; i++) {
