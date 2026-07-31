@@ -15,9 +15,14 @@
                                            get a free AccessKey at
                                            console.picovoice.ai)
 """
-import io, sys
+import io, os, re, sys
 
 PATH = 'android/app/build.gradle'
+
+# androidx.health.connect:connect-client declares minSdk 26 in its AAR manifest;
+# the Capacitor template defaults to 22, which makes manifest merger fail.
+# Raise the project's floor once, here. Health Connect needs Android 8+ anyway.
+MIN_SDK_FLOOR = 26
 
 LLAMA_VERSION = '4.1.0'        # bump if Maven Central 404s -- engine adapter is version-tolerant
 LOCATION_VERSION = '21.3.0'    # from Google's maven (google() repo, already in the template)
@@ -45,6 +50,37 @@ DEPS.append(('androidx.health.connect:connect-client',
              'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
 
 
+def raise_min_sdk():
+    """Ensure the project's minSdkVersion >= MIN_SDK_FLOOR. Idempotent."""
+    # 1) Capacitor template keeps it in android/variables.gradle
+    #    (referenced from app/build.gradle as rootProject.ext.minSdkVersion)
+    vpath = 'android/variables.gradle'
+    if os.path.exists(vpath):
+        s = io.open(vpath, encoding='utf-8').read()
+        m = re.search(r'(?m)^(\s*)minSdkVersion\s*=\s*(\d+)', s)
+        if m:
+            cur = int(m.group(2))
+            if cur < MIN_SDK_FLOOR:
+                s = s[:m.start(2)] + str(MIN_SDK_FLOOR) + s[m.end(2):]
+                io.open(vpath, 'w', encoding='utf-8').write(s)
+                print('Raised minSdkVersion %d -> %d in %s' % (cur, MIN_SDK_FLOOR, vpath))
+            else:
+                print('minSdkVersion already %d (>= %d) in %s' % (cur, MIN_SDK_FLOOR, vpath))
+            return
+    # 2) fallback: literal "minSdkVersion 22" inside app/build.gradle
+    try:
+        s = io.open(PATH, encoding='utf-8').read()
+    except FileNotFoundError:
+        return
+    m = re.search(r'(minSdkVersion\s+)(\d+)', s)
+    if m and int(m.group(2)) < MIN_SDK_FLOOR:
+        s = s[:m.start(2)] + str(MIN_SDK_FLOOR) + s[m.end(2):]
+        io.open(PATH, 'w', encoding='utf-8').write(s)
+        print('Raised minSdkVersion %s -> %d in %s' % (m.group(2), MIN_SDK_FLOOR, PATH))
+    elif not m:
+        print('NOTE: no literal minSdkVersion in build.gradle (uses rootProject.ext); checked variables.gradle too -- nothing to raise')
+
+
 def main():
     try:
         s = io.open(PATH, encoding='utf-8').read()
@@ -67,6 +103,7 @@ def main():
         print('Added:', d)
     if present:
         print('Already present:', ', '.join(present))
+    raise_min_sdk()
     if not PORCUPINE_ENABLED:
         print('Porcupine hotword engine: OFF (flip PORCUPINE_ENABLED to include the AAR)')
 
