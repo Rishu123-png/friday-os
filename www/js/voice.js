@@ -12,6 +12,7 @@
 
 import { getSetting } from './store.js';
 import { applyPronunciations } from './memory.js';
+import { checkPermission, requestAll } from './native.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
 const WP = () => {
@@ -173,6 +174,30 @@ export function initRecognition(cbs = {}) {
 
 /* ================= LISTEN ================= */
 
+/* Mic permission pre-flight: never start the native recognizer blind.
+   First tap on a fresh install asks the system dialog; after a denial we
+   say so clearly instead of a generic beep. */
+async function ensureMicPermission() {
+  try {
+    const r = await checkPermission('android.permission.RECORD_AUDIO');
+    if (r && r.granted) return true;
+    await requestAll();   // system permission dialog
+    const again = await checkPermission('android.permission.RECORD_AUDIO');
+    return !!(again && again.granted);
+  } catch (e) { return true; }   // permissive on failure - native error path reports it
+}
+
+function normListenErr(e) {
+  const m = String((e && (e.message || e.code)) || e || '').toLowerCase();
+  if (m.includes('permission') || m.includes('denied') || m.includes('not-allowed')) return 'mic-denied';
+  if (m.includes('network') || m.includes('internet')) return 'network';
+  if (m.includes('busy')) return 'busy';
+  if (m.includes('server')) return 'server';
+  if (m.includes('audio')) return 'audio';
+  if (m.includes('client')) return 'client';
+  return 'unknown';
+}
+
 export function listen() {
   if (listening) return false;
   cancelSpeech();
@@ -180,8 +205,11 @@ export function listen() {
   if (useNative()) {
     wakeArmed = false;
     clearTimeout(wakeTimer);
-    NP().startListening({ lang: getSetting('voiceLang'), partial: true })
-      .catch(e => handlers.onError && handlers.onError(e.message || 'error'));
+    ensureMicPermission().then(ok => {
+      if (!ok) { handlers.onError && handlers.onError('mic-denied'); return; }
+      NP().startListening({ lang: getSetting('voiceLang'), partial: true })
+        .catch(e => handlers.onError && handlers.onError(normListenErr(e)));
+    });
     return true;
   }
 
