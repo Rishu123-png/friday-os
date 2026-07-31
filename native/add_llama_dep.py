@@ -21,8 +21,9 @@ PATH = 'android/app/build.gradle'
 
 LLAMA_VERSION = '4.1.0'        # bump if Maven Central 404s -- engine adapter is version-tolerant
 LOCATION_VERSION = '21.3.0'    # from Google's maven (google() repo, already in the template)
+HEALTH_CONNECT_VERSION = '1.1.0'  # androidx Health Connect client (google() repo)
 
-PORCUPINE_ENABLED = False      # <- set True + add your key in Settings to enable the hotword engine
+PORCUPINE_ENABLED = True      # <- set True + add your key in Settings to enable the hotword engine
 PORCUPINE_VERSION = '4.0.2'
 
 DEPS = [
@@ -35,6 +36,9 @@ DEPS = [
 if PORCUPINE_ENABLED:
     DEPS.append(('ai.picovoice:porcupine-android',
                  'implementation "ai.picovoice:porcupine-android:%s"' % PORCUPINE_VERSION))
+
+DEPS.append(('androidx.health.connect:connect-client',
+             'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
 
 
 def main():
