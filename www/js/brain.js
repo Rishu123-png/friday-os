@@ -438,7 +438,11 @@ I('storage', t => /\b(storage|disk space|free space|memory left)\b/.test(t) ? 1 
 I('bubble', t => /\b(bubble|overlay|floating)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'bubble', on: !/\b(off|hide|disable|remove)\b/.test(t) } }), 5);
 
-I('read_notifications', t => /\b(read.*notifications?|any notifications?|what.*notifications?|my notifications?)\b/.test(t) ? 1 : 0,
+I('read_notifications', t =>
+    /\b(read|see|check|show|get|any|what|my|koi)\b\s+notifications?\b/.test(t)
+    || /\bnotifications?\s+(padho|batao|sunao|suno|dikhao|aayi|aya|hai|kya)\b/.test(t)
+    || /\bkoi notification\b/.test(t)
+    ? 1 : 0,
   () => ({ say: null, action: { type: 'read_notifications' } }), 5);
 
 I('reply_notif', t => /\b(reply|respond)\b/.test(t) && !/^(reply to me|reply to this)$/i.test(t) ? 0.9 : 0,
@@ -620,3 +624,194 @@ export function resolve(text, ctx = {}) {
 
 export function intentCount() { return INTENTS.length; }
 export function intentIds() { return INTENTS.map(i => i.id); }
+
+/* ================= v7.5 TITAN INTENTS ================= */
+
+/* ---- steps & health ---- */
+I('steps', t => /\bsteps?\b|\bkadam\b|\bhow much.*walk|walked\b/.test(t) && !/\bstep by step\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'steps' } }), 6);
+
+I('step_goal', t => /\b(steps?\s*goal|goal\s*\d{3,5}\s*steps?)\b/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/(\d{4,5})/);
+    return { say: null, action: { type: 'step_goal', goal: m ? +m[1] : 0 } };
+  }, 7);
+
+I('health_summary', t => /\b(health report|fitness report|activity summary|exercise report|health summary|health score)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'health_summary' } }), 5);
+
+I('health_sync', t => /\bhealth connect\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'health_sync' } }), 6);
+
+/* ---- health reminders (water / medicine / eyes) ---- */
+I('water_plan', t => (/\bwater\b.*\bevery\s+\d+\s*(hour|hr)/.test(t) || /\bwater reminder\b|\bpaani\b.*\breminder\b/.test(t)) ? 1 : 0,
+  t => {
+    const m = t.match(/every\s+(\d+)\s*(hour|hr)/);
+    return { say: null, action: { type: 'water_plan', hours: m ? +m[1] : 2 } };
+  }, 6);
+
+I('med_plan', t => /\b(medicine|medicines|dawai|dawa|tablet|tablet lelo)\b.*\b(reminder|remind|lelo|routine)?\b/.test(t) && /\b(medicine|dawai|dawa|tablet)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'med_plan' } }), 6);
+
+I('eye_break', t => /\b(eye break|eye breaks|20-20-20|eye rest)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'eye_break', on: !/\b(off|stop|disable|band)\b/.test(t) } }), 5);
+
+/* ---- focus mode ---- */
+I('focus_mode', t => /\b(focus mode|pomodoro|deep work|study mode|do not disturb mode)\b/.test(t) ? 1 : 0,
+  t => {
+    if (/\b(off|stop|end|band|disable)\b/.test(t)) return { say: null, action: { type: 'focus_mode', off: true } };
+    const m = t.match(/(\d{1,3})\s*(min|minute)/);
+    return { say: null, action: { type: 'focus_mode', minutes: m ? +m[1] : 25 } };
+  }, 7);
+
+/* ---- screen time ---- */
+I('screen_time', t => /\b(screen time|phone usage|usage report|kitna chalaya|how much.*(phone|screen))\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'screen_time', days: /\bweek\b|\bhafte\b/.test(t) ? 7 : 1 } }), 6);
+
+/* ---- battery guard ---- */
+I('battery_guard', t => /\b(battery full|battery low|battery warn|battery alert|battery guard)\b/.test(t) ? 1 : 0,
+  t => {
+    if (/\b(low|kam)\b/.test(t)) {
+      const m = t.match(/(\d{1,2})\s*(%|percent)?/);
+      return { say: null, action: { type: 'battery_guard', kind: 'low', level: m ? +m[1] : 20 } };
+    }
+    return { say: null, action: { type: 'battery_guard', kind: 'full', on: !/\b(off|stop|band)\b/.test(t) } };
+  }, 6);
+
+/* ---- find my phone (rings loudly) ---- */
+I('find_phone', t =>
+    /\b(find|where|where's|kahan|ring|ringing)\b.*\b(my )?(phone|mobile)\b/.test(t)
+    && !/\b(papa|dad|mom|mum|mummy|bhai|didi|brother|sister|wife|husband|friend|dost)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'find_phone', on: !/\b(stop|found|band|mil gaya)\b/.test(t) } }), 9);
+
+/* ---- scheduled whatsapp ---- */
+I('whatsapp_schedule', t => /\bschedule\b.*\bwhatsapp\b|\bwhatsapp\b.*\b(at \d|tomorrow|kal|schedule)\b/.test(t) ? 1 : 0,
+  t => {
+    const to = t.match(/(?:whatsapp|to)\s+([a-z][a-z .'-]{1,30}?)(?:\s+(?:at|saying|that|\d{4}))/i);
+    const msg = t.match(/(?:saying|say|message|bol ke|bolna)\s+(.+)$/i);
+    const when = parseTime(t);
+    return { say: null, action: {
+      type: 'whatsapp_schedule',
+      name: to ? to[1].trim() : '',
+      msg: msg ? msg[1].trim() : '',
+      time: when ? when.date.getTime() : null
+    } };
+  }, 6);
+
+/* ---- quick inline translate (panel stays for the rest) ---- */
+I('quick_translate', t => /^translate\s+.+?\s+(to|in)\s+[a-z]+$/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/^translate\s+(.+?)\s+(to|in)\s+([a-z]+)$/);
+    return m ? { say: null, action: { type: 'quick_translate', text: m[1], lang: m[3] } }
+             : { say: 'Opening translator.', action: { type: 'open_panel', panel: 'sub-translate', prefill: t } };
+  }, 6);
+
+/* ---- wifi QR ---- */
+I('wifi_qr', t => /\bwifi\s*(qr|qr code)\b|\bshare wifi\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'wifi_qr' } }), 6);
+
+/* ---- link summarizer ---- */
+I('summarize_link', t => /\b(summar(y|ize|ise)|short version|tldr|tl;dr)\b.*\bhttps?:\/\//.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/(https?:\/\/[^\s]+)/);
+    return { say: null, action: { type: 'summarize_link', url: m ? m[1] : '' } };
+  }, 6);
+
+/* ---- anti-theft pocket guard ---- */
+I('pocket_guard', t => /\b(pocket mode|pocket guard|anti ?theft|chori alarm)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'pocket_guard', on: !/\b(off|stop|band|disable)\b/.test(t) } }), 6);
+
+/* ---- backup ---- */
+I('backup_data', t => /\b(backup|export)\b.*\b(data|settings|memory)\b|\bbackup my\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'backup_data' } }), 5);
+
+/* ---- voice note ---- */
+I('voice_note', t => /\b(voice note|record note|note bolo|dictat)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'voice_note' } }), 6);
+
+/* ---- payment reminders (NO banking - FRIDAY never reads money details) ---- */
+I('pay_remind', t => /\bremind me (to )?pay\b|\bpay reminder\b|\bpaise dene\b/.test(t) ? 1 : 0,
+  t => {
+    const who = t.match(/pay\s+([a-z][a-z .'-]{1,25}?)(?:\s+(?:rs|rupees|inr|₹|\d))/i);
+    const amt = t.match(/(?:rs\.?|rupees|inr|₹)\s*(\d+(?:,\d{3})*(?:\.\d+)?)|(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:rs\.?|rupees|₹)/i);
+    const when = parseTime(t);
+    const name = who ? who[1].trim() : '';
+    const amount = amt ? (amt[1] || amt[2] || '').replace(/,/g, '') : '';
+    let task = 'Pay ' + (name || 'someone') + (amount ? ` ₹${amount}` : '');
+    const date = when ? when.date : (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); return d; })();
+    const rec = addItem(KEYS.REMINDERS, { text: task, due: date.getTime(), done: false });
+    return {
+      say: `Done — I'll remind you: "${task}" ${humanTime(date)}. I never see your bank or money details; I just keep the reminder.`,
+      action: { type: 'schedule_reminder', item: rec },
+      refresh: ['reminders']
+    };
+  }, 6);
+
+I('pay_list', t => /\b(my|pending|bakaya)\s+payments?\b|\bpayments?\s+(due|pending|list)\b/.test(t) ? 1 : 0,
+  () => {
+    const pays = getList(KEYS.REMINDERS).filter(r => !r.done && /^pay\b/i.test(r.text));
+    if (!pays.length) return { say: 'No payment reminders pending.', action: null };
+    return {
+      say: pays.length + ' payment' + (pays.length === 1 ? '' : 's') + ' pending:\n'
+         + pays.slice(0, 6).map(r => `\u2022 ${r.text} - ${humanTime(new Date(r.due))}`).join('\n'),
+      action: null
+    };
+  }, 6);
+
+/* ---- hindi ui toggle ---- */
+I('hindi_ui', t => /\b(hindi (ui|mode|interface)|hindi mein dikhao|english (ui|mode|interface))\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'hindi_ui', on: !/\b(english\b|off|band)/.test(t) } }), 6);
+
+/* ================= v7.6 APEX INTENTS ================= */
+
+/* screen eyes: "what's on my screen", "read this screen", "translate the screen" */
+I('screen_read', t => /\b(screen|skreen)\b.*\b(read|parh|batao|kya hai|summarize|translate|dikha)\b|\b(read|what'?s on|whats on|parho)\b.*\bscreen\b|\b(translate|summarize)\b\s+(the\s+|my\s+)?screen\b|\bon.?screen\b/.test(t) ? 1 : 0,
+  t => ({
+    say: null,
+    action: {
+      type: 'screen_read',
+      mode: /translate/.test(t) ? 'translate' : /(summar|short|simple)/.test(t) ? 'summarize' : 'read'
+    }
+  }), 6);
+
+/* camera eyes: "what do you see", "ye kya hai", "look at this" */
+I('eyes', t => /\bwhat (do you see|is this|is that)\b|\b(look|dekh|dekho)\b.*\b(this|ye|kya)\b|\bye kya hai\b|\bscan (this|scene)\b|\bwhat'?s in front\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'eyes', question: t } }), 6);
+
+/* deep research: "tell me about latest budget", "research X", "ask ai with news" */
+I('deep_ask', t => /\b(research|deep answer|latest (news|info|update)s? (on|about)|ask ai about|search web for)\b/.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(research|deep answer|latest news on|latest info on|latest updates on|latest in|ask ai about|search web for|tell me about latest)\b/gi, '').trim() || t;
+    return { say: null, action: { type: 'deep_ask', query: q } };
+  }, 6);
+
+/* youtube dj: "play kesariya on youtube", "youtube pe bella ciao chalao" */
+I('yt_play', t => /\byoutube\b|\byt\b/.test(t) && /\b(play|chalao|bajao|lagao|search|song|gana|video|turn on|sunao|suno)\b/.test(t) ? 1 : 0,
+  t => {
+    let q = t.replace(/\b(play|chalao|bajao|lagao|search for|search|on youtube|youtube|yt|pe|song|gana|video|please|ko|karke|dikhao)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'yt_play', query: q || t } };
+  }, 7);
+
+/* universal device search: "find everything about ramesh" */
+I('uni_search', t => /\b(find|search)\b.*\beverything\b|\bsearch (all|everywhere)\b|\bsab kuch\b.*\b(dhoondo|batao)\b/.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(find|search|everything|all|everywhere|about|sab kuch|dhoondo|batao|ke baare mein|for)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'uni_search', query: q } };
+  }, 6);
+
+/* quiz / teacher mode: "quiz me on photosynthesis", "test me" */
+I('quiz', t => /\b(quiz|test me|mcq|question answer|practice)\b/.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(quiz me on|quiz me|quiz on|quiz|test me on|test me|practice|mcq|start)\b/gi, '').trim();
+    return { say: null, action: { type: 'quiz', topic: q || 'general knowledge' } };
+  }, 6);
+
+/* image maker: "make an image of a cyberpunk city" */
+I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
+  t => {
+    let q = t.replace(/\b(make|create|generate|draw|banao|an|a|me|image|picture|photo|wallpaper|painting|of|please)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'image_make', prompt: q || t } };
+  }, 6);
