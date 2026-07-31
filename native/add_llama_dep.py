@@ -21,7 +21,11 @@ PATH = 'android/app/build.gradle'
 
 LLAMA_VERSION = '4.1.0'        # bump if Maven Central 404s -- engine adapter is version-tolerant
 LOCATION_VERSION = '21.3.0'    # from Google's maven (google() repo, already in the template)
-HEALTH_CONNECT_VERSION = '1.1.0'  # androidx Health Connect client (google() repo)
+# androidx Health Connect client (google() repo). PINNED to alpha08:
+# the newest release whose AAR metadata accepts compileSdk 34 + AGP 8.2.x
+# (alpha09+ needs SDK 35, rc/stable need SDK 36 + AGP 8.9.1 -- the Java side
+#  talks to it purely by reflection, so the alpha works identically).
+HEALTH_CONNECT_VERSION = '1.1.0-alpha08'
 
 PORCUPINE_ENABLED = True      # <- set True + add your key in Settings to enable the hotword engine
 PORCUPINE_VERSION = '4.0.2'
