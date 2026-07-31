@@ -300,3 +300,64 @@ test('read_notifications catches real phrasings', () => {
   const nav = resolve('open notifications');
   assert.ok(nav && nav.intent === 'nav_gesture', 'open notifications must stay a nav gesture');
 });
+
+/* ================= v7.5 TITAN intents ================= */
+test('steps + health intents', () => {
+  const cases = [
+    ['how many steps today', 'steps'], ['kadam kitne', 'steps'],
+    ['steps goal 8000', 'step_goal'], ['health report', 'health_summary'],
+    ['open health connect', 'health_sync'], ['water reminder', 'water_plan'],
+    ['remind me to drink water every 2 hours', 'water_plan'],
+    ['medicine reminder', 'med_plan'], ['eye breaks on', 'eye_break'],
+    ['focus mode 25 minutes', 'focus_mode'], ['focus mode off', 'focus_mode'],
+    ['screen time', 'screen_time'], ['screen time this week', 'screen_time'],
+    ['tell me when battery full', 'battery_guard'],
+    ['warn me when battery low 15%', 'battery_guard']
+  ];
+  for (const [q, id] of cases) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === id, 'missed: ' + q + ' -> ' + (r && r.intent));
+  }
+  const sg = resolve('steps goal 8000');
+  assert.equal(sg.action.goal, 8000);
+  const fm = resolve('focus mode 25 minutes');
+  assert.equal(fm.action.minutes, 25);
+  const fs = resolve('screen time this week');
+  assert.equal(fs.action.days, 7);
+});
+
+test('find phone + tools + payments + misc intents', () => {
+  const fp = resolve('find my phone');
+  assert.ok(fp && fp.intent === 'find_phone' && fp.action.on !== false);
+  const ffs = resolve('stop ringing my phone');
+  assert.ok(ffs && ffs.intent === 'find_phone' && ffs.action.on === false);
+  const ws = resolve('schedule whatsapp to mummy at 9pm saying good night');
+  assert.ok(ws && ws.intent === 'whatsapp_schedule', 'ws missed: ' + (ws && ws.intent));
+  assert.ok(ws.action.name.includes('mummy') && ws.action.msg.includes('good night'));
+  assert.ok(ws.action.time > Date.now());
+  const tr = resolve('translate kaise ho to spanish');
+  assert.ok(tr && tr.intent === 'quick_translate' && tr.action.lang === 'spanish' && tr.action.text === 'kaise ho');
+  const qr = resolve('make wifi qr');
+  assert.ok(qr && qr.intent === 'wifi_qr');
+  const sl = resolve('summarize this link https://example.com/story');
+  assert.ok(sl && sl.intent === 'summarize_link' && sl.action.url === 'https://example.com/story');
+  const pg = resolve('pocket mode on');
+  assert.ok(pg && pg.intent === 'pocket_guard' && pg.action.on !== false);
+  const bd = resolve('backup my data');
+  assert.ok(bd && bd.intent === 'backup_data');
+  const vn = resolve('voice note');
+  assert.ok(vn && vn.intent === 'voice_note');
+  const hu = resolve('hindi mode on');
+  assert.ok(hu && hu.intent === 'hindi_ui' && hu.action.on === true);
+  const eu = resolve('english ui');
+  assert.ok(eu && eu.intent === 'hindi_ui' && eu.action.on === false);
+});
+
+test('pay reminders (no banking!) work + land in reminders list', () => {
+  const p = resolve('remind me to pay ramesh 500 rupees tomorrow 5pm');
+  assert.ok(p && p.intent === 'pay_remind', 'pay_remind missed');
+  assert.ok(p.action && p.action.type === 'schedule_reminder');
+  assert.ok(/Pay ramesh/.test(p.action.item.text) && p.action.item.text.includes('500'));
+  const l = resolve('my payments');
+  assert.ok(l && l.intent === 'pay_list');
+});
