@@ -167,7 +167,12 @@ export const TOOLS = [
     parameters: { type: 'object', properties: { app: { type: 'string', description: 'optional: whatsapp, telegram, gmail...' } } } } },
   { type: 'function', function: { name: 'get_steps', description: 'Steps walked today vs daily goal', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'list_reminders', description: 'List pending (not yet done) reminders', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'read_screen_text', description: 'Read the text on the phone screen right now ("what am I doing/working on") - needs FRIDAY Control accessibility', parameters: { type: 'object', properties: {} } } }
+  { type: 'function', function: { name: 'read_screen_text', description: 'Read the text on the phone screen right now ("what am I doing/working on") - needs FRIDAY Control accessibility', parameters: { type: 'object', properties: {} } } },
+  /* v8.1 EYES: visual screen loop - see, then act */
+  { type: 'function', function: { name: 'see_screen', description: 'Take an on-demand screenshot and describe the screen visually (apps, buttons, inputs)',
+    parameters: { type: 'object', properties: { question: { type: 'string', description: 'what to focus on' } } } } },
+  { type: 'function', function: { name: 'tap_screen', description: 'Tap exact screen coordinates (pixels) after see_screen located a button',
+    parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } } }
 ];
 
 /** First-pass, non-streaming call that may return tool_calls. */
