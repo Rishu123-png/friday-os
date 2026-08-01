@@ -1,4 +1,3 @@
-
 /* FRIDAY OS — unit tests. Run: npm test (node --test)
    Pure-function coverage for the offline engine: NLP, intents, alarms,
    memory extraction, templates. No DOM, no network. */
@@ -401,4 +400,36 @@ test('apex intents route correctly', () => {
   assert.ok(yt.action.query.includes('kesariya'));
   const im = resolve('make an image of a robot dog');
   assert.ok(im.action.prompt.includes('robot dog'));
+});
+
+/* ---------------- v7.6.4: natural-language hardening ---------------- */
+test('app-specific notification reading routes correctly', () => {
+  const t = resolve('see the message of telegram');
+  assert.ok(t && t.intent === 'read_notifications', 'telegram msg read got: ' + (t && t.intent));
+  assert.equal(t.action.app, 'telegram');
+  const w = resolve('whatsapp ke messages padho');
+  assert.ok(w && w.intent === 'read_notifications', 'hinglish app read got: ' + (w && w.intent));
+  const s = resolve('read my notifications');
+  assert.ok(s && s.intent === 'read_notifications' && !s.action.app, 'generic read broke');
+});
+
+test('whatsapp_schedule accepts loose natural phrasing', () => {
+  const r = resolve('schedule message at whatsapp for mummy');
+  assert.ok(r && r.intent === 'whatsapp_schedule', 'loose schedule got: ' + (r && r.intent));
+  assert.equal(r.action.name, 'mummy');
+  assert.ok(!r.action.time, 'no time -> slot-ask flow');
+  const full = resolve('schedule whatsapp to divik at 10:51pm saying hi');
+  assert.ok(full && full.intent === 'whatsapp_schedule', 'full got: ' + (full && full.intent));
+  assert.equal(full.action.name, 'divik');
+  assert.ok(full.action.msg.includes('hi'));
+  assert.ok(full.action.time > Date.now());
+});
+
+test('find_person accepts an explicit name with shared-location phrasing', () => {
+  const q = 'open maps and show me vijay prakash chaudhary location which is sharing by him';
+  const r = resolve(q);
+  assert.ok(r && r.intent === 'find_person', 'named location got: ' + (r && r.intent));
+  assert.equal(r.action.name, 'vijay prakash chaudhary');
+  const nav = resolve('where is connaught place');
+  assert.ok(!nav || nav.intent !== 'find_person', 'place lookup stolen');
 });
