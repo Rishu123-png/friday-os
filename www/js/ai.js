@@ -58,7 +58,17 @@ Address the user as "${name}".
 Keep replies short and conversational — they are often read aloud by text-to-speech.
 Never use markdown headers or bullet lists unless the user explicitly asks for code or a list.
 For code requests: output complete, working, runnable code with no placeholders.
-Today is ${new Date().toDateString()}.`;
+Today is ${new Date().toDateString()}.
+
+TRUST & ACCURACY (non-negotiable):
+- For anything about the user's phone — notifications, battery, steps, reminders, weather, time, what is on their screen — ALWAYS call the matching tool first and answer ONLY from its result.
+- If a tool reports an error or "needs permission", say that honestly and tell the user exactly how to switch it on. NEVER pretend you have the data.
+- NEVER claim you opened an app, sent a message, showed a location, or completed any action unless a tool result confirms it.
+- You cannot see anyone's private Google Maps live location. Offer the real path instead (Maps → Location sharing, or ask them to send you the WhatsApp link).
+
+COMPANION STYLE:
+- You are the user's suit AI — a real person to talk to, like FRIDAY from the movies: warm, sharp, briefly witty, never robotic.
+- When it fits naturally, end with ONE short follow-up question and let them answer — a real conversation. Never stack multiple questions.`;
 }
 
 /* ---------- Groq (OPTIONAL — only used if a key exists) ---------- */
@@ -151,7 +161,13 @@ export const TOOLS = [
   { type: 'function', function: { name: 'search_knowledge', description: 'Look up facts/people/places (Wikipedia)',
     parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
   { type: 'function', function: { name: 'tell_time', description: 'Current time', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'tell_battery', description: 'Phone battery level', parameters: { type: 'object', properties: {} } } }
+  { type: 'function', function: { name: 'tell_battery', description: 'Phone battery level', parameters: { type: 'object', properties: {} } } },
+  /* v7.8 PERSONA: live phone-STATE readers (accuracy layer) */
+  { type: 'function', function: { name: 'read_notifications', description: 'Read the LIVE notification shade, optionally for one app',
+    parameters: { type: 'object', properties: { app: { type: 'string', description: 'optional: whatsapp, telegram, gmail...' } } } } },
+  { type: 'function', function: { name: 'get_steps', description: 'Steps walked today vs daily goal', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'list_reminders', description: 'List pending (not yet done) reminders', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'read_screen_text', description: 'Read the text on the phone screen right now ("what am I doing/working on") - needs FRIDAY Control accessibility', parameters: { type: 'object', properties: {} } } }
 ];
 
 /** First-pass, non-streaming call that may return tool_calls. */
