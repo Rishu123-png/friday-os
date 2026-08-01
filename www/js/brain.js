@@ -704,6 +704,10 @@ I('find_phone', t =>
     && !/\b(papa|dad|mom|mum|mummy|bhai|didi|brother|sister|wife|husband|friend|dost)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'find_phone', on: !/\b(stop|found|band|mil gaya)\b/.test(t) } }), 9);
 
+/* ---- v8.0: Karen daily brief ---- */
+I('daily_brief', t => /\b(?:morning|daily|day)\s+(?:brief|briefing|plan|update|summary)\b|\bbrief me\b|\baaj ka (?:plan|brief|update)\b|\bday\s+kaise\s+ja\s+rahi\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'daily_brief' } }), 6);
+
 /* ---- scheduled whatsapp ---- */
 I('whatsapp_schedule', t => (/\bschedule\b/.test(t) && /\bwhatsapp|message|msg\b/.test(t)) || /\bwhatsapp\b.*\b(at \d|tomorrow|kal|schedule)\b/.test(t) ? 1 : 0,
   t => {

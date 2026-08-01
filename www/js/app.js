@@ -131,6 +131,15 @@ async function init() {
   setInterval(computeSystemsLine, 120000);
   setInterval(() => { const mc = $('#micContainer'); if (mc) mc.classList.toggle('speaking', !!state.speaking); }, 700);
 
+  /* v8.0: Karen morning brief - once per day, first open before noon */
+  try {
+    const todayKey = new Date().toDateString();
+    if (new Date().getHours() < 12 && S.getSetting('lastBriefDate') !== todayKey) {
+      S.setSetting('lastBriefDate', todayKey);
+      setTimeout(() => handleInput('morning brief', { silentEcho: true, dedupeSkip: true }), 4500);
+    }
+  } catch (e) {}
+
   // greeting (v7.6.4: throttled - aggressive OEMs restart the WebView often,
   // and "Systems online" was spamming the chat on every restart)
   const lastGreetAt = S.getSetting('lastGreetAt') || 0;
@@ -196,28 +205,69 @@ function updateBrainBadge() {
 }
 
 /* ================= INPUT PIPELINE ================= */
+/* ================= v8.0 STARK: Mission mode =================
+   "remind me X and add task Y and send Z" becomes a visible checklist.
+   Steps that touch the outside world pause and ask for a "go" first. */
+const MISSION_RISKY = /\b(send|pay|paid|order|book|delete|remove|post|call|whatsapp|message|sms)\b/i;
+
+async function runMission(parts) {
+  const items = parts.map(p => ({ text: p, status: 'wait' }));
+  const el = addMsg('ai', '', { returnEl: true, proactive: true });
+  const draw = () => {
+    if (!el) return;
+    el.querySelector('.message-bubble').innerHTML = U.renderRich(
+      `**Mission: ${items.length} steps**\n` + items.map((it, i) =>
+        `${it.status === 'done' ? '\u2705' : it.status === 'skip' ? '\u23ed' : it.status === 'run' ? '\u26a1' : it.status === 'ask' ? '\u2753' : '\u25ab'} ${i + 1}. ${it.text}`
+      ).join('\n'));
+    scrollBottom();
+  };
+  state.mission = { items, draw };
+  reply(`On it, Boss - ${items.length} steps. Watch me work.`);
+  draw();
+  return runMissionFrom(0);
+}
+
+async function runMissionFrom(startIdx) {
+  const ms = state.mission;
+  if (!ms) return true;
+  for (let j = startIdx; j < ms.items.length; j++) {
+    const it = ms.items[j];
+    if (it.status === 'done' || it.status === 'skip') continue;
+    it.status = 'run'; ms.draw();
+    if (MISSION_RISKY.test(it.text)) {
+      it.status = 'ask'; ms.draw();
+      state.expect = 'mission_go';
+      reply(`Step ${j + 1}: "${it.text}" - this touches the outside world. Say "go" to execute it, or "skip".`);
+      return true;
+    }
+    await handleInput(it.text, { noChain: true, silentEcho: true, dedupeSkip: true });
+    it.status = 'done'; ms.draw();
+  }
+  state.mission = null;
+  reply('Mission complete, Boss.');
+  return true;
+}
+
 async function handleInput(text, opts = {}) {
   text = String(text || '').trim();
   if (!text) return;
 
   /* v7.6.4: drop duplicate submissions (voice double-final, STT retries) —
      same text within 4s is an echo, not a new command. */
+  clearTimeout(state.talkWait);   // v7.8: user spoke - cancel the Karen nudge
   if (!opts.dedupeSkip) {
     const norm = text.toLowerCase().replace(/\s+/g, ' ');
     if (norm === state.lastSubmitted && Date.now() - state.lastSubmittedAt < 4000) return;
     state.lastSubmitted = norm; state.lastSubmittedAt = Date.now();
   }
 
-  // ---- command chaining: "remind me X and add task Y" ----
+  // ---- mission mode (v8.0 STARK): multi-step commands become a live checklist ----
   if (!opts.noChain) {
     const parts = NLU.splitCommands(text);
     if (parts.length > 1) {
       addMsg('user', text);
       MEM.logEpisode({ text, intent: 'chain', role: 'user' });
-      for (const part of parts) {
-        await handleInput(part, { noChain: true, silentEcho: true });
-      }
-      return;
+      return runMission(parts);
     }
   }
 
@@ -279,6 +329,28 @@ async function handleInput(text, opts = {}) {
       const w = parseTime(text.toLowerCase());
       if (!w) { state.expect = 'wa_sched_time'; return reply('Give me a time like "9pm", "tomorrow 8am", "kal 8 baje".'); }
       return collectWaSchedule({ time: w.date.getTime() });
+    }
+    /* v8.0: mission step confirmation ("go" / "skip") */
+    if (kind === 'mission_go') {
+      const it = state.mission && state.mission.items.find(i => i.status === 'ask');
+      if (!it) return reply('No pending mission step.');
+      const go = /^(go|yes|haan|kar|karo|do|ok|okay|sure|send it|haan ji)\b/i.test(text.trim());
+      const skip = /^(skip|no|nahi|nope|cancel|rehne)\b/i.test(text.trim());
+      if (!go && !skip) {
+        state.expect = 'mission_go';
+        return reply('Say "go" to execute it, or "skip" to leave it.');
+      }
+      if (go) {
+        it.status = 'run';
+        if (state.mission) state.mission.draw();
+        await handleInput(it.text, { noChain: true, silentEcho: true, dedupeSkip: true });
+        it.status = 'done';
+      } else it.status = 'skip';
+      if (state.mission) state.mission.draw();
+      const nextIdx = state.mission ? state.mission.items.findIndex(i => i.status === 'wait') : -1;
+      if (nextIdx >= 0) return runMissionFrom(nextIdx);
+      state.mission = null;
+      return reply('Mission complete, Boss.');
     }
   }
 
@@ -394,6 +466,29 @@ function collectWaSchedule(slots) {
   const ht = humanTime(new Date(w.time));
   reply(`Scheduled - ${/^in /.test(ht) ? ht : 'at ' + ht} I'll open WhatsApp and send "${w.msg}" to ${w.name}. (Works best when the phone is unlocked - I press the send button for you.)`);
   return true;
+}
+
+/* v8.0 Karen morning brief - live data in, warm human brief out. */
+async function buildDailyBrief() {
+  const bits = [];
+  try {
+    const loc = await API.resolveLocation();
+    const wx = await API.getWeather(loc.lat, loc.lon);
+    const [desc] = API.describeWMO(wx.current.weather_code);
+    bits.push(`Weather: ${Math.round(wx.current.temperature_2m)}°C ${desc}`);
+  } catch (e) {}
+  try { const st = await HEALTH.getSteps(); if (st) bits.push(`Steps so far: ${st.today} of ${HEALTH.stepsGoal()}`); } catch (e) {}
+  try { const b = await D.battery(); if (b && typeof b.level === 'number') bits.push(`Battery ${b.level}%`); } catch (e) {}
+  const rs = (S.getList(KEYS.REMINDERS) || []).filter(r => !r.done && r.due).sort((x, y) => x.due - y.due).slice(0, 3);
+  if (rs.length) bits.push('Reminders: ' + rs.map(r => `${r.text} (${humanTime(new Date(r.due))})`).join('; '));
+  if (NAT.isNative()) {
+    try {
+      const u = await NAT.getUsageStats(1);
+      const top = u && u.ok && (u.items || [])[0];
+      if (top) bits.push(`Your most-used app yesterday: ${top.label}`);
+    } catch (e) {}
+  }
+  return bits;
 }
 
 async function runAction(a, hit) {
@@ -871,6 +966,27 @@ async function runAction(a, hit) {
         msg: (a.msg || '').trim(),
         time: a.time || null
       });
+    }
+
+    case 'daily_brief': {
+      thinking(true);
+      const bits = await buildDailyBrief();
+      thinking(false);
+      const name = S.getSetting('userName') || 'Boss';
+      if (AI.hasGroq() && bits.length) {
+        try {
+          const out = await AI.callGroq([
+            { role: 'system', content: 'You are FRIDAY, the user\'s suit AI (Iron Man style). Turn this data into ONE warm 3-4 sentence spoken brief for ' + name + '. Talk like a person - no bullets, no headers, no emoji spam. Data: ' + bits.join(' | ') },
+            { role: 'user', content: 'Give me my brief.' }
+          ], { maxTokens: 230, temperature: 0.6 });
+          if (out) { reply(out); return true; }
+        } catch (e) {}
+      }
+      const greet = new Date().getHours() < 12 ? 'Good morning' : 'Here is your brief';
+      reply(bits.length
+        ? `${greet}, ${name}. ` + bits.join('. ') + '.'
+        : `${greet}, ${name}. No live data right now - weather is offline or permissions are pending.`);
+      return true;
     }
 
     case 'quick_translate': {
@@ -1605,6 +1721,43 @@ async function runToolByName(name, args = {}) {
         catch (_) { return 'No knowledge result'; }
       }
       case 'tell_time': return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      /* ---- v7.8 PERSONA: live phone-state readers (the accuracy layer) ---- */
+      case 'read_notifications': {
+        if (!NAT.isNative()) return 'Notification reading needs the installed FRIDAY app + notification access.';
+        try {
+          const r = await NAT.getActiveNotifications();
+          let items = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
+          if (!items.length) items = recentNotifs;
+          if (!items.length) return 'Shade is empty (or notification access is OFF - if the user expected data, tell them to enable it in Special app access > Notification access).';
+          if (args.app) {
+            const q = String(args.app).toLowerCase();
+            items = items.filter(n => (n.pkg || '').toLowerCase().includes(q) || (n.title || '').toLowerCase().includes(q));
+          }
+          if (!items.length) return `Nothing from ${args.app} in the shade right now.`;
+          return items.slice(0, 8).map(n => `${NAT.friendlyApp(n.pkg)}: ${n.title} - ${n.text}`).join(' | ').slice(0, 900);
+        } catch (e) { return 'Notification reader error.'; }
+      }
+      case 'get_steps': {
+        try {
+          const st = await HEALTH.getSteps();
+          if (!st) return 'Step counter needs the Physical Activity permission - ask the user to say "permissions" and allow it.';
+          return `${st.today} steps today (goal ${HEALTH.stepsGoal()}).`;
+        } catch (e) { return 'Steps unavailable right now.'; }
+      }
+      case 'list_reminders': {
+        const rs = (S.getList(KEYS.REMINDERS) || []).filter(r => !r.done).slice(0, 8);
+        if (!rs.length) return 'No pending reminders.';
+        return rs.map(r => `${r.text} (${humanTime(new Date(r.due))})`).join(' | ');
+      }
+      case 'read_screen_text': {
+        if (!NAT.isNative()) return 'Screen reading needs the installed FRIDAY app.';
+        try {
+          const r = await NAT.readScreenText();
+          if (!r || !r.ok || r.reason === 'a11y_off') return 'Screen reader (FRIDAY Control accessibility) is OFF - tell the user to enable it, then ask again.';
+          const txt = (r.text || '').trim();
+          return txt ? txt.slice(0, 1500) : 'The screen looks empty right now.';
+        } catch (e) { return 'Screen reader error.'; }
+      }
       case 'tell_battery': { const b = await D.battery(); return b ? `${b.level}%${b.charging ? ' charging' : ''}` : 'unknown'; }
       default: return 'Unknown tool';
     }
@@ -1618,7 +1771,7 @@ async function contactByName(name) {
   return S.getList(KEYS.CONTACTS).find(c => c.name.toLowerCase().includes(q)) || null;
 }
 
-const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule)\b/i;
+const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule|notifications?|reminders?|steps?|screen|doing|working|status|location|wifi|charging)\b/i;
 
 async function askGroq(text) {
   thinking(true);
@@ -1626,7 +1779,7 @@ async function askGroq(text) {
     role: m.role === 'user' ? 'user' : 'assistant',
     content: m.text
   }));
-  const ctxBrief = MEM.buildContext();
+  const ctxBrief = MEM.buildContext({ maxFacts: 22, maxPatterns: 6 });
   const sys = AI.systemPrompt() + (ctxBrief ? '\n\n' + ctxBrief : '') +
     '\nIf the user asks you to DO something (remind, alarm, call, message, note, weather...), use the appropriate tool. Confirm briefly afterward.';
   const msgs = [{ role: 'system', content: sys }, ...history, { role: 'user', content: text }];
@@ -1647,7 +1800,7 @@ async function askGroq(text) {
     if (cut > boundaryCursor) { feed.push(sofar.slice(boundaryCursor, cut)); boundaryCursor = cut; }
   };
 
-  let el = null, acc = '';
+  let el = null, acc = '', toolsUsed = false;
   try {
     // --- pass 1: tool detection (only when the request looks actionable) ---
     if (ACTIONISH.test(text)) {
@@ -1659,6 +1812,7 @@ async function askGroq(text) {
             let out;
             try { out = await runToolByName(tc.function?.name, JSON.parse(tc.function?.arguments || '{}')); }
             catch (e) { out = 'Tool failed'; }
+            toolsUsed = true;
             msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function?.name, content: String(out) });
           }
         }
@@ -1671,7 +1825,7 @@ async function askGroq(text) {
       maxTokens: 1500,
       onToken: (_, sofar) => {
         acc = sofar;
-        if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true }); }
+        if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true, source: toolsUsed ? 'live' : 'mind' }); }
         el.querySelector('.message-bubble').innerHTML = U.renderRich(sofar);
         scrollBottom();
         feedFrom(sofar);
@@ -1690,9 +1844,10 @@ async function askGroq(text) {
       const rec = state.messages[state.messages.length - 1];
       if (rec) { rec.text = final; saveChat(); }
     } else {
-      addMsg('ai', final);
+      addMsg('ai', final, { source: toolsUsed ? 'live' : 'mind' });
     }
     S.remember('ai', final);
+    armTalkWait(final);   // v7.8: companion waits for your answer, re-asks gently
   } catch (e) {
     thinking(false);
     if (feed) feed.cancel();
@@ -2348,11 +2503,45 @@ async function runProactive() {
 }
 
 /* ================= MESSAGES ================= */
+/* v7.8 PERSONA (Karen behavior): when FRIDAY asks a question she WAITS for the
+   answer, and if silence stretches she gently asks once more - like a person. */
+const TALK_NUDGES = [
+  'Boss? You went quiet on me. Take your time - I am still listening.',
+  'Still with me? No rush.',
+  'Hello? Suit still on? I am right here when you are ready.'
+];
+function armTalkWait(questionText) {
+  clearTimeout(state.talkWait);
+  if (!/\?\s*$/.test(String(questionText || '').trim())) return;
+  /* v8.0 hands-free: when she asks something, she opens her own ears for the
+     answer - a real back-and-forth. (Skipped when a wake word guards the mic:
+     then the wake phrase re-opens the conversation instead.) */
+  const handsFree = S.getSetting('handsFree') !== false;
+  if (handsFree && NAT.isNative() && S.getSetting('voiceOutput') && !S.getSetting('wakeWord')) {
+    state.talkWait = setTimeout(() => {
+      state.talkWait = null;
+      if (state.listening || state.speaking || document.hidden) return;
+      V.listen();
+    }, 1600);
+    return;
+  }
+  state.talkWait = setTimeout(() => {
+    state.talkWait = null;
+    if (state.listening || state.speaking || document.hidden) return;
+    const nudge = pick(TALK_NUDGES);
+    addMsg('ai', nudge, { proactive: true });
+    if (S.getSetting('voiceOutput')) {
+      V.speak(nudge, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    }
+  }, 42000);
+}
+
 function reply(text) {
   if (state.tonePrefix) { text = state.tonePrefix + ' ' + text; state.tonePrefix = null; }
   addMsg('ai', text);
   S.remember('ai', text);
   V.speak(text, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  armTalkWait(text);
 }
 
 function addMsg(role, text, opts = {}) {
@@ -2373,8 +2562,11 @@ function buildMsgEl(msg, opts = {}) {
   const time = new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const link = opts.link ? `<a class="msg-link" href="${opts.link}" target="_blank" rel="noopener">Read more →</a>` : '';
   if (opts.proactive) div.classList.add('proactive');
+  /* v8.0 Badge of Truth: shows whether an answer came from live phone data */
+  const badge = opts.source === 'live' ? ' <span class="src-badge live" title="Built from LIVE on-device data">&#9889; live</span>'
+              : opts.source === 'mind' ? ' <span class="src-badge mind" title="From general knowledge - not live phone data">&#128173; mind</span>' : '';
   div.innerHTML = `<div class="message-bubble">${U.renderRich(msg.text)}${link}</div>
-    <div class="message-meta"><span class="message-label">${label}</span><span>${time}</span></div>`;
+    <div class="message-meta"><span class="message-label">${label}${badge}</span><span>${time}</span></div>`;
   return div;
 }
 
@@ -2938,6 +3130,7 @@ function bindEvents() {
   bind('#waCC', 'waCountryCode', 'input');
   bind('#bargeIn', 'bargeIn', 'change', 'checked');
   bind('#streamingTts', 'streamingTts', 'change', 'checked');
+  bind('#handsFree', 'handsFree', 'change', 'checked');
   bind('#offlineChat', 'offlineChat', 'change', 'checked');
   bind('#porcupineKey', 'porcupineKey', 'input');
 
@@ -3067,6 +3260,7 @@ function syncSettingsUI() {
   set('#waCC', S.getSetting('waCountryCode') || '91');
   set('#bargeIn', S.getSetting('bargeIn') !== false, 'checked');
   set('#streamingTts', S.getSetting('streamingTts') !== false, 'checked');
+  set('#handsFree', S.getSetting('handsFree') !== false, 'checked');
   set('#offlineChat', S.getSetting('offlineChat') !== false, 'checked');
   set('#porcupineKey', S.getSetting('porcupineKey') || '');
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
