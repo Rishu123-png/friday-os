@@ -777,3 +777,79 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .model-info{flex:1;min-width:0}
 .model-row button{flex-shrink:0}
 .model-row button[disabled]{opacity:.4;pointer-events:none}
+
+/* ================= v7.7 HUD (Tony Stark FRIDAY) ================= */
+:root { --core: #ffa63d; }
+
+/* --- Themes --- */
+[data-theme="stark"] {
+  --primary:#35c8ff; --primary-dim:#1a7ba6; --primary-bg:rgba(53,200,255,.06);
+  --secondary:#ffa63d; --accent:#35c8ff; --core:#ffa63d;
+  --bg-dark:#050d1f; --bg-card:#0a1830; --bg-card-hover:#10264a;
+  --text:#dcf3ff; --text-dim:#5f87ab; --border:#12345c;
+  --glow:0 0 20px rgba(53,200,255,.35); --glow-strong:0 0 40px rgba(53,200,255,.55);
+}
+[data-theme="crimson"] {
+  --primary:#ff3b3b; --primary-dim:#a61f2d; --primary-bg:rgba(255,59,59,.06);
+  --secondary:#ffc84d; --accent:#ffc84d; --core:#ffc84d;
+  --bg-dark:#160508; --bg-card:#240a10; --bg-card-hover:#3a121c;
+  --text:#ffe8e8; --text-dim:#a86a72; --border:#4a1624;
+  --glow:0 0 20px rgba(255,80,80,.35); --glow-strong:0 0 40px rgba(255,80,80,.55);
+}
+[data-theme="stealth"] {
+  --primary:#ffb020; --primary-dim:#8a6110; --primary-bg:rgba(255,176,32,.06);
+  --secondary:#9adcff; --accent:#ffb020; --core:#9adcff;
+  --bg-dark:#0b0b08; --bg-card:#17150c; --bg-card-hover:#262214;
+  --text:#f4ecd8; --text-dim:#8a8266; --border:#35301a;
+  --glow:0 0 20px rgba(255,176,32,.30); --glow-strong:0 0 40px rgba(255,176,32,.5);
+}
+
+/* --- Arc Reactor mic: two live data rings + tick marks --- */
+.mic-container{position:relative}
+.reactor-ring{position:absolute;border-radius:50%;pointer-events:none;opacity:.85;
+  background:conic-gradient(var(--primary) calc(var(--p,0)*1%), rgba(255,255,255,.06) 0);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+          mask:radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  transition:background .8s ease}
+.ring-outer{inset:-15px}
+.ring-mid{inset:-8px;
+  background:conic-gradient(var(--core) calc(var(--p,0)*1%), rgba(255,255,255,.05) 0);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px));
+          mask:radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px))}
+.reactor-ticks{position:absolute;inset:-22px;border-radius:50%;pointer-events:none;opacity:.30;
+  background:repeating-conic-gradient(var(--primary) 0deg 1.2deg, transparent 1.2deg 30deg);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+          mask:radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px))}
+.mic-container.listening .reactor-ticks{animation:reactorSpin 7s linear infinite;opacity:.55}
+.mic-container.listening .reactor-ring{opacity:1;filter:drop-shadow(0 0 6px var(--primary))}
+.mic-container.speaking .mic-button{box-shadow:0 0 18px var(--core),0 0 46px rgba(255,166,61,.35);border-color:var(--core)}
+@keyframes reactorSpin{to{transform:rotate(360deg)}}
+
+/* --- Systems status line (tap for details) --- */
+.systems-line{margin:14px auto 0;text-align:center;cursor:pointer;user-select:none;
+  font-family:var(--font-mono);font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--text-dim);padding:4px 10px;max-width:320px}
+.systems-line.ok{color:var(--primary);text-shadow:0 0 12px var(--primary-bg)}
+.systems-line.warn{color:var(--warning)}
+.systems-line:active{opacity:.6}
+
+/* --- HUD corner-bracket panels (widgets & cards) --- */
+.widget{position:relative;border:1px solid var(--primary-bg);border-color:rgba(120,160,255,.14)}
+.widget::before,.widget::after{content:"";position:absolute;width:12px;height:12px;pointer-events:none}
+.widget::before{top:-1px;left:-1px;border-top:2px solid var(--primary);border-left:2px solid var(--primary);opacity:.8}
+.widget::after{bottom:-1px;right:-1px;border-bottom:2px solid var(--primary);border-right:2px solid var(--primary);opacity:.8}
+.widget-header{font-family:var(--font-display);letter-spacing:.08em}
+
+/* --- Holographic chat bubbles --- */
+.message.ai .message-bubble{border:1px solid rgba(120,160,255,.22);
+  background:linear-gradient(160deg, rgba(20,40,80,.55), rgba(10,20,45,.35));
+  box-shadow:inset 0 0 24px rgba(53,200,255,.04)}
+.message.user .message-bubble{box-shadow:0 0 14px rgba(0,212,255,.18)}
+
+/* --- Composer waveform strip --- */
+.input-wave{display:flex;gap:3px;align-items:center;justify-content:center;height:0;
+  overflow:hidden;transition:height .18s ease;padding:0 8px}
+.input-wave.on{height:20px}
+.input-wave span{width:3px;height:6px;border-radius:2px;background:var(--primary);opacity:.85;
+  animation:waveJump .9s ease-in-out calc(var(--i)*.07s) infinite}
+@keyframes waveJump{0%,100%{height:5px}50%{height:18px}}
