@@ -704,6 +704,11 @@ I('find_phone', t =>
     && !/\b(papa|dad|mom|mum|mummy|bhai|didi|brother|sister|wife|husband|friend|dost)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'find_phone', on: !/\b(stop|found|band|mil gaya)\b/.test(t) } }), 9);
 
+/* ---- v8.1 EYES: visual screen reading (keeps plain "what's on my screen" on the
+   offline text reader; only explicitly-VISUAL phrasings take the Groq vision path) ---- */
+I('screen_vision', t => /\b(?:what do you see|what can you see)\s+(?:on |at |in )?(?:my |the |this )?(?:phone )?screen\b|\b(?:look at|analyze|describe)\s+(?:my |the |this )?(?:phone )?screen\b|\bscreen\s+(?:ko\s+)?(?:dekh ke bata|analyse|analyze|summary)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'screen_vision', question: /blue button|button|tap|dabao/.test(t) ? 'Find any buttons on this screen and describe their on-screen positions.' : null } }), 7);
+
 /* ---- v8.0: Karen daily brief ---- */
 I('daily_brief', t => /\b(?:morning|daily|day)\s+(?:brief|briefing|plan|update|summary)\b|\bbrief me\b|\baaj ka (?:plan|brief|update)\b|\bday\s+kaise\s+ja\s+rahi\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'daily_brief' } }), 6);
