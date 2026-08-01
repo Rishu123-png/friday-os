@@ -62,14 +62,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function init() {
   state.booted = true;
 
-  U.applyTheme(S.getSetting('uiTheme'));
+  U.applyTheme(S.getSetting('uiTheme') || 'stark');
   U.initCore($('#coreCanvas'), state);
   U.initParticles($('#particleCanvas'));
   U.animateWaveform($('#voiceWaveform'), state);
 
   await V.initSynthesis();
   V.initRecognition({
-    onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); D.tap(); },
+    onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); $('#micContainer')?.classList.add('listening'); $('#inputWave')?.classList.add('on'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
     /* v7.6.4: Android fires several "final" segments per utterance. Merging them into
        ONE submission — otherwise one spoken command executed 2-3 times and the
@@ -84,12 +84,14 @@ async function init() {
     },
     onEnd: () => {
       state.listening = false; setStatus('Tap to speak'); $('#micButton').classList.remove('listening');
+      $('#micContainer')?.classList.remove('listening'); $('#inputWave')?.classList.remove('on');
       clearTimeout(state.voiceFlush);
       if (state.voiceBuf) { const out = state.voiceBuf; state.voiceBuf = ''; handleInput(out, { fromVoice: true }); }
     },
     onError: err => {
       state.listening = false;
       $('#micButton').classList.remove('listening');
+      $('#micContainer')?.classList.remove('listening'); $('#inputWave')?.classList.remove('on');
       const msgs = {
         'no-speech': 'Didn\'t catch that. Tap to retry.',
         'not-allowed': 'Mic off: Settings > Apps > FRIDAY OS > Permissions > Microphone > Allow',
@@ -121,6 +123,13 @@ async function init() {
   D.startMicAnalyser().catch(() => {});
   if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
   loadWeatherWidget();
+
+  /* v7.7 HUD: arc-reactor rings (battery/steps) + systems status line */
+  updateReactor();
+  computeSystemsLine();
+  setInterval(updateReactor, 60000);
+  setInterval(computeSystemsLine, 120000);
+  setInterval(() => { const mc = $('#micContainer'); if (mc) mc.classList.toggle('speaking', !!state.speaking); }, 700);
 
   // greeting (v7.6.4: throttled - aggressive OEMs restart the WebView often,
   // and "Systems online" was spamming the chat on every restart)
@@ -1202,6 +1211,62 @@ async function runAction(a, hit) {
 function thinking(on) {
   state.processing = on;
   if (on) showTyping(); else hideTyping();
+}
+
+/* ================= v7.7 HUD ================= */
+/* Arc-reactor rings: outer ring = battery %, mid ring = steps-to-goal %.
+   All data optional - rings just dim when a source is unavailable. */
+async function updateReactor() {
+  try {
+    const rb = $('#ringBattery');
+    if (rb) {
+      try {
+        const b = await D.battery();
+        const pct = b && typeof b.level === 'number' ? Math.max(0, Math.min(100, b.level)) : null;
+        rb.style.setProperty('--p', pct == null ? 0 : pct);
+        rb.style.opacity = pct == null ? .25 : .85;
+        rb.title = pct == null ? 'Battery: unknown' : `Battery ${pct}%${b.charging ? ' (charging)' : ''}`;
+      } catch (e) { rb.style.opacity = .25; }
+    }
+    const rs = $('#ringSteps');
+    if (rs) {
+      try {
+        const st = await HEALTH.getSteps();
+        const goal = HEALTH.stepsGoal() || 0;
+        const sp = st && goal > 0 ? Math.min(100, Math.round(st.today / goal * 100)) : 0;
+        rs.style.setProperty('--p', sp);
+        rs.title = sp ? `Steps: ${sp}% of goal` : 'Steps: waiting for permission';
+      } catch (e) { rs.style.setProperty('--p', 0); }
+    }
+  } catch (e) {}
+}
+
+/* "ALL SYSTEMS NOMINAL" line - computed from REAL capability flags.
+   Tap it and FRIDAY posts a per-system card with fix instructions. */
+async function computeSystemsLine() {
+  const el = $('#systemsLine'); if (!el) return;
+  if (!NAT.isNative()) {
+    state.systemsRows = [];
+    el.className = 'systems-line';
+    el.textContent = 'WEB PREVIEW - RUN THE APK FOR SYSTEMS CHECK';
+    return;
+  }
+  let caps = {};
+  try { caps = await NAT.capabilities() || {}; } catch (e) {}
+  const rows = [
+    { name: 'Notification read/reply', ok: !!caps.notifications, fix: 'Special access > Notification access > FRIDAY OS ON' },
+    { name: 'FRIDAY Control (screen taps)', ok: !!caps.accessibility, fix: 'Accessibility > FRIDAY Control > ON' },
+    { name: 'Floating bubble overlay', ok: !!caps.overlay, fix: 'Display over other apps > FRIDAY OS > Allow' },
+    { name: 'Contacts', ok: !!caps.contacts, fix: 'say "permissions" or Settings > Apps > FRIDAY OS' },
+    { name: 'SMS', ok: !!caps.sendSms, fix: 'Settings > Apps > FRIDAY OS > Permissions > SMS' },
+    { name: 'Phone calls', ok: !!caps.phone, fix: 'Settings > Apps > FRIDAY OS > Permissions > Phone' }
+  ];
+  state.systemsRows = rows;
+  const bad = rows.filter(r => !r.ok).length;
+  el.className = 'systems-line ' + (bad ? 'warn' : 'ok');
+  el.textContent = bad
+    ? `${bad} SYSTEM${bad > 1 ? 'S' : ''} NEED${bad > 1 ? '' : 'S'} ATTENTION - TAP HERE`
+    : 'ALL SYSTEMS NOMINAL';
 }
 
 async function loadWeatherWidget() {
@@ -2876,6 +2941,12 @@ function bindEvents() {
   bind('#offlineChat', 'offlineChat', 'change', 'checked');
   bind('#porcupineKey', 'porcupineKey', 'input');
 
+  $('#systemsLine')?.addEventListener('click', () => {
+    const rows = state.systemsRows || [];
+    if (!rows.length) { computeSystemsLine(); return; }
+    const lines = rows.map(r => `${r.ok ? '✅' : '⚠️'} ${r.name}${r.ok ? '' : ' — ' + r.fix}`);
+    addMsg('ai', `**Systems check**\n` + lines.join('\n') + `\n\nFix a ⚠️ row, then say "read my notifications" or try the bubble again.`, { proactive: true });
+  });
   $('#setupBtn')?.addEventListener('click', () => { U.closeAllPanels(); U.showView('chat'); runSetup(); });
   $('#syncContactsBtn')?.addEventListener('click', async () => {
     if (!NAT.isNative()) return U.toast('Only in the installed app', '\u26a0');
