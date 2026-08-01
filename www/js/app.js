@@ -71,8 +71,22 @@ async function init() {
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
-    onFinal: txt => { handleInput(txt); },
-    onEnd: () => { state.listening = false; setStatus('Tap to speak'); $('#micButton').classList.remove('listening'); },
+    /* v7.6.4: Android fires several "final" segments per utterance. Merging them into
+       ONE submission — otherwise one spoken command executed 2-3 times and the
+       leftover segment leaked into the cloud chat (fake confident answers). */
+    onFinal: txt => {
+      state.voiceBuf = state.voiceBuf ? state.voiceBuf + ' ' + txt : txt;
+      clearTimeout(state.voiceFlush);
+      state.voiceFlush = setTimeout(() => {
+        const out = state.voiceBuf; state.voiceBuf = '';
+        if (out) handleInput(out, { fromVoice: true });
+      }, 900);
+    },
+    onEnd: () => {
+      state.listening = false; setStatus('Tap to speak'); $('#micButton').classList.remove('listening');
+      clearTimeout(state.voiceFlush);
+      if (state.voiceBuf) { const out = state.voiceBuf; state.voiceBuf = ''; handleInput(out, { fromVoice: true }); }
+    },
     onError: err => {
       state.listening = false;
       $('#micButton').classList.remove('listening');
@@ -108,23 +122,28 @@ async function init() {
   if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
   loadWeatherWidget();
 
-  // greeting
-  const p = AI.persona();
-  const hour = new Date().getHours();
-  const tod = I18N.greetWord(hour) || (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
-  const learnedName = MEM.getFact('user.name');
-  if (learnedName && !S.getSetting('userName')) S.setSetting('userName', learnedName);
-  const name = S.getSetting('userName') || learnedName || p.address;
-  const greet = state.messages.length
-    ? `${tod}, ${name}. Systems online.`
-    : (learnedName ? `${tod}, ${name}. Systems online.` : p.greeting);
-  addMsg('ai', greet);
-  const spoke = V.speak(greet, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
-  if (!spoke) {
-    // TTS engine may still be warming up on first launch
-    setTimeout(() => V.speak(greet, {
-      onStart: () => state.speaking = true, onEnd: () => state.speaking = false
-    }), 1500);
+  // greeting (v7.6.4: throttled - aggressive OEMs restart the WebView often,
+  // and "Systems online" was spamming the chat on every restart)
+  const lastGreetAt = S.getSetting('lastGreetAt') || 0;
+  if (Date.now() - lastGreetAt > 20 * 60 * 1000) {
+    S.setSetting('lastGreetAt', Date.now());
+    const p = AI.persona();
+    const hour = new Date().getHours();
+    const tod = I18N.greetWord(hour) || (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
+    const learnedName = MEM.getFact('user.name');
+    if (learnedName && !S.getSetting('userName')) S.setSetting('userName', learnedName);
+    const name = S.getSetting('userName') || learnedName || p.address;
+    const greet = state.messages.length
+      ? `${tod}, ${name}. Systems online.`
+      : (learnedName ? `${tod}, ${name}. Systems online.` : p.greeting);
+    addMsg('ai', greet);
+    const spoke = V.speak(greet, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    if (!spoke) {
+      // TTS engine may still be warming up on first launch
+      setTimeout(() => V.speak(greet, {
+        onStart: () => state.speaking = true, onEnd: () => state.speaking = false
+      }), 1500);
+    }
   }
 
   updateBrainBadge();
@@ -171,6 +190,14 @@ function updateBrainBadge() {
 async function handleInput(text, opts = {}) {
   text = String(text || '').trim();
   if (!text) return;
+
+  /* v7.6.4: drop duplicate submissions (voice double-final, STT retries) —
+     same text within 4s is an echo, not a new command. */
+  if (!opts.dedupeSkip) {
+    const norm = text.toLowerCase().replace(/\s+/g, ' ');
+    if (norm === state.lastSubmitted && Date.now() - state.lastSubmittedAt < 4000) return;
+    state.lastSubmitted = norm; state.lastSubmittedAt = Date.now();
+  }
 
   // ---- command chaining: "remind me X and add task Y" ----
   if (!opts.noChain) {
@@ -236,6 +263,33 @@ async function handleInput(text, opts = {}) {
     }
     if (kind === 'med_times') return createMedAlarms(text);
     if (kind === 'wifi_qr_pass') return finishWifiQr(text);
+    /* v7.6.4: whatsapp schedule slot-filling (natural language) */
+    if (kind === 'wa_sched_name') return collectWaSchedule({ name: text.replace(/^(to|for|ko)\s+/i, '').trim() });
+    if (kind === 'wa_sched_msg') return collectWaSchedule({ msg: text.trim() });
+    if (kind === 'wa_sched_time') {
+      const w = parseTime(text.toLowerCase());
+      if (!w) { state.expect = 'wa_sched_time'; return reply('Give me a time like "9pm", "tomorrow 8am", "kal 8 baje".'); }
+      return collectWaSchedule({ time: w.date.getTime() });
+    }
+  }
+
+  /* v7.6.4: bare "send" after scheduling a WhatsApp = send it now via WhatsApp
+     (was falling into the SMS path and falsely claiming "Message sent") */
+  if (/^(send|send it|send now|bhej do|bhejo|bhej de|send kar do)$/i.test(text)) {
+    const pendingWa = (S.getList(KEYS.REMINDERS) || []).filter(r => r.wa && !r.done).sort((x, y) => x.due - y.due)[0];
+    if (pendingWa && NAT.isNative()) {
+      const c = await NAT.findContact(pendingWa.wa.name);
+      if (!c || !c.phone) { reply(`I couldn't find "${pendingWa.wa.name}" in your contacts.`); return; }
+      const r = await NAT.whatsappSend(c.phone, pendingWa.wa.msg, true);
+      if (r && r.ok) {
+        S.updateItem(KEYS.REMINDERS, pendingWa.id, { done: true });
+        refresh('reminders');
+        reply(r.autoSend
+          ? `Sending "${pendingWa.wa.msg}" to ${pendingWa.wa.name} on WhatsApp.`
+          : `WhatsApp is open for ${pendingWa.wa.name} - tap send there, or enable FRIDAY Control (Accessibility) so I can press it myself.`);
+      } else reply('Could not open WhatsApp for that.');
+      return;
+    }
   }
 
   // 1) OFFLINE INTENT ENGINE
@@ -313,6 +367,26 @@ async function streamLocalChat(text) {
 }
 
 /* ================= ACTIONS ================= */
+/* v7.6.4: progressive WhatsApp scheduling - fill missing slots by asking. */
+function collectWaSchedule(slots) {
+  state.waSched = Object.assign({}, state.waSched, slots);
+  const w = state.waSched;
+  if (!w.name) { state.expect = 'wa_sched_name'; reply('Who should I send it to on WhatsApp? Give me a contact name.'); return true; }
+  if (!w.msg)  { state.expect = 'wa_sched_msg';  reply(`What should I say to ${w.name}?`); return true; }
+  if (!w.time) { state.expect = 'wa_sched_time'; reply(`When should it go? e.g. "9pm", "tomorrow 8am", "kal 8 baje".`); return true; }
+  state.waSched = null;
+  const item = S.addItem(KEYS.REMINDERS, {
+    text: `💬 WhatsApp ${w.name}: ${w.msg}`,
+    due: w.time, done: false,
+    wa: { name: w.name, msg: w.msg }
+  });
+  scheduleReminder(item);
+  refresh('reminders');
+  const ht = humanTime(new Date(w.time));
+  reply(`Scheduled - ${/^in /.test(ht) ? ht : 'at ' + ht} I'll open WhatsApp and send "${w.msg}" to ${w.name}. (Works best when the phone is unlocked - I press the send button for you.)`);
+  return true;
+}
+
 async function runAction(a, hit) {
   switch (a.type) {
     case 'open_panel': U.openPanel(a.panel); if (a.prefill) prefillPanel(a.panel, a.prefill); return true;
@@ -603,6 +677,28 @@ async function runAction(a, hit) {
       } catch (e) {}
       if (!items.length) items = recentNotifs;
       if (!items.length) { reply('Your notification shade is empty. Nothing to read.'); return true; }
+      // v7.6.4: per-app filter — "see the message of telegram"
+      const NOTIF_PKGS = {
+        whatsapp: ['whatsapp'], telegram: ['telegram'], instagram: ['instagram'],
+        gmail: ['gm', 'gmail'], messenger: ['facebook.orca'],
+        messages: ['messaging', 'mms'], sms: ['messaging', 'mms']
+      };
+      if (a.app) {
+        const key = Object.keys(NOTIF_PKGS).find(k => a.app.toLowerCase().includes(k));
+        const pats = (key ? NOTIF_PKGS[key] : [a.app.toLowerCase().replace(/\s+/g, '')]).filter(p => p.length >= 2);
+        const label = key || a.app;
+        items = items.filter(n => pats.some(p =>
+          (n.pkg || '').toLowerCase().includes(p) || (n.title || '').toLowerCase().includes(p)));
+        if (!items.length) { reply(`Nothing from ${label} in the shade right now.`); return true; }
+        const lines = items.slice(0, 5).map(n => {
+          const hidden = /sensitive notification content hidden/i.test(n.text || '');
+          return hidden
+            ? `${NAT.friendlyApp(n.pkg)} - ${n.title}: (content hidden by lock-screen privacy - disable "Hide sensitive content" for ${NAT.friendlyApp(n.pkg)} to let me read it)`
+            : `${NAT.friendlyApp(n.pkg)} - ${n.title}: ${n.text}`.slice(0, 140);
+        });
+        reply(`${items.length} from ${label}:\n` + lines.map(l => '\u2022 ' + l).join('\n'));
+        return true;
+      }
       const lines = items.slice(0, 5)
         .map(n => `${NAT.friendlyApp(n.pkg)} - ${n.title}: ${n.text}`.slice(0, 120));
       reply(`${items.length} in your shade:\n` + lines.map(l => '\u2022 ' + l).join('\n'));
@@ -759,17 +855,13 @@ async function runAction(a, hit) {
     }
 
     case 'whatsapp_schedule': {
-      if (!a.name || !a.msg) { reply('Say it like: "schedule whatsapp to mummy at 9pm saying happy birthday".'); return true; }
-      if (!a.time) { reply('Tell me when - "tomorrow 9am", "kal 8 baje", "at 9pm".'); return true; }
-      const item = S.addItem(KEYS.REMINDERS, {
-        text: `💬 WhatsApp ${a.name}: ${a.msg}`,
-        due: a.time, done: false,
-        wa: { name: a.name, msg: a.msg }
+      /* v7.6.4: natural-language slot filling - ask for the missing piece one
+         by one instead of demanding an exact command format */
+      return collectWaSchedule({
+        name: (a.name || '').replace(/^(to|for|ko)\s+/i, '').trim(),
+        msg: (a.msg || '').trim(),
+        time: a.time || null
       });
-      scheduleReminder(item);
-      refresh('reminders');
-      reply(`Scheduled - at ${humanTime(new Date(a.time))} I'll open WhatsApp and send "${a.msg}" to ${a.name}. (Works best when the phone is unlocked - I press the send button for you.)`);
-      return true;
     }
 
     case 'quick_translate': {
@@ -2289,7 +2381,13 @@ function scheduleReminder(item) {
         const num = c && (c.phone || c.number);
         if (num) {
           const r = await NAT.whatsappSend(num, item.wa.msg, true);
-          D.notify('FRIDAY', (r && r.ok ? 'WhatsApp sent to ' : 'Could not send WhatsApp to ') + item.wa.name, item.id);
+          /* v7.6.4: only claim "sent" when the accessibility auto-press actually
+             ran - otherwise be honest that the chat is open and needs one tap */
+          D.notify('FRIDAY',
+            r && r.ok
+              ? (r.autoSend ? 'WhatsApp sent to ' : 'WhatsApp is open for ') + item.wa.name
+              : 'Could not send WhatsApp to ' + item.wa.name,
+            item.id);
         } else {
           D.notify('FRIDAY', 'No number saved for ' + item.wa.name, item.id);
         }
@@ -2847,9 +2945,28 @@ function onSettingChange(key, v) {
   if (key === 'speechPitch') $('#speechPitchValue').textContent = v;
   if (key === 'wakeWord') { v ? V.startWakeWord() : V.stopWakeWord(); U.toast(v ? 'Wake word on — say "Hey Friday"' : 'Wake word off', '🎙️'); }
   if (key === 'showWidgets') $('#dashWidgets').style.display = v ? 'grid' : 'none';
-  if (key === 'backgroundService' && NAT.isNative()) v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
-  if (key === 'bootStart' && NAT.isNative()) NAT.setBootStart(v);
+  if (key === 'backgroundService' && NAT.isNative()) {
+    v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
+    if (v && !S.getSetting('batOptAsked')) {
+      S.setSetting('batOptAsked', true);
+      U.toast('One-time: set FRIDAY battery to Unrestricted so the phone never kills me', '🔋');
+      NAT.openSpecialSetting('battery_optimization').catch(() => {});
+    }
+  }
+  if (key === 'bootStart' && NAT.isNative()) {
+    NAT.setBootStart(v);
+    if (v) U.toast('Infinix/XOS also needs - Settings > Apps > FRIDAY OS > Auto-start ON', '🛡');
+  }
   if (key === 'bubbleEnabled' && NAT.isNative()) runAction({ type: 'bubble', on: v }, {});
+  if (key === 'announceNotifications' && NAT.isNative() && v) {
+    NAT.hasSpecialPermission('notification_listener').then(r => {
+      if (!r || !r.granted) {
+        U.toast('Opening Notification access - turn FRIDAY OS ON there, then say read my notifications', '🔔');
+        NAT.openSpecialSetting('notification_listener').catch(() => {});
+      }
+    }).catch(() => {});
+  }
+  if (key === 'batteryWarnFull' && v) U.toast('I will alert at 100% while the background service is running', '🔋');
   if (key === 'hindiUI') I18N.applyHindiUI();
   if (key === 'personality') { const p = AI.persona(); U.toast(`Now running as ${p.name}`, '🤖'); }
 }

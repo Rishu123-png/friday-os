@@ -135,7 +135,7 @@ I('call', t => /\b(call|dial|phone)\s+\w+/.test(t) && !/\b(recall|calling card)\
     return { say: `I don't have "${target}" in contacts. Add them in the Contacts panel, or say the number.`, action: { type: 'open_panel', panel: 'sub-contacts' } };
   }, 3);
 
-I('message', t => /\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0,
+I('message', t => /\bmessages?\s+(of|from)\s+[a-z]/.test(t) ? 0 : (/\b(text|message|whatsapp|sms)\s+\w+/.test(t) ? 1 : 0),
   t => {
     let src = t;
     // drop a leading "open whatsapp and" / "open whatsapp then"
@@ -438,12 +438,21 @@ I('storage', t => /\b(storage|disk space|free space|memory left)\b/.test(t) ? 1 
 I('bubble', t => /\b(bubble|overlay|floating)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'bubble', on: !/\b(off|hide|disable|remove)\b/.test(t) } }), 5);
 
+/* v7.6.4: per-app shade reading — "see the message of telegram", "whatsapp ke messages padho" */
+const NOTIF_APP_RE = /\b(?:messages?|msgs?|texts?|chats?)\s+(?:of|from|on|in|ke|pe|par)\s+([a-z][a-z .]{0,18}?)(?:\s+(?:padho|batao|dikhao|sunao|suno))?$/i;
 I('read_notifications', t =>
     /\b(read|see|check|show|get|any|what|my|koi)\b\s+notifications?\b/.test(t)
     || /\bnotifications?\s+(padho|batao|sunao|suno|dikhao|aayi|aya|hai|kya)\b/.test(t)
     || /\bkoi notification\b/.test(t)
+    || /\bmessages?\s+(of|from|on|in)\s+(whatsapp|telegram|instagram|gmail|messenger|messages|sms)\b/.test(t)
+    || /\b(whatsapp|telegram|instagram|gmail)\s+ke?\s+(?:messages?|msgs?|chats?)\b/.test(t)
+    || NOTIF_APP_RE.test(t)
     ? 1 : 0,
-  () => ({ say: null, action: { type: 'read_notifications' } }), 5);
+  t => {
+    const m = t.match(NOTIF_APP_RE)
+      || t.match(/\b(whatsapp|telegram|instagram|gmail)\s+ke?\s+(?:messages?|msgs?|chats?)\b/i);
+    return { say: null, action: { type: 'read_notifications', app: m ? m[1].trim() : null } };
+  }, 8);
 
 I('reply_notif', t => /\b(reply|respond)\b/.test(t) && !/^(reply to me|reply to this)$/i.test(t) ? 0.9 : 0,
   t => {
@@ -514,15 +523,26 @@ I('security_scan', t =>
 
 /* ---------- Find a person on Google Maps (location sharing) ---------- */
 const KIN_RE = /\b(dad|daddy|papa|father|aba|mom|mum|mumma|mummy|mother|parents?|brother|bhai|sister|didi|wife|husband|girlfriend|boyfriend|son|daughter|best friend|friend)\b/;
+/* v7.6.4: "<name> location which is shared by him" — person without kin word */
+const PERSON_LOC_RE = /\b([a-z][a-z]+(?:\s+[a-z][a-z]+){0,3})\s+(?:ki\s+|ka\s+|ke\s+)?location\b/i;
 
 I('find_person', t =>
-  /\b(where|find|locate|track|show me|look (for|up))\b/.test(t) && KIN_RE.test(t) ? 1 : 0,
+  /\b(where|find|locate|track|show me|look (for|up))\b/.test(t) && KIN_RE.test(t) ? 1 : 0
+  || (PERSON_LOC_RE.test(t) && /\b(shar|bheja|sent|dikha|maps?|google)\b/.test(t) ? 1 : 0),
   t => {
     const m = t.match(KIN_RE);
-    const rel = m ? m[1].toLowerCase() : null;
-    const k = rel ? kinshipName(rel) : null;
-    return { say: null, action: { type: 'find_person', rel, name: k ? k.name : null } };
-  }, 5);
+    if (m) {
+      const rel = m[1].toLowerCase();
+      const k = kinshipName(rel);
+      return { say: null, action: { type: 'find_person', rel, name: k ? k.name : null } };
+    }
+    // v7.6.4: explicit name — "show me vijay prakash location which is shared by him"
+    const pm = t.match(PERSON_LOC_RE);
+    let name = pm ? pm[1] : '';
+    name = name.replace(/\b(open|maps?|google|and|show|me|the|dear|please|kripya|where|is|find|locate|track|his|her|by)\b/gi, ' ')
+               .replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'find_person', rel: null, name: name || null } };
+  }, 6);
 
 /* ---------- Password vault (v7.3) ---------- */
 const VAULT_SAVE_RE = /\b(?:save|remember|store|keep)\s+(?:my\s+)?([a-z0-9][a-z0-9.]{1,19})\s+(?:password|passcode|pass|login|pin)\s*(?:as|is|to|:)?\s+(.{2,64})$/i;
@@ -685,10 +705,11 @@ I('find_phone', t =>
   t => ({ say: null, action: { type: 'find_phone', on: !/\b(stop|found|band|mil gaya)\b/.test(t) } }), 9);
 
 /* ---- scheduled whatsapp ---- */
-I('whatsapp_schedule', t => /\bschedule\b.*\bwhatsapp\b|\bwhatsapp\b.*\b(at \d|tomorrow|kal|schedule)\b/.test(t) ? 1 : 0,
+I('whatsapp_schedule', t => (/\bschedule\b/.test(t) && /\bwhatsapp|message|msg\b/.test(t)) || /\bwhatsapp\b.*\b(at \d|tomorrow|kal|schedule)\b/.test(t) ? 1 : 0,
   t => {
-    const to = t.match(/(?:whatsapp|to)\s+([a-z][a-z .'-]{1,30}?)(?:\s+(?:at|saying|that|\d{4}))/i);
-    const msg = t.match(/(?:saying|say|message|bol ke|bolna)\s+(.+)$/i);
+    let src = t.replace(/\bschedule\s+(?:a\s+|ek\s+)?(?:message\s+|msg\s+)?(?:on\s+|at\s+|in\s+|pe\s+)?whatsapp\b/i, '').trim();
+    const to = src.match(/(?:^|\b)(?:to|for|ko)\s+([a-z][a-z .'-]{1,30}?)(?=\s+(?:at\s+\d|\bat\b|kal\b|aaj\b|subah|shaam|raat|baje|saying|say\b|\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)\b)|$)/i);
+    const msg = src.match(/(?:saying|say|message|msg|bol ke|bolna|likhna)\s+(.+)$/i);
     const when = parseTime(t);
     return { say: null, action: {
       type: 'whatsapp_schedule',
