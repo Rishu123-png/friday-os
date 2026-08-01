@@ -19,6 +19,8 @@ const { parseAlarm } = await import('../www/js/automation.js');
 const { convertUnit, generatePassword, offlineCode } = await import('../www/js/templates.js');
 const HACKER = await import('../www/js/hacker.js');
 const { extractFacts, saveFact, getFact, kinshipName, applyPronunciations, forgetFact } = await import('../www/js/memory.js');
+const { buildLocalPrompt, shouldUseLocal, friendlyReason } = await import('../www/js/localbrain.js');
+const { formatAmbient } = await import('../www/js/ambient.js');
 const { splitCommands, autoCorrect, sentiment, semanticSearch, resolveFollowup, hinglishAliases } = await import('../www/js/nlu.js');
 
 /* ---------------- NLP: math ---------------- */
@@ -444,4 +446,64 @@ test('daily brief intent (karen mode)', () => {
 test('mission chaining splits multi-goal commands', () => {
   const parts = splitCommands('remind me to gym at 6pm and add task drink water');
   assert.ok(Array.isArray(parts) && parts.length >= 2, 'chain split failed');
+});
+
+/* ---------------- v8.1 EYES ---------------- */
+test('screen_vision routes visual screen questions, keeps offline text reader + screenshot intent', () => {
+  for (const q of ['what do you see on my screen', 'analyze my screen', 'look at the screen']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'screen_vision', 'eyes missed: ' + q + ' -> ' + (r && r.intent));
+  }
+  const s = resolve('take a screenshot');
+  assert.ok(s && s.intent !== 'screen_vision', 'plain screenshot command stolen');
+  const w = resolve("what's on my screen");
+  assert.ok(!w || w.intent !== 'screen_vision', 'offline text screen_read stolen by vision');
+});
+
+/* ---------------- v8.2 BRAIN (on-device llama.cpp) ---------------- */
+test('buildLocalPrompt wraps system + user in llama-3 headers', () => {
+  const p = buildLocalPrompt('You are FRIDAY.', 'hello boss');
+  assert.ok(p.startsWith('<|begin_of_text|><|start_header_id|>system<|end_header_id|>'));
+  assert.ok(p.includes('You are FRIDAY.<|eot_id|>'));
+  assert.ok(p.includes('<|start_header_id|>user<|end_header_id|>'));
+  assert.ok(p.endsWith('<|start_header_id|>assistant<|end_header_id|>\n\n'));
+});
+test('buildLocalPrompt survives empty input safely', () => {
+  const p = buildLocalPrompt('', '');
+  assert.ok(typeof p === 'string' && p.includes('assistant<|end_header_id|>'));
+});
+test('shouldUseLocal: toggle off never routes local', () => {
+  assert.equal(shouldUseLocal('hi', { offlineBrain: false, native: true, hasKey: false }), false);
+  assert.equal(shouldUseLocal('hi', { offlineBrain: true, native: false, hasKey: false }), false);
+});
+test('shouldUseLocal: on + no cloud key -> always local', () => {
+  assert.equal(shouldUseLocal('remind me at 6', { offlineBrain: true, native: true, hasKey: false, actionish: true }), true);
+  assert.equal(shouldUseLocal('how are you', { offlineBrain: true, native: true, hasKey: false, actionish: false }), true);
+});
+test('shouldUseLocal: with cloud key only chatter goes local, actions keep tools', () => {
+  assert.equal(shouldUseLocal('what is quantum computing', { offlineBrain: true, native: true, hasKey: true, actionish: false }), true);
+  assert.equal(shouldUseLocal('remind me at 6', { offlineBrain: true, native: true, hasKey: true, actionish: true }), false);
+});
+test('formatAmbient: empty snapshot -> empty string (prompt untouched)', () => {
+  assert.equal(formatAmbient({}), '');
+  assert.equal(formatAmbient({ notifs: [] }), '');
+});
+test('formatAmbient formats live lines and clips long notification text', () => {
+  const long = 'x'.repeat(200);
+  const s = formatAmbient({
+    timeLabel: '09:41', battery: '67%', charging: true, steps: 4211,
+    topApp: 'WhatsApp',
+    notifs: [{ app: 'Telegram', text: long }, { app: 'Gmail', title: 'Meeting at 5' }]
+  });
+  assert.ok(s.startsWith('LIVE PHONE TELEMETRY'));
+  assert.ok(s.includes('Battery: 67% (charging)'));
+  assert.ok(s.includes('Steps today: 4211'));
+  assert.ok(s.includes('Most-used app today: WhatsApp'));
+  assert.ok(s.includes('- Gmail: Meeting at 5'));
+  assert.ok(!s.includes(long), 'notification text not clipped');
+});
+test('friendlyReason words every failure honestly', () => {
+  assert.ok(friendlyReason('no_model_path').includes('Settings'));
+  assert.ok(friendlyReason('LLAMA_BINDING_MISSING - x').includes('engine missing'));
+  assert.ok(friendlyReason('load_failed').toLowerCase().includes('ram'));
 });
