@@ -837,6 +837,88 @@ public class FridayNative extends Plugin {
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
 
+    /* ============ v8.1 EYES: screenshot + coordinate tap ============ */
+    @PluginMethod
+    public void screenShot(PluginCall call) {
+        if (!FridayAccessibility.isEnabled()) { call.resolve(fail("a11y_off")); return; }
+        if (Build.VERSION.SDK_INT < 30) { call.resolve(fail("unsupported_android")); return; }
+        boolean started = FridayAccessibility.takeShot(new FridayAccessibility.ShotCb() {
+            @Override public void onShot(android.graphics.Bitmap bmp) {
+                JSObject r;
+                if (bmp == null) {
+                    r = fail("capture_failed");
+                } else {
+                    try {
+                        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, bos);
+                        bmp.recycle();
+                        r = ok();
+                        r.put("b64", android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
+                    } catch (Throwable t) { r = fail("encode_failed"); }
+                }
+                call.resolve(r);
+            }
+        });
+        if (!started) call.resolve(fail("a11y_off"));
+    }
+
+    @PluginMethod
+    public void tapAt(PluginCall call) {
+        Float xf = call.getFloat("x");
+        Float yf = call.getFloat("y");
+        boolean done = xf != null && yf != null && FridayAccessibility.tapAt(xf.floatValue(), yf.floatValue());
+        call.resolve(done ? ok() : fail(FridayAccessibility.isEnabled() ? "dispatch_failed" : "a11y_off"));
+    }
+
+    /* ============ ON-DEVICE LLM: model discovery ============ */
+
+    /** Finds *.gguf model files in Downloads, Documents and the app's own
+     *  directories, so the web layer can offer a one-tap picker instead of
+     *  making the user type a storage path. Never throws - empty list on
+     *  any storage restriction. */
+    @PluginMethod
+    public void scanModels(PluginCall call) {
+        JSArray out = new JSArray();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        try {
+            java.io.File[] roots = new java.io.File[] {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                getContext().getExternalFilesDir(null),
+                getContext().getFilesDir()
+            };
+            for (java.io.File root : roots) {
+                if (root != null && root.isDirectory()) scanDir(root, out, seen, 0);
+            }
+        } catch (Throwable ignored) {}
+        JSObject r = new JSObject();
+        r.put("models", out);
+        call.resolve(r);
+    }
+
+    private void scanDir(java.io.File dir, JSArray out, java.util.HashSet<String> seen, int depth) {
+        if (depth > 1) return;
+        java.io.File[] files;
+        try { files = dir.listFiles(); } catch (Throwable t) { return; }
+        if (files == null) return;
+        try { java.util.Arrays.sort(files); } catch (Throwable ignored) {}
+        for (java.io.File f : files) {
+            try {
+                if (f.isDirectory()) { scanDir(f, out, seen, depth + 1); continue; }
+                String name = f.getName();
+                if (name == null || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".gguf")) continue;
+                String path = f.getAbsolutePath();
+                if (seen.contains(path)) continue;
+                seen.add(path);
+                JSObject m = new JSObject();
+                m.put("path", path);
+                m.put("name", name);
+                m.put("sizeMB", (int) (f.length() / 1048576));
+                out.put(m);
+            } catch (Throwable ignored) {}
+        }
+    }
+
     /* ============ CAPABILITIES ============ */
     @PluginMethod
     public void capabilities(PluginCall call) {
