@@ -21,6 +21,8 @@ import * as VAULT from './vault.js';
 import * as HACKER from './hacker.js';
 import * as HEALTH from './health.js';
 import * as I18N from './i18n.js';
+import * as LB from './localbrain.js';
+import * as AMB from './ambient.js';
 import { humanTime, parseTime, pick } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -255,6 +257,7 @@ async function handleInput(text, opts = {}) {
   /* v7.6.4: drop duplicate submissions (voice double-final, STT retries) —
      same text within 4s is an echo, not a new command. */
   clearTimeout(state.talkWait);   // v7.8: user spoke - cancel the Karen nudge
+  if (state.llmBusy) { state.llmBusy = false; LB.abortLocal(); }  // v8.2: new input stops on-device generation
   if (!opts.dedupeSkip) {
     const norm = text.toLowerCase().replace(/\s+/g, ' ');
     if (norm === state.lastSubmitted && Date.now() - state.lastSubmittedAt < 4000) return;
@@ -445,6 +448,28 @@ async function streamLocalChat(text) {
     thinking(false);
     reply(AI.offlineReply(text));
   }
+}
+
+/* v8.1 EYES: one shared pipeline - screenshot -> vision description.
+   Honest at every failure step (a11y off, old android, no Groq key). */
+async function performScreenVision(question) {
+  if (!NAT.isNative()) return { ok: false, text: 'Screen vision needs the installed FRIDAY app.' };
+  const shot = await NAT.screenShot();
+  if (!shot || !shot.ok) {
+    if (shot && shot.reason === 'a11y_off') return { ok: false, text: 'FRIDAY Control (accessibility) is OFF. Opening settings - enable it, then ask me again.', openA11y: true };
+    if (shot && shot.reason === 'unsupported_android') return { ok: false, text: 'Screen vision needs Android 11 or newer.' };
+    return { ok: false, text: 'Screen capture failed - the current app may be protected (banking/lock screens block screenshots). Try on a normal screen.' };
+  }
+  if (!AI.hasGroq()) {
+    try {
+      const t = await NAT.readScreenText();
+      if (t && t.ok && t.text) return { ok: true, text: 'No Groq key for visual analysis, but the screen shows: ' + String(t.text).slice(0, 500) };
+    } catch (e) {}
+    return { ok: false, text: 'Visual screen analysis needs a Groq key in Settings.' };
+  }
+  const v = await AI.callGroqVision('data:image/jpeg;base64,' + shot.b64,
+    question || 'Describe what is on this phone screen: which app, what is happening, and which buttons or inputs are visible. Be brief and factual.');
+  return v && v.ok ? { ok: true, text: v.text } : { ok: false, text: 'Vision service hiccup. Try again.' };
 }
 
 /* ================= ACTIONS ================= */
@@ -966,6 +991,15 @@ async function runAction(a, hit) {
         msg: (a.msg || '').trim(),
         time: a.time || null
       });
+    }
+
+    case 'screen_vision': {
+      thinking(true);
+      const r = await performScreenVision(a.question);
+      thinking(false);
+      reply(r.text);
+      if (r.openA11y) NAT.openSpecialSetting('accessibility');
+      return true;
     }
 
     case 'daily_brief': {
@@ -1758,6 +1792,16 @@ async function runToolByName(name, args = {}) {
           return txt ? txt.slice(0, 1500) : 'The screen looks empty right now.';
         } catch (e) { return 'Screen reader error.'; }
       }
+      /* ---- v8.1 EYES: visual see + tap tools ---- */
+      case 'see_screen': {
+        const r = await performScreenVision(String(args.question || ''));
+        return r.text;
+      }
+      case 'tap_screen': {
+        if (!NAT.isNative()) return 'Screen taps need the installed FRIDAY app.';
+        const r = await NAT.tapAt(Number(args.x), Number(args.y));
+        return r && r.ok ? `Tapped at (${args.x}, ${args.y}).` : 'Tap failed - FRIDAY Control may be off, or the spot was protected.';
+      }
       case 'tell_battery': { const b = await D.battery(); return b ? `${b.level}%${b.charging ? ' charging' : ''}` : 'unknown'; }
       default: return 'Unknown tool';
     }
@@ -1773,14 +1817,80 @@ async function contactByName(name) {
 
 const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule|notifications?|reminders?|steps?|screen|doing|working|status|location|wifi|charging)\b/i;
 
+/* v8.2: try the on-device llama.cpp brain for one full answer.
+   Returns true when it produced (and rendered) a reply; false lets the
+   caller fall through to the cloud path. Never throws. */
+async function askLocalFirst(text) {
+  thinking(true);
+  state.llmBusy = true;
+  try {
+    /* Local mode has no tools: strip the tool instructions from the system
+       prompt, then bolt on live telemetry - the private ideal case: the
+       snapshot never leaves the phone. */
+    const sysLocal = AI.systemPrompt().split('TRUST & ACCURACY')[0].trim() +
+      '\nYou run fully on-device with no live tools in this mode. For actions (reminders, calls, messages) tell the user to keep cloud mode on or phrase it as a command. Never invent battery, notification or step counts.';
+    const amb = await AMB.collectAmbient();
+    const sys = sysLocal + (amb ? '\n\n' + amb : '');
+
+    let el = null, acc = '';
+    const r = await LB.askLocal(sys, text, {
+      onToken: (_, sofar) => {
+        acc = sofar;
+        if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true, source: 'on-device' }); }
+        el.querySelector('.message-bubble').innerHTML = U.renderRich(sofar);
+        scrollBottom();
+      }
+    });
+    const final = (r.ok ? r.text : acc || '').trim();
+    if (!final) {
+      if (el) {
+        el.remove();
+        const rec = state.messages[state.messages.length - 1];
+        if (rec && rec.role === 'ai') state.messages.pop();   // don't persist a blank bubble
+        saveChat();
+      }
+      if (!state.llmHintShown) {
+        state.llmHintShown = true;
+        U.toast('On-device brain not ready (' + LB.friendlyReason(r.reason) + ') — using the other engines', '🧠');
+      }
+      return false;
+    }
+    if (el) {
+      el.querySelector('.message-bubble').innerHTML = U.renderRich(final);
+      const rec = state.messages[state.messages.length - 1];
+      if (rec) { rec.text = final; saveChat(); }
+    } else {
+      addMsg('ai', final, { source: 'on-device' });
+    }
+    V.speak(final, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    S.remember('ai', final);
+    armTalkWait(final);   // Karen loop works on-device too
+    return true;
+  } catch (e) {
+    console.warn('[localbrain]', e.message || e);
+    if (!state.llmHintShown) { state.llmHintShown = true; U.toast('On-device brain hiccup — using the other engines', '🧠'); }
+    return false;
+  } finally {
+    state.llmBusy = false;
+    thinking(false);
+  }
+}
+
 async function askGroq(text) {
+  /* v8.2 BRAIN: on-device llama.cpp answers first when the user enabled it
+     and the message needs no tools. Falls through to cloud on any failure. */
+  if (LB.wantLocal(text, ACTIONISH.test(text))) {
+    const done = await askLocalFirst(text);
+    if (done) return;
+  }
   thinking(true);
   const history = state.messages.slice(-10).map(m => ({
     role: m.role === 'user' ? 'user' : 'assistant',
     content: m.text
   }));
   const ctxBrief = MEM.buildContext({ maxFacts: 22, maxPatterns: 6 });
-  const sys = AI.systemPrompt() + (ctxBrief ? '\n\n' + ctxBrief : '') +
+  const amb = await AMB.collectAmbient();   // v8.2: live telemetry in every cloud call
+  const sys = AI.systemPrompt() + (amb ? '\n\n' + amb : '') + (ctxBrief ? '\n\n' + ctxBrief : '') +
     '\nIf the user asks you to DO something (remind, alarm, call, message, note, weather...), use the appropriate tool. Confirm briefly afterward.';
   const msgs = [{ role: 'system', content: sys }, ...history, { role: 'user', content: text }];
 
@@ -2562,9 +2672,11 @@ function buildMsgEl(msg, opts = {}) {
   const time = new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const link = opts.link ? `<a class="msg-link" href="${opts.link}" target="_blank" rel="noopener">Read more →</a>` : '';
   if (opts.proactive) div.classList.add('proactive');
-  /* v8.0 Badge of Truth: shows whether an answer came from live phone data */
+  /* v8.0 Badge of Truth: shows whether an answer came from live phone data.
+     v8.2: third state - generated entirely on-device by the local model. */
   const badge = opts.source === 'live' ? ' <span class="src-badge live" title="Built from LIVE on-device data">&#9889; live</span>'
-              : opts.source === 'mind' ? ' <span class="src-badge mind" title="From general knowledge - not live phone data">&#128173; mind</span>' : '';
+              : opts.source === 'mind' ? ' <span class="src-badge mind" title="From general knowledge - not live phone data">&#128173; mind</span>'
+              : opts.source === 'on-device' ? ' <span class="src-badge local" title="Generated 100% on this phone - no cloud, no key">&#129504; on-device</span>' : '';
   div.innerHTML = `<div class="message-bubble">${U.renderRich(msg.text)}${link}</div>
     <div class="message-meta"><span class="message-label">${label}${badge}</span><span>${time}</span></div>`;
   return div;
@@ -3132,6 +3244,12 @@ function bindEvents() {
   bind('#streamingTts', 'streamingTts', 'change', 'checked');
   bind('#handsFree', 'handsFree', 'change', 'checked');
   bind('#offlineChat', 'offlineChat', 'change', 'checked');
+  bind('#offlineBrain', 'offlineBrain', 'change', 'checked');
+  bind('#llmModelPath', 'llmModelPath', 'input');
+  const llmScan = $('#llmScan'), llmLoad = $('#llmLoad'), llmUnload = $('#llmUnload');
+  if (llmScan) llmScan.addEventListener('click', llmScanUI);
+  if (llmLoad) llmLoad.addEventListener('click', llmLoadUI);
+  if (llmUnload) llmUnload.addEventListener('click', llmUnloadUI);
   bind('#porcupineKey', 'porcupineKey', 'input');
 
   $('#systemsLine')?.addEventListener('click', () => {
@@ -3233,6 +3351,65 @@ function onSettingChange(key, v) {
   if (key === 'batteryWarnFull' && v) U.toast('I will alert at 100% while the background service is running', '🔋');
   if (key === 'hindiUI') I18N.applyHindiUI();
   if (key === 'personality') { const p = AI.persona(); U.toast(`Now running as ${p.name}`, '🤖'); }
+  if (key === 'offlineBrain') {
+    if (v && !NAT.isNative()) U.toast('On-device brain only works inside the installed APK - web build keeps using cloud', 'ℹ️');
+    else if (v && !(S.getSetting('llmModelPath') || '').trim()) U.toast('Pick a .gguf model below (Scan finds them in Downloads), then Load', '🧠');
+    else if (v) U.toast('On-device brain on — conversations run 100% on this phone', '🧠');
+    refreshLlmStatus();
+  }
+  if (key === 'llmModelPath') refreshLlmStatus();
+}
+
+/* ================= v8.2 AI CORE (on-device brain UI) ================= */
+
+function llmBase(p) { return String(p || '').split('/').pop() || p; }
+
+async function refreshLlmStatus() {
+  const chip = $('#llmStatusChip');
+  if (!chip) return;
+  if (!NAT.isNative()) { chip.textContent = 'Engine status: web build — engine ships only in the installed APK.'; return; }
+  if (!NAT.llmAvailable()) { chip.textContent = 'Engine status: llama.cpp plugin missing in this build.'; return; }
+  const st = await NAT.llmStatus();
+  const path = (S.getSetting('llmModelPath') || '').trim();
+  if (st.reason && String(st.reason).includes('LLAMA_BINDING_MISSING')) {
+    chip.textContent = 'Engine status: binding missing — rebuild with native/add_llama_dep.py.';
+  } else if (st.loaded) {
+    chip.textContent = `Engine status: ● loaded — ${llmBase(st.modelPath)} · ${st.freeRamMB || '?'} MB free heap`;
+  } else {
+    chip.textContent = 'Engine status: ○ ready, no model loaded' + (path ? ` — will load ${llmBase(path)} on first use` : ' — set a .gguf path');
+  }
+}
+
+async function llmScanUI() {
+  U.toast('Scanning Downloads/Documents for .gguf models…', '🔍');
+  const models = await NAT.scanModels();
+  const row = $('#llmPickRow'), sel = $('#llmPick');
+  if (!models.length) { U.toast('No .gguf files found. Download one into Downloads first (0.8–2.5 GB Q4 models).', '🧠'); return; }
+  if (sel) {
+    sel.innerHTML = models.map(m =>
+      `<option value="${m.path}">${m.name} · ${m.sizeMB} MB</option>`).join('');
+    if (row) row.style.display = '';
+    sel.onchange = () => { S.setSetting('llmModelPath', sel.value); const inp = $('#llmModelPath'); if (inp) inp.value = sel.value; };
+    S.setSetting('llmModelPath', models[0].path);
+    const inp = $('#llmModelPath'); if (inp) inp.value = models[0].path;
+  }
+  U.toast(`Found ${models.length} model(s) — tap Load to wake the on-device brain`, '🧠');
+  refreshLlmStatus();
+}
+
+async function llmLoadUI() {
+  const path = (S.getSetting('llmModelPath') || '').trim();
+  if (!path) { U.toast('Set a model path first (or Scan)', '🧠'); return; }
+  U.toast(`Loading ${llmBase(path)} — first load maps the file, give it a moment…`, '⬇️');
+  const r = await NAT.llmLoad(path);
+  U.toast(r.ok ? `Loaded: ${llmBase(path)}. Ask me anything — no internet needed.` : 'Load failed: ' + LB.friendlyReason(r.reason), r.ok ? '🧠' : '⚠️');
+  refreshLlmStatus();
+}
+
+async function llmUnloadUI() {
+  await NAT.llmUnload();
+  U.toast('On-device model unloaded — RAM freed', '🧠');
+  refreshLlmStatus();
 }
 
 function syncSettingsUI() {
@@ -3262,6 +3439,9 @@ function syncSettingsUI() {
   set('#streamingTts', S.getSetting('streamingTts') !== false, 'checked');
   set('#handsFree', S.getSetting('handsFree') !== false, 'checked');
   set('#offlineChat', S.getSetting('offlineChat') !== false, 'checked');
+  set('#offlineBrain', S.getSetting('offlineBrain'), 'checked');
+  set('#llmModelPath', S.getSetting('llmModelPath') || '');
+  refreshLlmStatus();
   set('#porcupineKey', S.getSetting('porcupineKey') || '');
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');

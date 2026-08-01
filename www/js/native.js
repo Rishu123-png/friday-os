@@ -169,6 +169,9 @@ export async function getUsageStats(days = 1) {
 export async function readScreenText() {
   return call('readScreenText');
 }
+/* v8.1 EYES */
+export async function screenShot() { return call('screenShot'); }
+export async function tapAt(x, y) { return call('tapAt', { x, y }); }
 export async function openUrl(url) {
   return call('openUrl', { url });
 }
@@ -358,6 +361,85 @@ export function onSecurityAlert(cb) {
 export async function wifiAudit() { return call('wifiAudit'); }
 export async function lanScan() { return call('lanScan'); }
 export async function portScan(host) { return call('portScan', { host }); }
+
+/* ================= ON-DEVICE LLM (llama.cpp) =================
+   JS half of the LlamaCpp native plugin. The AAR with the C++ engine is
+   bundled by native/add_llama_dep.py; the GGUF model file is picked by
+   the user at runtime (too big to ship inside the APK).
+   Every call degrades to { ok:false, reason } - nothing throws. */
+const llama = () => pluginNamed('LlamaCpp');
+
+/** True when the native engine plugin exists (installed APK builds). */
+export function llmAvailable() { return isNative() && !!llama(); }
+
+export async function llmStatus() {
+  const p = llama();
+  if (!p || typeof p.status !== 'function') return { ok: false, loaded: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return { ok: true, ...(await p.status()) }; }
+  catch (e) { return { ok: false, loaded: false, reason: e?.message || 'error' }; }
+}
+
+export async function llmLoad(path, opts = {}) {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try {
+    await p.loadModel({
+      filePath: path,
+      nCtx: opts.nCtx || 4096,
+      nThreads: opts.nThreads || 4,
+      nGpuLayers: opts.nGpuLayers || 0
+    });
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: e?.message || 'load_failed' }; }
+}
+
+export async function llmUnload() {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { await p.unloadModel(); return { ok: true }; }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+/** Streams tokens through the plugin's "token" event while generating. */
+export async function llmGenerate(prompt, opts = {}, onToken = null) {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  let sub = null;
+  try {
+    if (onToken && p.addListener) sub = p.addListener('token', ev => onToken(ev.text || ''));
+    const res = await p.generate({
+      prompt,
+      stream: !!onToken,
+      temperature: opts.temperature !== undefined ? opts.temperature : 0.7,
+      topP: opts.topP !== undefined ? opts.topP : 0.9,
+      topK: opts.topK !== undefined ? opts.topK : 40,
+      repeatPenalty: opts.repeatPenalty !== undefined ? opts.repeatPenalty : 1.1,
+      nPredict: opts.nPredict || 512,
+      stop: Array.isArray(opts.stop) ? opts.stop : []
+    });
+    return { ok: true, text: (res && res.text) || '' };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'generate_failed' };
+  } finally {
+    if (sub) { try { sub.remove(); } catch (_) {} }
+  }
+}
+
+export async function llmAbort() {
+  const p = llama();
+  if (!p) return { ok: false };
+  try { await p.abort(); return { ok: true }; }
+  catch (_) { return { ok: false }; }
+}
+
+/** Finds *.gguf files on device storage (Downloads/Documents/app dirs). */
+export async function scanModels() {
+  const r = await call('scanModels');
+  return r.ok && Array.isArray(r.models) ? r.models : [];
+}
+
+/** Battery level + charging from the native BatteryManager. */
+export async function batteryDetail() { return call('getBatteryDetail'); }
 
 /* ================= CAPABILITY REPORT ================= */
 /** What actually works on this device right now */
