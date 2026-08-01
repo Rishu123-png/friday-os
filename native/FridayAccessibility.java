@@ -253,4 +253,46 @@ public class FridayAccessibility extends AccessibilityService {
         }
         return false;
     }
+
+    /* ============ v8.1 EYES: on-demand screenshot + coordinate tap ============ */
+    public interface ShotCb { void onShot(android.graphics.Bitmap bmp); }
+
+    /** One fresh frame via the accessibility screenshot API (Android 11+).
+        No consent dialog, no MediaProjection stream - on-demand and light. */
+    public static boolean takeShot(final ShotCb cb) {
+        final FridayAccessibility svc = instance;
+        if (svc == null || cb == null) return false;
+        if (android.os.Build.VERSION.SDK_INT < 30) return false;
+        try {
+            svc.takeScreenshot(android.view.Display.DEFAULT_DISPLAY, svc.getMainExecutor(),
+                new AccessibilityService.TakeScreenshotCallback() {
+                    @Override public void onSuccess(AccessibilityService.ScreenshotResult res) {
+                        android.graphics.Bitmap out = null;
+                        try {
+                            android.hardware.HardwareBuffer buf = res.getHardwareBuffer();
+                            android.graphics.Bitmap hw = android.graphics.Bitmap.wrapHardwareBuffer(buf, res.getColorSpace());
+                            if (buf != null) buf.close();
+                            if (hw != null) { out = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false); hw.recycle(); }
+                        } catch (Throwable ignored) {}
+                        cb.onShot(out);
+                    }
+                    @Override public void onFailure(int errorCode) { cb.onShot(null); }
+                });
+            return true;
+        } catch (Throwable t) { return false; }
+    }
+
+    /** Physical tap at exact pixel coordinates - pairs with vision ("tap the blue button"). */
+    public static boolean tapAt(float x, float y) {
+        FridayAccessibility svc = instance;
+        if (svc == null || android.os.Build.VERSION.SDK_INT < 24) return false;
+        try {
+            android.graphics.Path p = new android.graphics.Path();
+            p.moveTo(x, y);
+            android.accessibilityservice.GestureDescription g = new android.accessibilityservice.GestureDescription.Builder()
+                .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(p, 0, 60)).build();
+            svc.dispatchGesture(g, null, null);
+            return true;
+        } catch (Throwable t) { return false; }
+    }
 }
