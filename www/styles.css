@@ -861,5 +861,15 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .src-badge.live{color:var(--success,#00ff88);border:1px solid rgba(0,255,136,.35);
   text-shadow:0 0 8px rgba(0,255,136,.4)}
 .src-badge.mind{color:var(--text-dim);border:1px solid rgba(255,255,255,.14)}
+.src-badge.local{color:#ffb347;border:1px solid rgba(255,179,71,.45);
+  text-shadow:0 0 6px rgba(255,179,71,.5)}
+
+/* ---- v8.2 AI Core: settings action chips ---- */
+.chip-btn{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--primary,#00d4ff);cursor:pointer;
+  background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.35);
+  border-radius:6px;padding:.45rem .7rem;transition:background .2s ease}
+.chip-btn:active{background:rgba(0,212,255,.2)}
+.llm-actions{display:flex;gap:.6rem;justify-content:flex-start}
 /* Mission checklist spacing */
 .message.proactive .message-bubble li{list-style:none}
