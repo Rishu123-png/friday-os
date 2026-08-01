@@ -433,3 +433,15 @@ test('find_person accepts an explicit name with shared-location phrasing', () =>
   const nav = resolve('where is connaught place');
   assert.ok(!nav || nav.intent !== 'find_person', 'place lookup stolen');
 });
+
+/* ---------------- v8.0 STARK ---------------- */
+test('daily brief intent (karen mode)', () => {
+  for (const q of ['morning brief', 'daily briefing', 'brief me', 'aaj ka plan']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'daily_brief', 'brief missed: ' + q + ' -> ' + (r && r.intent));
+  }
+});
+test('mission chaining splits multi-goal commands', () => {
+  const parts = splitCommands('remind me to gym at 6pm and add task drink water');
+  assert.ok(Array.isArray(parts) && parts.length >= 2, 'chain split failed');
+});
