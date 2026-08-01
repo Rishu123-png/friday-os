@@ -72,7 +72,8 @@ export function applyTheme(name) {
   document.documentElement.dataset.theme = name === 'cyber' ? '' : name;
   const colors = {
     cyber: '#0a0a1a', neon: '#0f0520', matrix: '#000a00',
-    sunset: '#1a0a05', midnight: '#000000'
+    sunset: '#1a0a05', midnight: '#000000',
+    stark: '#050d1f', crimson: '#160508', stealth: '#0b0b08'
   };
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = colors[name] || '#0a0a1a';
