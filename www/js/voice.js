@@ -63,6 +63,7 @@ export async function initSynthesis() {
       // native TTS events
       NP().addListener('ttsStart', () => { speaking = true; });
       NP().addListener('ttsDone', () => {
+        clearTimeout(speakWatch);               // v8.3: real done beats the watchdog
         speaking = false;
         if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
       });
@@ -359,6 +360,16 @@ export function stopWakeWord() {
 /* ================= SPEAK ================= */
 
 let pendingEnd = null;
+let speakWatch = null;   // v8.3 watchdog: if ttsDone never arrives (engine
+                         // hiccup), FRIDAY must not believe she speaks forever
+
+/* Force-release a silently-dead utterance so feeds/everything can continue. */
+function releaseStuckSpeech() {
+  if (!speaking) return;
+  speaking = false;
+  try { NP() && NP().stopSpeaking && NP().stopSpeaking().catch(() => {}); } catch (_) {}
+  if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
+}
 
 function cleanForSpeech(text) {
   let out = String(text)
@@ -390,11 +401,18 @@ export function speak(text, { onStart, onEnd } = {}) {
     NP().speak({
       text: clean,
       rate: parseFloat(getSetting('speechRate')) || 1,
-      pitch: parseFloat(getSetting('speechPitch')) || 1.1,
+      pitch: parseFloat(getSetting('speechPitch') ) || 1.1,
       lang: getSetting('voiceLang') || 'en-US'
     }).then(r => {
       if (r && r.ok !== false) {
         armBargeIn();                       // hot mic while talking
+        /* v8.3: ttsDone is normally the truth, but some engines drop the
+           callback (QUEUE_FLUSH races, OEM TTS bugs). Without a watchdog
+           `speaking` stayed true forever -> hands-free chain died and the
+           voice felt "broken". Estimate length, then force-release. */
+        clearTimeout(speakWatch);
+        const est = 1600 + clean.split(/\s+/).length * 560;   // ~ 2 words/sec
+        speakWatch = setTimeout(releaseStuckSpeech, Math.min(est, 16000));
       } else {                              // TTS unavailable
         speaking = false;
         pendingEnd = null;
@@ -462,6 +480,7 @@ let speechEpoch = 0;
 
 function stopCurrent({ bump = false } = {}) {
   if (bump) speechEpoch++;
+  clearTimeout(speakWatch);
   if (useNative()) {
     speaking = false;
     const release = pendingEnd;      // release any feed pump waiting on this sentence
