@@ -37,6 +37,48 @@ public class FridayNotificationService extends NotificationListenerService {
         long when;
     }
 
+    /* ---- v9.0 notification history ring (deleted-message keeper) ----
+       Every posted notification's text is kept locally so history and the
+       "what did they delete?" question still work after the sender unsends.
+       Local SharedPreferences only - never leaves the phone. */
+    private static final String PREFS = "friday_notif_log";
+    private static final int LOG_MAX = 300;
+
+    public static synchronized void appendLog(Context ctx, String pkg, String title, String text) {
+        try {
+            if ((title == null || title.isEmpty()) && (text == null || text.isEmpty())) return;
+            android.content.SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            org.json.JSONArray arr;
+            try { arr = new org.json.JSONArray(sp.getString("items", "[]")); }
+            catch (Exception e) { arr = new org.json.JSONArray(); }
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("pkg", pkg);
+            o.put("title", title == null ? "" : (title.length() > 120 ? title.substring(0, 120) : title));
+            o.put("text", text == null ? "" : (text.length() > 240 ? text.substring(0, 240) : text));
+            o.put("when", System.currentTimeMillis());
+            arr.put(o);
+            while (arr.length() > LOG_MAX) arr.remove(0);
+            sp.edit().putString("items", arr.toString()).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    public static org.json.JSONArray readLog(Context ctx, String pkgFilter, int limit) {
+        org.json.JSONArray out = new org.json.JSONArray();
+        try {
+            android.content.SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            org.json.JSONArray arr = new org.json.JSONArray(sp.getString("items", "[]"));
+            String q = pkgFilter == null ? "" : pkgFilter.toLowerCase(java.util.Locale.ROOT);
+            int n = 0;
+            for (int i = arr.length() - 1; i >= 0 && n < limit; i--) {
+                org.json.JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                if (!q.isEmpty() && !o.optString("pkg", "").toLowerCase(java.util.Locale.ROOT).contains(q)) continue;
+                out.put(o); n++;
+            }
+        } catch (Throwable ignored) {}
+        return out;
+    }
+
     public static void setPlugin(FridayNative p) { plugin = p; }
 
     @Override
@@ -135,6 +177,18 @@ public class FridayNotificationService extends NotificationListenerService {
             if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
 
             captureReplyAction(pkg, n);   // v2: remember how to answer this
+
+            /* v9.0: local history ring - written BEFORE any plugin check, so
+               history keeps working in the background. Powers the deleted-
+               message keeper and the notifications digest. Local only. */
+            Bundle ex0 = n.extras;
+            if (ex0 != null) {
+                CharSequence t0 = ex0.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence x0 = ex0.getCharSequence(Notification.EXTRA_TEXT);
+                appendLog(getApplicationContext(), pkg,
+                        t0 == null ? "" : t0.toString(),
+                        x0 == null ? "" : x0.toString());
+            }
 
             if (plugin == null) return;
             Bundle ex = n.extras;
