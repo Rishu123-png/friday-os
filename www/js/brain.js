@@ -5,7 +5,7 @@
    Each intent: { id, score(text) -> 0..1, run(text, ctx) -> {say, action?} } */
 
 import { getSetting, KEYS, addItem, getList, removeItem, updateItem, remember } from './store.js';
-import { parseTime, humanTime, safeMath, cleanSubject, fuzzyHas, keywordScore, pick } from './nlp.js';
+import { parseTime, humanTime, safeMath, cleanSubject, fuzzyHas, keywordScore, pick, wordToNum } from './nlp.js';
 import { persona } from './ai.js';
 import { convertUnit, generatePassword } from './templates.js';
 import { parseAlarm, parseRoutine, findRoutine, alarms, describeAlarm } from './automation.js';
@@ -407,7 +407,30 @@ I('brightness', t => /\b(brightness|screen bright)\b/.test(t) ? 1 : 0,
     return { say: null, action: { type: 'sys_brightness', percent: pct } };
   }, 5);
 
-I('media', t => /\b(play|pause|resume|next song|next track|previous song|skip|stop music)\b/.test(t) && !/\b(play (a |the )?(game|video)|playlist)\b/.test(t) ? 1 : 0,
+/* ---- v8.4 TRUE CONTROL: no more play/music confusion ---- */
+/* "i like to play" / bare "play" / "let's play" — CONTEXT decides in app.js:
+   last offer was a game -> open the game; otherwise resume media.  */
+I('play_context', t => /^(?:play|let'?s play|play it|play the game|haan play|play karo|game play)\s*$|\b(?:i (?:would |really )?like to play|i want to play|i wanna play|let'?s play|yes,? let'?s play|haan,? play karo|game khelna (?:hai|he)|mujhe khelna hai)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'play_context' } }), 8);
+
+/* "play candy crush" / "khelo ludo" — a NAMED game or app. Music words are
+   excluded so "play music" still goes to the media keys. */
+I('play_game', t => {
+    if (/\b(?:on youtube|on spotify|youtube|spotify)\b/.test(t)) return 0;   // yt_play/spotify own those
+    const m = t.match(/\b(?:play|khelo|khelna)\s+([a-z0-9][a-z0-9 .'-]{1,28})\s*$/);
+    if (!m) return 0;
+    return /^(music|songs?|gaana|gane|radio|playlist|spotify|something|anything|a game|the game|games)$/.test(m[1].trim()) ? 0 : 1;
+  },
+  t => {
+    const m = t.match(/\b(?:play|khelo|khelna)\s+([a-z0-9][a-z0-9 .'-]{1,28})\s*$/);
+    return { say: null, action: { type: 'play_game', name: m ? m[1].trim() : '' } };
+  }, 7);
+
+/* "off the music" / "music band karo" / "stop the music" — real media keys. */
+I('media_off', t => /\b(?:stop|pause|band karo|band krdo|band kar do|rok do|rok lo)\s+(?:the\s+)?(?:music|song|gaana|audio|media)\b|\bmusic\s+(?:band|band karo|band kar do|stop|off|pause|rok do)\b|\b(?:turn off|off|kill)\s+(?:the\s+)?music\b|\b(?:music|gaana|song|audio|volume)\s+turn off\b|\bgaana band\b|\bsong (?:off|band|stop)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'media', action: /\bstop\b/.test(t) ? 'stop' : 'pause' } }), 6);
+
+I('media', t => /\b(play music|resume|pause|next song|next track|previous song|previous track|skip(?:\s(?:song|track))?)\b/.test(t) ? 1 : 0,
   t => {
     let a = 'playpause';
     if (/\bnext|skip\b/.test(t)) a = 'next';
@@ -676,12 +699,15 @@ I('med_plan', t => /\b(medicine|medicines|dawai|dawa|tablet|tablet lelo)\b.*\b(r
 I('eye_break', t => /\b(eye break|eye breaks|20-20-20|eye rest)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'eye_break', on: !/\b(off|stop|disable|band)\b/.test(t) } }), 5);
 
-/* ---- focus mode ---- */
-I('focus_mode', t => /\b(focus mode|pomodoro|deep work|study mode|do not disturb mode)\b/.test(t) ? 1 : 0,
+/* ---- focus mode (v9: hours/ghante + dnd-for + Hindi off-words) ---- */
+I('focus_mode', t => /\b(focus mode|focus for|pomodoro|deep work|study mode|do not disturb mode|dnd for|concentrate mode|(?:stop|end|exit)\s+(?:the\s+)?(?:focus|pomodoro|dnd|deep work)|focus\s+(?:off|band)|dnd\s+off)\b/.test(t) ? 1 : 0,
   t => {
-    if (/\b(off|stop|end|band|disable)\b/.test(t)) return { say: null, action: { type: 'focus_mode', off: true } };
-    const m = t.match(/(\d{1,3})\s*(min|minute)/);
-    return { say: null, action: { type: 'focus_mode', minutes: m ? +m[1] : 25 } };
+    if (/\b(off|stop|end|band|disable|hatao)\b/.test(t)) return { say: null, action: { type: 'focus_mode', off: true } };
+    const m = t.match(/(\d{1,3})\s*(min(?:utes?)?|mins?|hours?|ghante|hr)/);
+    let mins = m ? +m[1] : 25;
+    if (m && /hour|ghante|hr/.test(m[0])) mins *= 60;
+    if (mins > 720) mins = 720;
+    return { say: null, action: { type: 'focus_mode', minutes: mins } };
   }, 7);
 
 /* ---- screen time ---- */
@@ -708,6 +734,95 @@ I('find_phone', t =>
    offline text reader; only explicitly-VISUAL phrasings take the Groq vision path) ---- */
 I('screen_vision', t => /\b(?:what do you see|what can you see|what am i seeing|what am i looking at)\s+(?:on |at |in )?(?:my |the |this )?(?:phone |mobile )?screen\b|\b(?:look at|analyze|analyse|describe)\s+(?:my |the |this )?(?:phone |mobile )?screen\b|\bscreen\s+pe\s+kya\b|\bscreen\s+(?:ko\s+)?(?:dekh ke bata|dekhkar bata|analyse|analyze|summary)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'screen_vision', question: /blue button|button|tap|dabao/.test(t) ? 'Find any buttons on this screen and describe their on-screen positions.' : null } }), 7);
+
+/* ================= v9.0 APEX ================= */
+
+/* A1 AI Wallpaper Forge */
+I('wallpaper', t => /\bwallpaper\b/.test(t) && /\b(make|create|generate|banao|bana do|set|change|laga|of|with|new|nikal)\b/.test(t) ? 1 : 0,
+  t => {
+    let topic = '';
+    const m1 = t.match(/wallpaper\s+(?:of|with|about|pe|ka|par|banao|bana do|nikal)\s+(.+)/);
+    const m2 = t.match(/(?:make|create|generate|banao|bana do)\s+(?:me\s+)?(?:a\s+)?(?:new\s+)?wallpaper\s+(.+)/);
+    if (m1) topic = m1[1].trim();
+    else if (m2 && !/^(of|with|about)\b/.test(m2[1])) topic = m2[1].trim();
+    if (/^(change|set|laga do|new|nayi)$/.test(topic)) topic = '';
+    return { say: null, action: { type: 'wallpaper', topic } };
+  }, 6);
+
+/* A3 notification history + deleted-message keeper + digest */
+I('notif_history', t => /\b(deleted messages?|what did (they|he|she|[a-z']{2,}) delete|notification history|old notifications?|purani notifications?|kal ki notifications?)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'notif_history' } }), 6);
+I('notif_digest', t => /\b(whatsapp digest|notification digest|aaj ka whatsapp|whatsapp (?:ka )?summary|notifications? (?:ka )?summary|summari[sz]e (?:my )?(?:whatsapp|notifications?))\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'notif_digest', app: /whatsapp/.test(t) ? 'whatsapp' : (/telegram/.test(t) ? 'telegram' : '') } }), 6);
+
+/* A4: focus_mode and screen_time upgraded in-place above/below (scroll police
+       lives in app.js); the v9 additions here avoid duplicates. */
+
+/* A5 SOS guardian */
+I('sos', t => (/\bcancel\b|\bstop\b/.test(t) ? 0 :
+  (/^(?:emergency|sos|help me|bachao|save me|madad)\b|\b(?:s\.?o\.?s\.?|bachao|meri madad karo)\b/.test(t) ? 1 : 0)),
+  () => ({ say: null, action: { type: 'sos' } }), 9);
+I('sos_cancel', t => /\bcancel (?:the )?sos\b|\bstop sos\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'sos_cancel' } }), 9);
+I('sos_set_contact', t => /emergency contact (?:is|=|:)\s*[+\d][\d\s-]{5,}/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/emergency contact (?:is|=|:)\s*([+\d][\d\s-]{5,})/);
+    return { say: null, action: { type: 'sos_set_contact', number: m[1].replace(/[\s-]/g, '') } };
+  }, 8);
+
+/* A6 dictation (Rambler-style) */
+I('dictate', t => /\b(?:dictate|dictation|dictate karo)\b|\bmessage likh do\b|\blikh do na message\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'dictate' } }), 6);
+
+/* A7 parked car */
+I('park_save', t => /\b(?:parked here|mark my car|car parked|remember parking|gaadi (?:yahan )?park|parking yaad rakh)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'park_save' } }), 7);
+I('park_find', t => /\bwhere (?:is|did) (?:i\s+)?(?:park|my car)\b|\bfind my car\b|\bgaadi kahan\b|\bcar kahan\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'park_find' } }), 7);
+
+/* A8 sleep timer */
+I('sleep_timer', t => /\bsleep timer\b|\bstop (?:the )?music in\s+|\bmusic band kar dena\b|\bturn off music in\s+/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/(\d+)\s*(min(?:utes?)?|mins?|hours?|ghante|hr)/);
+    let mins = m ? parseInt(m[1], 10) : 20;
+    if (m && /hour|ghante|hr/.test(m[0])) mins *= 60;
+    if (!m) {
+      const wm = t.match(/(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|sixty)\s*(min|minutes|hours?)/);
+      if (wm) { const n = wordToNum(wm[1]); if (n) mins = n * (/hour/.test(wm[0]) ? 60 : 1); }
+    }
+    if (!mins || mins > 480) mins = 20;
+    return { say: null, action: { type: 'sleep_timer', minutes: mins } };
+  }, 7);
+
+/* A9 read page aloud */
+I('read_page', t => /\b(?:read|padho|padh ke sunao)\s+(?:this|ye|yeh)\s+(?:article|page|link|story)\b|\bread aloud\b|\barticle sunao\b|\bread https?:\/\/\S+/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/https?:\/\/\S+/);
+    return { say: null, action: { type: 'read_page', url: m ? m[0] : '' } };
+  }, 6);
+
+/* A10 watchers (message + screen) */
+I('watch_add', t => t.match(/watch (?:my )?(whatsapp|telegram|instagram|screen) for\s+(.+)/)
+                || t.match(/(?:ping|alert|notify)\s+(?:me\s+)?(?:when|if|jab)\s+(.+)/)
+                || t.match(/batana (?:jab|jub)\s+(.+)\s+(?:aaye|message|text)/) ? 1 : 0,
+  t => {
+    let needle = '', app = '';
+    const w = t.match(/watch (?:my )?(whatsapp|telegram|instagram|screen) for\s+(.+)/);
+    if (w) { app = w[1]; needle = w[2].trim(); }
+    else {
+      const m1 = t.match(/(?:ping|alert|notify)\s+(?:me\s+)?(?:when|if|jab)\s+(.+)/);
+      const m2 = t.match(/batana (?:jab|jub)\s+(.+?)\s+(?:aaye|message|text)/);
+      needle = (m1 ? m1[1] : (m2 ? m2[1] : '')).trim();
+      if (/whatsapp/.test(t)) app = 'whatsapp';
+      else if (/telegram/.test(t)) app = 'telegram';
+      needle = needle.replace(/\s+(?:texts?|messages?|calls?|comes|aaye)$/, '').trim();
+    }
+    return { say: null, action: { type: 'watch_add', needle, app } };
+  }, 8);
+I('watch_cancel', t => /\b(?:stop|cancel|band karo)\s+(?:the\s+)?watch(?:ing|ers)?\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'watch_cancel' } }), 7);
+I('watch_list', t => /\bwhat are you watching\b|\bmy watchers\b|\bwatch list\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'watch_list' } }), 7);
 
 /* ---- v8.0: Karen daily brief ---- */
 I('daily_brief', t => /\b(?:morning|daily|day)\s+(?:brief|briefing|plan|update|summary)\b|\bbrief me\b|\baaj ka (?:plan|brief|update)\b|\bday\s+kaise\s+ja\s+rahi\b/.test(t) ? 1 : 0,

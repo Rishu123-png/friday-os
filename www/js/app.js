@@ -23,7 +23,7 @@ import * as HEALTH from './health.js';
 import * as I18N from './i18n.js';
 import * as LB from './localbrain.js';
 import * as AMB from './ambient.js';
-import { humanTime, parseTime, pick } from './nlp.js';
+import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
 
@@ -181,6 +181,10 @@ async function init() {
   MEM.learnPatterns();
   AUTO.start(execAction);
   initNative();
+  setTimeout(checkShareInbox, 1800);                    // v9.0 (A2): cold-start share
+  document.addEventListener('visibilitychange', () => {  // warm-start share
+    if (!document.hidden) checkShareInbox();
+  });
   lastSeenPrev = PRO.touchSession();
   setTimeout(runProactive, 6000);
   setInterval(runProactive, 5 * 60000);
@@ -274,6 +278,13 @@ async function handleInput(text, opts = {}) {
      the mic chaining (continuous conversation), typed turns stay one-shot. */
   state.lastInputWasVoice = !!opts.fromVoice;
   state.autoListens = 0;
+  /* v9.0 APEX (A6): after "dictate", the next voice input becomes a cleaned
+     draft in the input box instead of a command (Rambler-style). */
+  if (state.dictateNext && opts.fromVoice) {
+    state.dictateNext = false;
+    doDictateFinish(text);
+    return;
+  }
   if (state.llmBusy) { state.llmBusy = false; LB.abortLocal(); }  // v8.2: new input stops on-device generation
   if (!opts.dedupeSkip) {
     const norm = text.toLowerCase().replace(/\s+/g, ' ');
@@ -656,7 +667,88 @@ async function runAction(a, hit) {
     case 'media': {
       if (!NAT.isNative()) { reply(nativeOnly('media control')); return true; }
       const r = await NAT.mediaControl(a.action);
-      reply(r.ok ? pick(['Done.', 'Got it.', 'Playing.']) : "Couldn't control media.");
+      /* v8.4: honest verbs, no more bare "Playing." */
+      const verbs = {
+        play: 'Music playing.', pause: 'Music paused.', stop: 'Music stopped.',
+        next: 'Next track.', previous: 'Previous track.', playpause: 'Toggled play/pause.'
+      };
+      reply(r.ok ? (verbs[a.action] || 'Done.') : "Couldn't reach a media player - is anything actually playing right now?");
+      return true;
+    }
+
+    /* v8.4 TRUE CONTROL: named game/app via "play candy crush" */
+    case 'play_game': {
+      if (!NAT.isNative()) { reply(nativeOnly('launching games')); return true; }
+      const r0 = await NAT.launchApp(a.name);
+      if (r0 && r0.ok && r0.app) { reply(`Opening ${r0.app.label}. Enjoy, ${S.getSetting('userName') || 'Boss'}.`); return true; }
+      reply(`I couldn't find a game or app called "${a.name}" on this phone. Check the exact name, or install it first.`);
+      return true;
+    }
+
+    /* v8.4 TRUE CONTROL: "i like to play" - context decides game vs music.
+       Scans my last message for a title that matches an installed app; falls
+       back honestly instead of blindly firing the music key (the old bug:
+       "i like to play" started your last music session). */
+    case 'play_context': {
+      if (!NAT.isNative()) { reply(nativeOnly('games and media')); return true; }
+      const last = [...state.messages].reverse().find(m => m.role === 'ai');
+      const src = last ? String(last.text || '').toLowerCase() : '';
+      const words = src.match(/[a-z][a-z0-9']{2,}/g) || [];
+      const pairs = [];
+      for (let i = 0; i + 1 < words.length; i++) pairs.push(words[i] + ' ' + words[i + 1]);
+      const stopw = ['would','like','that','this','with','your','from','have','what','when','then','them','they','boss','friday','open','opening','same','checking','notification','game','play','market','music','song','want','lets','need','see','now','candies','blast','sugar','spread','master','sweetest','puzzle','games'];
+      const cands = [...pairs, ...words].filter(w => w.trim() && !stopw.includes(w.trim()));
+      for (const c of cands) {
+        const hit = await NAT.launchApp(c);
+        if (hit && hit.ok && hit.app) { reply(`Opening ${hit.app.label}. Enjoy!`); return true; }
+      }
+      if (/play|game|khel/.test(src)) {
+        reply('Tell me the game\'s name - say "play Ludo" or "open Candy Crush" and I\'ll open it.');
+        return true;
+      }
+      const rp = await NAT.mediaControl('play');
+      reply(rp && rp.ok ? 'Music playing.' : 'Nothing to play right now. Name a game ("play Ludo") or start some music first.');
+      return true;
+    }
+
+    /* ================= v9.0 APEX cases ================= */
+    case 'wallpaper':      return doWallpaper(a.topic);
+    case 'notif_history':  return doNotifHistory();
+    case 'notif_digest':   return doNotifDigest(a.app || '');
+    case 'sos':            return doSOS();
+    case 'sos_cancel': {
+      if (state.sosTimer) { clearTimeout(state.sosTimer); state.sosTimer = null; reply('SOS cancelled. Nothing was sent.'); }
+      else reply('No SOS is armed right now.');
+      return true;
+    }
+    case 'sos_set_contact': {
+      S.setSetting('emergencyContact', a.number);
+      reply(`Emergency contact locked in: ${a.number}. If you ever say "SOS", I send them your live location by SMS after an 8-second cancel window.`);
+      return true;
+    }
+    case 'dictate': {
+      state.dictateNext = true;
+      reply('Speak your message - ums and aahs allowed. I will clean it into a proper draft.');
+      setTimeout(() => { if (state.dictateNext) V.listen(); }, 900);
+      return true;
+    }
+    case 'park_save':      return doCarSave();
+    case 'park_find':      return doCarFind();
+    case 'sleep_timer':    return doSleepTimer(a.minutes || 20);
+    case 'read_page':      return doReadPage(a.url || '');
+    case 'watch_add':      return doWatchAdd(a.needle, a.app);
+    case 'watch_cancel': {
+      state.watchers = [];
+      clearInterval(state.watchLoop); state.watchLoop = null;
+      reply('All watchers cancelled.');
+      return true;
+    }
+    case 'watch_list': {
+      if (!state.watchers || !state.watchers.length) reply('No active watchers. Say "watch whatsapp for mummy" to set one.');
+      else reply('Watching for: ' + state.watchers.map(w => {
+        const left = Math.max(1, Math.round((w.until - Date.now()) / 60000));
+        return `"${w.needle}"${w.app ? ' in ' + w.app : ''} (${left}m left)`;
+      }).join(', '));
       return true;
     }
 
@@ -948,15 +1040,22 @@ async function runAction(a, hit) {
     case 'focus_mode': {
       if (a.off) {
         await HEALTH.stopFocus();
+        clearInterval(state.focusLoop); state.focusLoop = null;   // v9 police off
+        state.focus = null;
         reply('Focus mode off. Notifications are back. Well done.');
         return true;
       }
       const mins = a.minutes || 25;
       await HEALTH.startFocus(mins, () => {
+        clearInterval(state.focusLoop); state.focusLoop = null;   // v9 police auto-off
+        state.focus = null;
         addMsg('ai', `⏱ Focus session done (${mins} min). Take a breath - you earned it.`, { proactive: true });
         V.speak(`Focus session complete. Well done, ${S.getSetting('userName') || 'boss'}.`);
       });
-      reply(`⏱ **Focus mode: ${mins} minutes.** Do Not Disturb is ON, my announcements are muted. Go.`);
+      /* v9.0: arm the scroll police beside the existing DND focus */
+      state.focus = { until: Date.now() + mins * 60000, warned: {} };
+      startFocusLoop();
+      reply(`⏱ **Focus mode: ${mins} minutes.** Do Not Disturb is ON, my announcements are muted - and I'll nudge you if you drift into scroll apps. Go.`);
       return true;
     }
 
@@ -1820,9 +1919,298 @@ async function runToolByName(name, args = {}) {
         return r && r.ok ? `Tapped at (${args.x}, ${args.y}).` : 'Tap failed - FRIDAY Control may be off, or the spot was protected.';
       }
       case 'tell_battery': { const b = await D.battery(); return b ? `${b.level}%${b.charging ? ' charging' : ''}` : 'unknown'; }
+      case 'media_control': {
+        if (!NAT.isNative()) return 'Media keys need the installed FRIDAY app.';
+        const act = String(args.action || 'playpause');
+        const r = await NAT.mediaControl(act);
+        return r && r.ok ? `Media key "${act}" sent to the active player.` : 'No active media player answered - ask the user if anything is actually playing.';
+      }
       default: return 'Unknown tool';
     }
   } catch (e) { return 'Tool failed: ' + (e.message || e); }
+}
+
+/* ================= v9.0 APEX feature engines ================= */
+
+function fmtAgo(ts) {
+
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 60) return m + 'm ago';
+  const h = Math.round(m / 60);
+  if (h < 24) return h + 'h ago';
+  return Math.round(h / 24) + 'd ago';
+}
+
+/* ---- A1 AI Wallpaper Forge (keyless pollinations.ai + WallpaperManager) ---- */
+async function doWallpaper(topic) {
+  if (!navigator.onLine) { reply('The wallpaper forge needs internet for generation - no key, just data.'); return true; }
+  reply(topic ? `Forging a wallpaper of "${topic}" - model needs 20-45 seconds...` : 'Forging you a fresh Stark-grade wallpaper...');
+  const url = API.pollinationsUrl(topic || 'tony stark arc reactor core, dark cinematic, glowing blue');
+  let dataUrl;
+  try { dataUrl = await API.fetchImageDataUrl(url); }
+  catch (e) { reply('Generation timed out - the free forge is busy right now. Try again in a minute.'); return true; }
+  addMsg('ai', 'Here it is.', { image: dataUrl });
+  if (NAT.isNative()) {
+    const r = await NAT.setWallpaper(dataUrl);
+    reply(r && r.ok ? 'Set as your wallpaper - check your home screen.'
+                   : `Showed it above, but could not set the wallpaper (${(r && r.reason) || 'error'}).`);
+  } else {
+    reply('Showing it above. Inside the phone app I set it as your wallpaper automatically.');
+  }
+  return true;
+}
+
+/* ---- A3 notification history / digest ---- */
+async function doNotifHistory() {
+  if (!NAT.isNative()) { reply(nativeOnly('notification history')); return true; }
+  const r = await NAT.getNotifLog('', 8);
+  const items = (r && r.items) || [];
+  if (!items.length) { reply('No history yet - it builds from now on, and it survives messages the sender deletes.'); return true; }
+  reply(`Last ${items.length} notifications (these survive sender deletes):\n` +
+    items.map(n => `• ${NAT.friendlyApp(n.pkg)} — ${n.title}: ${(n.text || '').slice(0, 60)} · ${fmtAgo(n.when)}`).join('\n'),
+    { source: 'live' });
+  return true;
+}
+
+async function doNotifDigest(app) {
+  if (!NAT.isNative()) { reply(nativeOnly('digest')); return true; }
+  const r = await NAT.getNotifLog(app || '', 60);
+  const items = ((r && r.items) || []).filter(n => Date.now() - n.when < 24 * 3600e3);
+  if (!items.length) { reply(app ? `Nothing from ${NAT.friendlyApp(app)} in the last day.` : 'No notifications logged in the last day.'); return true; }
+  const label = app ? NAT.friendlyApp(app) : 'your apps';
+  if (AI.hasGroq()) {
+    try {
+      const raw = items.map(n => `${n.title}: ${n.text}`).join(' | ').slice(0, 3500);
+      const out = await AI.callGroq([
+        { role: 'system', content: 'Summarize this notification log into a short spoken digest: who messaged, what actually matters, anything urgent. 3-5 plain sentences, no bullets, no headers.' },
+        { role: 'user', content: raw }
+      ], { maxTokens: 240, temperature: 0.5 });
+      if (out) { reply(out, { source: 'live' }); return true; }
+    } catch (e) {}
+  }
+  reply(`Today from ${label}: ` + items.slice(0, 5).map(n => `${n.title} (${fmtAgo(n.when)})`).join(', ') +
+    (items.length > 5 ? `, plus ${items.length - 5} more` : '') + '.', { source: 'live' });
+  return true;
+}
+
+/* ---- A4 focus mode + scroll police + screen time ---- */
+const SCROLL_APPS = {
+  'com.instagram.android': 'Instagram', 'com.google.android.youtube': 'YouTube',
+  'com.zhiliaoapp.musically': 'TikTok', 'com.facebook.katana': 'Facebook',
+  'com.twitter.android': 'X', 'com.snapchat.android': 'Snapchat', 'com.reddit.frontpage': 'Reddit'
+};
+
+function startFocusLoop() {
+  clearInterval(state.focusLoop);
+  state.focusLoop = setInterval(async () => {
+    if (!state.focus || Date.now() > state.focus.until) {
+      // quiet expiry: HEALTH.startFocus's own completion does the talking/DND lift
+      clearInterval(state.focusLoop); state.focusLoop = null; state.focus = null; return;
+    }
+    try {
+      const fg = await NAT.getForegroundApp();
+      const label = fg && fg.pkg ? SCROLL_APPS[fg.pkg] : null;
+      if (!label || document.hidden) return;
+      if (Date.now() - (state.focus.warned[fg.pkg] || 0) < 90000) return;
+      state.focus.warned[fg.pkg] = Date.now();
+      const line = pick([
+        `${label} during focus time, Boss? Back to the mission.`,
+        `${label} can wait - your focus timer is still on.`,
+        `Scroll police: ${label} spotted. Eyes back on the prize?`
+      ]);
+      U.toast(line, '🛡️', 4500);
+      V.speak(line);
+    } catch (e) {}
+  }, 9000);
+}
+
+/* ---- A5 SOS guardian ---- */
+async function doSOS() {
+  const num = (S.getSetting('emergencyContact') || '').replace(/[^\d+]/g, '');
+  if (!num) {
+    reply('No emergency contact yet. Say "my emergency contact is 9876543210" - then "SOS" sends them your live location by SMS.');
+    return true;
+  }
+  reply(`SOS armed. Sending your live location to ${num} in 8 seconds. Say "cancel SOS" to abort.`);
+  D.buzz();
+  clearTimeout(state.sosTimer);
+  state.sosTimer = setTimeout(async () => {
+    state.sosTimer = null;
+    let loc = null;
+    try { loc = await API.getPosition(9000); } catch (e) {}
+    const link = loc ? `https://maps.google.com/?q=${loc.lat.toFixed(5)},${loc.lon.toFixed(5)}` : '(location unavailable - GPS refused)';
+    const msg = `SOS from ${S.getSetting('userName') || 'me'} - I need help. My location: ${link} (sent by FRIDAY OS)`;
+    const r = NAT.isNative() ? await NAT.sendSMSSilent(num, msg) : { ok: false };
+    reply(r && r.ok ? `SOS sent to ${num}. Stay strong, ${S.getSetting('userName') || 'Boss'} - help knows where you are.`
+                   : `SMS failed (${(r && r.reason) || 'no native SMS'}). Say "call ${num}" to dial them directly.`,
+          { source: 'live' });
+  }, 8000);
+  return true;
+}
+
+/* ---- A7 parked car ---- */
+async function doCarSave() {
+  reply('Marking this spot...');
+  try {
+    const p = await API.getPosition(9000);
+    S.setSetting('parkedCar', JSON.stringify({ lat: p.lat, lng: p.lon, at: Date.now() }));
+    reply('Parking spot locked in. Say "where is my car" when you need it.');
+  } catch (e) { reply('GPS refused - allow location for FRIDAY and try again.'); }
+  return true;
+}
+
+function doCarFind() {
+  let p = null;
+  try { p = JSON.parse(S.getSetting('parkedCar') || 'null'); } catch (e) {}
+  if (!p) { reply('No parking spot saved. When you park, just tell me "parked here".'); return true; }
+  const url = `https://maps.google.com/?q=${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+  addMsg('ai', `Your car is parked here (saved ${fmtAgo(p.at)}). Tap below to navigate.`, { link: url });
+  S.remember('ai', 'Car location shared.');
+  V.speak('Opening your car location on the map.');
+  if (NAT.isNative()) NAT.openUrl(url); else window.open(url, '_blank');
+  return true;
+}
+
+/* ---- A8 sleep timer ---- */
+function doSleepTimer(minutes) {
+  clearTimeout(state.sleepTimer);
+  state.sleepTimer = setTimeout(async () => {
+    state.sleepTimer = null;
+    const r = NAT.isNative() ? await NAT.mediaControl('pause') : { ok: false };
+    const done = `Sleep timer done - music ${r && r.ok ? 'paused' : 'off'}. Good night, ${S.getSetting('userName') || 'Boss'}.`;
+    addMsg('ai', done, { proactive: true });
+    V.speak(done);
+  }, minutes * 60000);
+  reply(`Sleep timer set - music stops in ${minutes} minutes. Keep my background service on so I can reach the keys.`);
+  return true;
+}
+
+/* ---- A9 read page aloud ---- */
+async function doReadPage(url) {
+  if (!url) { reply('Give me the link - say "read https://..." or share the page to me (Share → FRIDAY OS).'); return true; }
+  reply('Fetching the page and reading. One moment.');
+  const r = await API.fetchReadableUrl(url);
+  if (!r.ok) { reply('Could not read that page (' + r.reason + '). Some sites block extraction - try another link.'); return true; }
+  addMsg('ai', `**${r.title || 'Article'}**\n${r.text.slice(0, 550).trim()}…`, { link: url });
+  const feed = V.createSpeechFeed({
+    onStart: () => state.speaking = true,
+    onDone: () => { state.speaking = false; continueConvoAfterSpeech('article done'); }
+  });
+  if (r.title) feed.push(r.title);
+  const body = r.text.slice(0, 4500);
+  const sents = body.match(/[^.!?]+[.!?]+/g) || [body];
+  sents.forEach(s => feed.push(s));
+  feed.markDone();
+  return true;
+}
+
+/* ---- A10 watchers ---- */
+async function doWatchAdd(needle, app) {
+  if (!NAT.isNative()) { reply(nativeOnly('watchers')); return true; }
+  if (!needle) { reply('Watch for what? Say "watch whatsapp for mummy" or "ping me when delivery OTP comes".'); return true; }
+  state.watchers = state.watchers || [];
+  if (state.watchers.length >= 3) { reply('Three watchers max. Say "stop watching" to clear them.'); return true; }
+  state.watchers.push({ needle: needle.toLowerCase(), app: (app || '').toLowerCase(), since: Date.now(), until: Date.now() + 2 * 3600e3 });
+  startWatchLoop();
+  reply(`Watcher set. The moment "${needle}" appears${app ? ' in ' + app : ' on screen'} I alert you - two hour window. Keep my background service on.`);
+  return true;
+}
+
+function startWatchLoop() {
+  if (state.watchLoop) return;
+  state.watchLoop = setInterval(async () => {
+    if (!state.watchers || !state.watchers.length) { clearInterval(state.watchLoop); state.watchLoop = null; return; }
+    const now = Date.now();
+    for (const w of [...state.watchers]) {
+      if (now > w.until) { state.watchers = state.watchers.filter(x => x !== w); continue; }
+      try {
+        let hitText = '';
+        if (w.app) {
+          const r = await NAT.getNotifLog(w.app, 6);
+          const items = (r && r.items) || [];
+          const hit = items.find(n => n.when > w.since - 3000 && (n.title + ' ' + n.text).toLowerCase().includes(w.needle));
+          if (hit) hitText = `${hit.title}: ${(hit.text || '').slice(0, 120)}`;
+        } else {
+          const r = await NAT.readScreenText();
+          if (r && r.ok && r.text && String(r.text).toLowerCase().includes(w.needle)) hitText = 'It is on your screen right now.';
+        }
+        if (hitText) {
+          state.watchers = state.watchers.filter(x => x !== w);
+          D.buzz();
+          const msg = `Watcher hit - "${w.needle}": ${hitText}`;
+          addMsg('ai', msg, { proactive: true, source: 'live' });
+          D.notify('FRIDAY watcher', msg, 'watch-' + w.needle.slice(0, 12));
+          V.speak(`Boss, watcher alert. ${hitText}`);
+        }
+      } catch (e) {}
+    }
+  }, 15000);
+}
+
+/* ---- A6 dictation finish: raw speech -> clean draft in the input box ---- */
+async function doDictateFinish(raw) {
+  let clean = stripFillers(raw);
+  if (AI.hasGroq() && navigator.onLine) {
+    try {
+      const out = await AI.callGroq([
+        { role: 'system', content: 'Rewrite this voice-dictated message: remove filler words and stammers, fix grammar lightly, keep the meaning and the Hindi-English mix EXACTLY as spoken. Output ONLY the rewritten message - no quotes, no commentary.' },
+        { role: 'user', content: raw.slice(0, 1200) }
+      ], { maxTokens: 400, temperature: 0.3 });
+      if (out) clean = out;
+    } catch (e) {}
+  }
+  const inp = $('#textInput');
+  if (inp) { inp.value = clean; inp.focus(); }
+  addMsg('ai', `Clean draft is in your input box:\n"${clean}"\nEdit it there, or say "send to <name>" to fire it.`);
+  V.speak('Draft ready. Edit above, or say send to someone.');
+}
+
+/* ---- A2 share inbox: anything shared to FRIDAY answers instantly ---- */
+async function doSummarizeShared(url, text) {
+  thinking(true);
+  let body = text;
+  if (url) {
+    const r = await API.fetchReadableUrl(url);
+    body = r.ok ? ((r.title ? r.title + '\n' : '') + r.text.slice(0, 3500)) : text;
+  }
+  thinking(false);
+  if (AI.hasGroq()) {
+    try {
+      const out = await AI.callGroq([
+        { role: 'system', content: 'This content was just shared to FRIDAY (a personal AI). Summarize what it is in 2-4 plain spoken sentences for the user. No bullets, no headers.' },
+        { role: 'user', content: String(body).slice(0, 3500) }
+      ], { maxTokens: 220 });
+      if (out) { reply(out, { source: 'live' }); return; }
+    } catch (e) {}
+  }
+  reply('Received it: ' + String(body).slice(0, 280).trim() + (String(body).length > 280 ? '…' : ''));
+}
+
+async function checkShareInbox() {
+  if (!NAT.isNative()) return;
+  let r;
+  try { r = await NAT.getSharedContent(); } catch (e) { return; }
+  if (!r || !r.ok) return;
+  const text = (r.text || '').trim();
+  const img = r.imageBase64;
+  if (!text && !img) return;
+  if (img) {
+    const dataUrl = 'data:' + (r.mime || 'image/jpeg') + ';base64,' + img;
+    addMsg('user', 'Shared an image with you.', { image: dataUrl });
+    if (AI.hasGroq()) {
+      thinking(true);
+      const v = await AI.callGroqVision(dataUrl, text || 'Describe this shared image');
+      thinking(false);
+      reply(v && v.ok ? v.text : 'I can see you shared an image, but the vision model failed (' + ((v && v.reason) || 'error') + ').', { source: 'live' });
+    } else {
+      reply('Image received. Add a Groq key and I will describe anything you share.');
+    }
+    return;
+  }
+  const urlM = text.match(/https?:\/\/\S+/);
+  addMsg('user', urlM ? 'Shared a link: ' + urlM[0] : 'Shared text: ' + text.slice(0, 200));
+  if (urlM) doSummarizeShared(urlM[0], text);
+  else doSummarizeShared(null, text);
 }
 
 async function contactByName(name) {
@@ -1832,7 +2220,7 @@ async function contactByName(name) {
   return S.getList(KEYS.CONTACTS).find(c => c.name.toLowerCase().includes(q)) || null;
 }
 
-const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule|notifications?|reminders?|steps?|screen|doing|working|status|location|wifi|charging)\b/i;
+const ACTIONISH = /\b(set|remind|alarm|wake|call|text|message|whatsapp|note|task|timer|weather|battery|time|schedule|notifications?|reminders?|steps?|screen|doing|working|status|location|wifi|charging|music|songs?|media|play|pause|game)\b/i;
 
 /* v8.2: try the on-device llama.cpp brain for one full answer.
    Returns true when it produced (and rendered) a reply; false lets the
@@ -2696,9 +3084,9 @@ function armTalkWait(questionText) {
   }, 42000);
 }
 
-function reply(text) {
+function reply(text, opts = {}) {
   if (state.tonePrefix) { text = state.tonePrefix + ' ' + text; state.tonePrefix = null; }
-  addMsg('ai', text);
+  addMsg('ai', text, opts);
   S.remember('ai', text);
   V.speak(text, {
     onStart: () => state.speaking = true,
@@ -2730,7 +3118,8 @@ function buildMsgEl(msg, opts = {}) {
   const badge = opts.source === 'live' ? ' <span class="src-badge live" title="Built from LIVE on-device data">&#9889; live</span>'
               : opts.source === 'mind' ? ' <span class="src-badge mind" title="From general knowledge - not live phone data">&#128173; mind</span>'
               : opts.source === 'on-device' ? ' <span class="src-badge local" title="Generated 100% on this phone - no cloud, no key">&#129504; on-device</span>' : '';
-  div.innerHTML = `<div class="message-bubble">${U.renderRich(msg.text)}${link}</div>
+  const img = opts.image ? `<img class="msg-image" src="${opts.image}" alt="shared or generated image">` : '';
+  div.innerHTML = `<div class="message-bubble">${img}${U.renderRich(msg.text)}${link}</div>
     <div class="message-meta"><span class="message-label">${label}${badge}</span><span>${time}</span></div>`;
   return div;
 }
@@ -2913,9 +3302,22 @@ function renderCaps() {
     if (rows[1]) { rows[1].className = 'cap-row ' + (st.stt ? 'on' : 'off');
       rows[1].innerHTML = `<span>${st.stt ? '\u25cf' : '\u25cb'}</span> Voice input (listening)`; }
   });
-  el.innerHTML = items.map(([k, label]) =>
-    `<div class="cap-row ${nativeCaps[k] ? 'on' : 'off'}"><span>${nativeCaps[k] ? '\u25cf' : '\u25cb'}</span> ${label}</div>`
-  ).join('');
+  /* v8.4: grey rows are tappable - they open the exact Android setting page
+     that turns the feature on. "System gestures" being grey is why the eyes
+     seemed dead: nobody told the user it's ONE tap away. */
+  const FIX_FOR = {
+    overlay: 'overlay', accessibility: 'accessibility', notifications: 'notification_listener',
+    background: 'battery_optimization'
+  };
+  el.innerHTML = items.map(([k, label]) => {
+    const on = !!nativeCaps[k];
+    const fix = !on && FIX_FOR[k] ? ` data-fix="${FIX_FOR[k]}" style="cursor:pointer" title="Tap to enable"` : '';
+    return `<div class="cap-row ${on ? 'on' : 'off'}"${fix}><span>${on ? '\u25cf' : '\u25cb'}</span> ${label}${fix ? ' <span class="dim">— tap to enable</span>' : ''}</div>`;
+  }).join('');
+  el.querySelectorAll('[data-fix]').forEach(row => row.addEventListener('click', () => {
+    U.toast('Opening settings - turn FRIDAY ON there, then come back', '🔧');
+    NAT.openSpecialSetting(row.dataset.fix).catch(() => {});
+  }));
 }
 
 function renderAlarms() {
@@ -3364,6 +3766,7 @@ function bindEvents() {
   bind('#hindiUI', 'hindiUI', 'change', 'checked');
   bind('#batteryWarnFull', 'batteryWarnFull', 'change', 'checked');
   bind('#waCC', 'waCountryCode', 'input');
+  bind('#emergencyContact', 'emergencyContact', 'input');
   bind('#bargeIn', 'bargeIn', 'change', 'checked');
   bind('#streamingTts', 'streamingTts', 'change', 'checked');
   bind('#handsFree', 'handsFree', 'change', 'checked');
@@ -3559,6 +3962,7 @@ function syncSettingsUI() {
   set('#hindiUI', S.getSetting('hindiUI'), 'checked');
   set('#batteryWarnFull', S.getSetting('batteryWarnFull'), 'checked');
   set('#waCC', S.getSetting('waCountryCode') || '91');
+  set('#emergencyContact', S.getSetting('emergencyContact') || '');
   set('#bargeIn', S.getSetting('bargeIn') !== false, 'checked');
   set('#streamingTts', S.getSetting('streamingTts') !== false, 'checked');
   set('#handsFree', S.getSetting('handsFree') !== false, 'checked');
