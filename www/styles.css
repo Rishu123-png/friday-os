@@ -864,6 +864,11 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .src-badge.local{color:#ffb347;border:1px solid rgba(255,179,71,.45);
   text-shadow:0 0 6px rgba(255,179,71,.5)}
 
+/* v9.0: image bubbles (wallpaper forge, share inbox) */
+.msg-image{width:100%;max-width:240px;border-radius:10px;margin-bottom:.45rem;
+  border:1px solid rgba(0,212,255,.28);box-shadow:0 0 14px rgba(0,212,255,.15);
+  display:block}
+
 /* ---- v8.2 AI Core: settings action chips ---- */
 .chip-btn{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--primary,#00d4ff);cursor:pointer;
