@@ -39,5 +39,18 @@ else:
         '        super.onCreate(savedInstanceState);\n'
         '    }\n')
 
+# v9.0 APEX (A2): stash warm-start share intents so FridayNative.getSharedContent
+# can hand them to the web layer (cold starts come in via the launch intent).
+if 'onNewIntent' not in s:
+    hook = ('\n    @Override\n'
+            '    protected void onNewIntent(android.content.Intent intent) {\n'
+            '        super.onNewIntent(intent);\n'
+            '        try { FridayNative.pendingShare = intent; } catch (Throwable ignored) {}\n'
+            '    }\n')
+    s = s.rstrip()
+    assert s.endswith('}'), 'MainActivity: unexpected file end'
+    s = s[:s.rindex('}')] + hook + '}\n'
+    print('Added onNewIntent share hook to MainActivity')
+
 io.open(path, 'w', encoding='utf-8').write(s)
 print('Registered: %s in %s' % (', '.join(PLUGINS), path))
