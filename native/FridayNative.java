@@ -922,6 +922,87 @@ public class FridayNative extends Plugin {
         }
     }
 
+    /* ============ v9.0 APEX ============ */
+
+    /** Stashed by MainActivity.onNewIntent (added by register_plugin.py) so
+     *  warm-start shares reach the web layer. */
+    public static Intent pendingShare = null;
+
+    /** Reads and CONSUMES a share-sheet payload (ACTION_SEND text or image). */
+    @PluginMethod
+    public void getSharedContent(PluginCall call) {
+        JSObject r = ok();
+        try {
+            Intent i = pendingShare != null ? pendingShare : getActivity().getIntent();
+            pendingShare = null;
+            if (i != null && Intent.ACTION_SEND.equals(i.getAction())) {
+                String txt = i.getStringExtra(Intent.EXTRA_TEXT);
+                if (txt != null && !txt.isEmpty()) r.put("text", txt);
+                Uri stream = i.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (stream != null) {
+                    try {
+                        java.io.InputStream in = getContext().getContentResolver().openInputStream(stream);
+                        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                        byte[] buf = new byte[65536]; int n;
+                        if (in != null) { while ((n = in.read(buf)) > 0) bos.write(buf, 0, n); in.close(); }
+                        byte[] bytes = bos.toByteArray();
+                        if (bytes.length <= 8 * 1024 * 1024) {
+                            r.put("imageBase64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP));
+                            String mime = getContext().getContentResolver().getType(stream);
+                            if (mime != null) r.put("mime", mime);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                try { getActivity().setIntent(new Intent(Intent.ACTION_MAIN)); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+        call.resolve(r);
+    }
+
+    /** Set the home/lock-screen wallpaper from a base64 image (A1 Forge). */
+    @PluginMethod
+    public void setWallpaper(PluginCall call) {
+        String b64 = call.getString("base64", "");
+        if (b64.isEmpty()) { call.resolve(fail("empty")); return; }
+        try {
+            if (b64.startsWith("data:")) b64 = b64.substring(b64.indexOf(',') + 1);
+            byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            if (bmp == null) { call.resolve(fail("bad_image")); return; }
+            android.app.WallpaperManager.getInstance(getContext()).setBitmap(bmp);
+            call.resolve(ok());
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /** Notification history ring (A3: history, digest, deleted keeper). */
+    @PluginMethod
+    public void getNotifLog(PluginCall call) {
+        String app = call.getString("app", "");
+        int limit = Math.max(1, Math.min(200, call.getInt("limit", 40)));
+        org.json.JSONArray raw = FridayNotificationService.readLog(getContext(), app, limit);
+        JSArray items = new JSArray();
+        for (int i = 0; i < raw.length(); i++) {
+            org.json.JSONObject o = raw.optJSONObject(i);
+            if (o == null) continue;
+            JSObject m = new JSObject();
+            m.put("pkg", o.optString("pkg", ""));
+            m.put("title", o.optString("title", ""));
+            m.put("text", o.optString("text", ""));
+            m.put("when", o.optLong("when", 0));
+            items.put(m);
+        }
+        JSObject r = ok(); r.put("items", items); r.put("count", items.length());
+        call.resolve(r);
+    }
+
+    /** Package of the app currently in the foreground (A4 scroll police). */
+    @PluginMethod
+    public void getForegroundApp(PluginCall call) {
+        JSObject r = ok();
+        r.put("pkg", FridayAccessibility.foregroundPkg());
+        call.resolve(r);
+    }
+
     /* ============ CAPABILITIES ============ */
     @PluginMethod
     public void capabilities(PluginCall call) {
