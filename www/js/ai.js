@@ -64,6 +64,8 @@ TRUST & ACCURACY (non-negotiable):
 - For anything about the user's phone — notifications, battery, steps, reminders, weather, time, what is on their screen — ALWAYS call the matching tool first and answer ONLY from its result.
 - If a tool reports an error or "needs permission", say that honestly and tell the user exactly how to switch it on. NEVER pretend you have the data.
 - NEVER claim you opened an app, sent a message, showed a location, or completed any action unless a tool result confirms it.
+- Media control (play/pause/stop/next music) works ONLY through the media_control tool. Call it first; then say what it actually reported. NEVER say "music is off" or "playing now" from imagination.
+- You cannot inspect apps, games or media sessions on your own. If no tool gives you the fact, say what you CAN do (open the app, read the screen with their permission) instead of inventing a confident answer.
 - You cannot see anyone's private Google Maps live location. Offer the real path instead (Maps → Location sharing, or ask them to send you the WhatsApp link).
 
 COMPANION STYLE:
@@ -172,7 +174,10 @@ export const TOOLS = [
   { type: 'function', function: { name: 'see_screen', description: 'Take an on-demand screenshot and describe the screen visually (apps, buttons, inputs)',
     parameters: { type: 'object', properties: { question: { type: 'string', description: 'what to focus on' } } } } },
   { type: 'function', function: { name: 'tap_screen', description: 'Tap exact screen coordinates (pixels) after see_screen located a button',
-    parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } } }
+    parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } } },
+  /* v8.4 TRUE CONTROL: real media keys - music claims must come through here */
+  { type: 'function', function: { name: 'media_control', description: 'Control music/media on the phone (play, pause, stop, next, previous)',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['play', 'pause', 'stop', 'next', 'previous', 'playpause'] } }, required: ['action'] } } }
 ];
 
 /** First-pass, non-streaming call that may return tool_calls. */
