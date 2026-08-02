@@ -18,6 +18,11 @@ public class FridayAccessibility extends AccessibilityService {
     private static long autoSendUntil = 0;
     private static int autoSendTries = 0;
 
+    /* v9.0: last app seen in the foreground - powers Focus mode's
+       "scroll police" without any polling APIs. */
+    private static String lastForegroundPkg = "";
+    public static String foregroundPkg() { return lastForegroundPkg; }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -26,6 +31,10 @@ public class FridayAccessibility extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event != null) {
+            CharSequence p0 = event.getPackageName();
+            if (p0 != null) lastForegroundPkg = p0.toString();
+        }
         if (System.currentTimeMillis() > autoSendUntil) return;
         if (event == null) return;
 
