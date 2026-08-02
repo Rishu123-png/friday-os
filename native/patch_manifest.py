@@ -160,6 +160,22 @@ def main():
         i = s.rindex('</application>')
         s = s[:i] + SERVICES + '\n    ' + s[i:]
 
+    # v9.0 APEX (A2): turn MainActivity into a share target - any app can
+    # share text or images straight to FRIDAY ("Summarize this" flow).
+    if 'android.intent.action.SEND' not in s and '.MainActivity' in s:
+        act = s.index('.MainActivity')
+        close = s.index('</activity>', act)
+        block = s[act:close]
+        insert_at = block.rindex('</intent-filter>') + len('</intent-filter>') if '</intent-filter>' in block else block.index('>')
+        share = ('\n            <intent-filter>\n'
+                 '                <action android:name="android.intent.action.SEND"/>\n'
+                 '                <category android:name="android.intent.category.DEFAULT"/>\n'
+                 '                <data android:mimeType="text/plain"/>\n'
+                 '                <data android:mimeType="image/*"/>\n'
+                 '            </intent-filter>')
+        s = s[:act + insert_at] + share + s[act + insert_at:]
+        print('Share target intent-filter added to MainActivity')
+
     io.open(PATH, 'w', encoding='utf-8').write(s)
     print('Manifest patched OK')
     print('Permissions:', s.count('<uses-permission'))
