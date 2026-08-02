@@ -441,6 +441,19 @@ export async function scanModels() {
 /** Battery level + charging from the native BatteryManager. */
 export async function batteryDetail() { return call('getBatteryDetail'); }
 
+/* ================= v9.0 APEX ================= */
+/** Consumes a share-sheet payload sent to FRIDAY (text and/or base64 image). */
+export async function getSharedContent() { return call('getSharedContent'); }
+
+/** Sets the device wallpaper from a base64 image. */
+export async function setWallpaper(base64) { return call('setWallpaper', { base64 }); }
+
+/** Local notification history ring (most recent first). */
+export async function getNotifLog(app = '', limit = 40) { return call('getNotifLog', { app, limit }); }
+
+/** Package name of the app currently in the foreground (needs accessibility). */
+export async function getForegroundApp() { return call('getForegroundApp'); }
+
 /* ================= CAPABILITY REPORT ================= */
 /** What actually works on this device right now */
 export async function capabilities() {
