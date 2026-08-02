@@ -190,6 +190,9 @@ public class FridayNative extends Plugin {
                             Uri.parse("package:" + ctx.getPackageName())); break;
                 case "usage_access":
                     i = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS); break;
+                case "app_settings":
+                    i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + ctx.getPackageName())); break;
             }
             if (i == null) { call.resolve(fail("unknown")); return; }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
