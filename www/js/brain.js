@@ -706,7 +706,7 @@ I('find_phone', t =>
 
 /* ---- v8.1 EYES: visual screen reading (keeps plain "what's on my screen" on the
    offline text reader; only explicitly-VISUAL phrasings take the Groq vision path) ---- */
-I('screen_vision', t => /\b(?:what do you see|what can you see)\s+(?:on |at |in )?(?:my |the |this )?(?:phone )?screen\b|\b(?:look at|analyze|describe)\s+(?:my |the |this )?(?:phone )?screen\b|\bscreen\s+(?:ko\s+)?(?:dekh ke bata|analyse|analyze|summary)\b/.test(t) ? 1 : 0,
+I('screen_vision', t => /\b(?:what do you see|what can you see|what am i seeing|what am i looking at)\s+(?:on |at |in )?(?:my |the |this )?(?:phone |mobile )?screen\b|\b(?:look at|analyze|analyse|describe)\s+(?:my |the |this )?(?:phone |mobile )?screen\b|\bscreen\s+pe\s+kya\b|\bscreen\s+(?:ko\s+)?(?:dekh ke bata|dekhkar bata|analyse|analyze|summary)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'screen_vision', question: /blue button|button|tap|dabao/.test(t) ? 'Find any buttons on this screen and describe their on-screen positions.' : null } }), 7);
 
 /* ---- v8.0: Karen daily brief ---- */

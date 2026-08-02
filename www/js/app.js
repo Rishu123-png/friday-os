@@ -91,9 +91,15 @@ async function init() {
       if (state.voiceBuf) { const out = state.voiceBuf; state.voiceBuf = ''; handleInput(out, { fromVoice: true }); }
     },
     onError: err => {
+      const wasChain = state.chainListen;         // v8.3: auto re-listen heard nothing -> end quietly
+      state.chainListen = false;
       state.listening = false;
       $('#micButton').classList.remove('listening');
       $('#micContainer')?.classList.remove('listening'); $('#inputWave')?.classList.remove('on');
+      if (wasChain && (err === 'no-speech' || err === 'busy' || err === 'client')) {
+        setStatus('Tap to speak');
+        return;
+      }
       const msgs = {
         'no-speech': 'Didn\'t catch that. Tap to retry.',
         'not-allowed': 'Mic off: Settings > Apps > FRIDAY OS > Permissions > Microphone > Allow',
@@ -110,6 +116,11 @@ async function init() {
       setStatus(txt, err === 'not-allowed' || err === 'mic-denied');
       if (err === 'not-allowed' || err === 'mic-denied') {
         addMsg('ai', '**Microphone is off for me.** Fix: Settings → Apps → FRIDAY OS → Permissions → Microphone → **Allow**. Then tap the mic again.', { proactive: true });
+        /* v8.3: open the exact system page once instead of making the user hunt */
+        if (NAT.isNative() && !S.getSetting('micFixOpened')) {
+          S.setSetting('micFixOpened', true);
+          setTimeout(() => NAT.openSpecialSetting('app_settings').catch(() => {}), 900);
+        }
       }
     },
     onWake: () => { D.buzz(); U.toast('Yes?', '🎙️', 1400); setStatus('Listening...', true); }
@@ -257,6 +268,12 @@ async function handleInput(text, opts = {}) {
   /* v7.6.4: drop duplicate submissions (voice double-final, STT retries) —
      same text within 4s is an echo, not a new command. */
   clearTimeout(state.talkWait);   // v7.8: user spoke - cancel the Karen nudge
+  clearTimeout(state.convoWait);  // legacy guard
+  state.chainListen = false;
+  /* v8.3: remember whether this turn is voice or typed - voice turns keep
+     the mic chaining (continuous conversation), typed turns stay one-shot. */
+  state.lastInputWasVoice = !!opts.fromVoice;
+  state.autoListens = 0;
   if (state.llmBusy) { state.llmBusy = false; LB.abortLocal(); }  // v8.2: new input stops on-device generation
   if (!opts.dedupeSkip) {
     const norm = text.toLowerCase().replace(/\s+/g, ' ');
@@ -1862,7 +1879,7 @@ async function askLocalFirst(text) {
     } else {
       addMsg('ai', final, { source: 'on-device' });
     }
-    V.speak(final, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    V.speak(final, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(final); } });
     S.remember('ai', final);
     armTalkWait(final);   // Karen loop works on-device too
     return true;
@@ -1898,7 +1915,7 @@ async function askGroq(text) {
   const useFeed = S.getSetting('streamingTts') !== false && S.getSetting('voiceOutput');
   const feed = useFeed ? V.createSpeechFeed({
     onStart: () => { state.speaking = true; },
-    onDone: () => { state.speaking = false; }
+    onDone: () => { state.speaking = false; continueConvoAfterSpeech(acc); }
   }) : null;
   let boundaryCursor = 0;
   const feedFrom = sofar => {
@@ -1947,7 +1964,7 @@ async function askGroq(text) {
       if (boundaryCursor < final.length) feed.push(final.slice(boundaryCursor));
       feed.markDone();
     } else {
-      V.speak(final, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+      V.speak(final, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(final); } });
     }
     if (el) {
       el.querySelector('.message-bubble').innerHTML = U.renderRich(final);
@@ -2620,6 +2637,43 @@ const TALK_NUDGES = [
   'Still with me? No rush.',
   'Hello? Suit still on? I am right here when you are ready.'
 ];
+/* v8.3 CONTINUOUS CONVERSATION: a normal AI doesn't die after one answer.
+   When the last input came from the mic, FRIDAY re-opens her ears after every
+   spoken reply - a real back-and-forth until you fall silent. One unheard
+   cycle (no-speech) ends the chain quietly. Questions are excluded here
+   because armTalkWait already re-arms for them (and covers typed flows too). */
+function chainMic() {
+  if (!NAT.isNative() || S.getSetting('handsFree') === false || !S.getSetting('voiceOutput') || S.getSetting('wakeWord')) return;
+  if (!state.lastInputWasVoice) return;
+  if ((state.autoListens || 0) >= 12) return;          // burst cap, safety
+  state.autoListens = (state.autoListens || 0) + 1;
+  state.chainListen = true;                            // lets onError stay silent on no-speech
+  waitForQuietThenListen();
+}
+
+function continueConvoAfterSpeech(text) {
+  if (/\?\s*$/.test(String(text || '').trim())) return;   // armTalkWait owns questions
+  chainMic();
+}
+
+/* v8.3: shared "open her ears" helper. The killer bug it fixes: the old code
+   listened at a FIXED 1600 ms even while FRIDAY was still talking - listen()
+   cancels speech, so her voice got CUT mid-sentence and the mic then captured
+   the tail of her own voice. Now we wait for real silence first. */
+function waitForQuietThenListen(maxWaitMs = 24000) {
+  const t0 = Date.now();
+  const tick = () => {
+    if (Date.now() - t0 > maxWaitMs) { state.talkWait = null; return; }
+    if (state.speaking || V.isSpeaking()) { state.talkWait = setTimeout(tick, 250); return; }
+    state.talkWait = setTimeout(() => {
+      state.talkWait = null;
+      if (state.listening || state.speaking || V.isSpeaking() || state.processing || document.hidden) return;
+      V.listen();
+    }, 450);
+  };
+  tick();
+}
+
 function armTalkWait(questionText) {
   clearTimeout(state.talkWait);
   if (!/\?\s*$/.test(String(questionText || '').trim())) return;
@@ -2628,11 +2682,7 @@ function armTalkWait(questionText) {
      then the wake phrase re-opens the conversation instead.) */
   const handsFree = S.getSetting('handsFree') !== false;
   if (handsFree && NAT.isNative() && S.getSetting('voiceOutput') && !S.getSetting('wakeWord')) {
-    state.talkWait = setTimeout(() => {
-      state.talkWait = null;
-      if (state.listening || state.speaking || document.hidden) return;
-      V.listen();
-    }, 1600);
+    waitForQuietThenListen();
     return;
   }
   state.talkWait = setTimeout(() => {
@@ -2650,7 +2700,10 @@ function reply(text) {
   if (state.tonePrefix) { text = state.tonePrefix + ' ' + text; state.tonePrefix = null; }
   addMsg('ai', text);
   S.remember('ai', text);
-  V.speak(text, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  V.speak(text, {
+    onStart: () => state.speaking = true,
+    onEnd: () => { state.speaking = false; continueConvoAfterSpeech(text); }   // v8.3: keep the conversation alive
+  });
   armTalkWait(text);
 }
 
@@ -2945,9 +2998,79 @@ function prefillPanel(panel, text) {
 
 /* ================= CAMERA ================= */
 let camMode = 'photo', scanLoop = null;
+
+/* v8.3: Capacitor's WebView does NOT grant camera to getUserMedia - the live
+   preview only works in a real browser. Inside the APK we open the phone's
+   real camera app instead (intent-based capture through the WebView file
+   chooser, the same proven path the attach button uses. Needs no CAMERA
+   permission dialog - the camera app mediates it.) */
+function pickNativePhoto() {
+  return new Promise(res => {
+    let inp = document.getElementById('nativePhotoPick');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id = 'nativePhotoPick';
+      inp.accept = 'image/*';
+      inp.setAttribute('capture', 'environment');
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+    }
+    inp.value = '';
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return res(null);
+      const rd = new FileReader();
+      rd.onload = () => res(rd.result);
+      rd.onerror = () => res(null);
+      rd.readAsDataURL(f);
+    };
+    try { inp.click(); } catch (_) { res(null); }
+  });
+}
+
+/* Auto-describe the capture with the Groq vision model and SPEAK it -
+   "Friday, what am I looking at?" finally answers out loud. */
+async function describeNativePhoto(dataUrl) {
+  const out = $('#cameraAnalysis');
+  if (!AI.hasGroq()) {
+    if (out) out.textContent = 'Photo captured. No Groq key for a spoken description - use Analyze (on-device objects) or Read text below.';
+    return;
+  }
+  if (out) out.textContent = 'Asking my vision model…';
+  try {
+    const v = await AI.callGroqVision(dataUrl, 'Describe what you see');
+    const desc = v && v.ok ? v.text : null;
+    if (desc) {
+      if (out) out.innerHTML = U.renderRich(desc);
+      addMsg('ai', desc, { source: 'live' });
+      S.remember('ai', desc);
+      V.speak(desc, {
+        onStart: () => state.speaking = true,
+        onEnd: () => { state.speaking = false; continueConvoAfterSpeech(desc); }
+      });
+    } else if (out) {
+      out.textContent = 'Vision unavailable (' + ((v && v.reason) || 'error') + '). Buttons below still work offline.';
+    }
+  } catch (e) {
+    if (out) out.textContent = 'Vision failed: ' + (e.message || e);
+  }
+}
+
 async function openCamera(mode = 'photo') {
   camMode = mode;
   const view = $('#cameraView');
+  if (NAT.isNative() && mode === 'photo') {
+    U.toast('Opening camera…', '📷');
+    const dataUrl = await pickNativePhoto();
+    if (!dataUrl) { U.toast('No photo taken', '📷'); return; }
+    view.classList.add('open');
+    const feed = $('#cameraFeed'); if (feed) feed.style.display = 'none';
+    $('#capturedImage').src = dataUrl;
+    $('#cameraResult').style.display = 'block';
+    describeNativePhoto(dataUrl);
+    return;
+  }
   view.classList.add('open');
   try {
     await D.startCamera($('#cameraFeed'));
@@ -2962,6 +3085,7 @@ function closeCamera() {
   D.stopCamera();
   $('#cameraView').classList.remove('open');
   $('#cameraResult').style.display = 'none';
+  const feed = $('#cameraFeed'); if (feed) feed.style.display = '';   // back to live preview for next time
 }
 function startScan() {
   clearInterval(scanLoop);
