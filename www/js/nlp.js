@@ -228,6 +228,19 @@ export function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/* ---------- v9.0 APEX: dictation cleanup (offline, Rambler-style) ---------- */
+/** Strips spoken filler words + collapses stammered repeats, keeps meaning.
+ *  Works for English and Hinglish dictation. Pure - unit-testable. */
+export function stripFillers(text) {
+  let t = ' ' + String(text || '') + ' ';
+  t = t.replace(/\s+(?:um+|uh+|er+|erm|ah+|hmm+|hm+|like,?\s+)(?=\s)/gi, ' ');
+  t = t.replace(/\s+(?:matlab|toh basically|basically|actually|you know|i mean)(?=\s)/gi, ' ');
+  t = t.replace(/\b(\w+)([,\s]+\1\b)+/gi, '$1');           // the the -> the
+  t = t.replace(/\s{2,}/g, ' ').trim();
+  if (t && /^[a-z]/.test(t)) t = t[0].toUpperCase() + t.slice(1);
+  return t;
+}
+
 /** Safe math evaluator (no eval / no Function) — shunting-yard */
 export function safeMath(expr) {
   const clean = expr
