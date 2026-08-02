@@ -507,3 +507,18 @@ test('friendlyReason words every failure honestly', () => {
   assert.ok(friendlyReason('LLAMA_BINDING_MISSING - x').includes('engine missing'));
   assert.ok(friendlyReason('load_failed').toLowerCase().includes('ram'));
 });
+
+/* ---------------- v8.3 SENSES ---------------- */
+test('screen_vision now hears natural phrasings (seeing/looking at, mobile screen, hinglish)', () => {
+  for (const q of ['what am i seeing on my screen', 'what am i looking at on my phone screen',
+                   'describe my mobile screen', 'screen pe kya hai', 'screen ko dekhkar bata']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'screen_vision', 'eyes missed: ' + q + ' -> ' + (r && r.intent));
+  }
+  const w = resolve("what's on my screen");
+  assert.ok(!w || w.intent !== 'screen_vision', 'offline screen_read stolen');
+});
+test('analyse my screen still routes to vision after regex change', () => {
+  const r = resolve('analyse my screen');
+  assert.ok(r && r.intent === 'screen_vision');
+});
