@@ -522,3 +522,108 @@ test('analyse my screen still routes to vision after regex change', () => {
   const r = resolve('analyse my screen');
   assert.ok(r && r.intent === 'screen_vision');
 });
+
+/* ---------------- v8.4 TRUE CONTROL ---------------- */
+test('media_off: every "turn the music off" phrasing fires REAL media keys', () => {
+  const cases = {
+    'off the music': 'pause', 'turn off music': 'pause', 'music band karo': 'pause',
+    'stop the music': 'stop', 'gaana band': 'pause', 'music off': 'pause', 'pause the song': 'pause'
+  };
+  for (const [q, want] of Object.entries(cases)) {
+    const r = resolve(q);
+    assert.ok(r && (r.intent === 'media_off' || r.intent === 'media'), 'media missed: ' + q + ' -> ' + (r && r.intent));
+    if (r.intent === 'media_off') assert.equal(r.action.action, want, q);
+  }
+});
+test('named games go to play_game, never to the music keys', () => {
+  for (const [q, name] of [['play candy crush', 'candy crush'], ['play free fire', 'free fire'], ['khelo ludo', 'ludo']]) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'play_game', 'game missed: ' + q + ' -> ' + (r && r.intent));
+    assert.equal(r.action.name, name);
+  }
+  const m = resolve('play music');
+  assert.ok(m && m.intent === 'media', 'play music stolen by play_game');
+  assert.equal(m.action.action, 'play');
+});
+test('play_context catches bare and conversational play', () => {
+  for (const q of ['play', "let's play", 'i like to play', 'i want to play', 'play it']) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'play_context', 'context missed: ' + q + ' -> ' + (r && r.intent));
+  }
+});
+test('media keys still route next/previous/pause/resume honestly', () => {
+  assert.equal(resolve('next song').action.action, 'next');
+  assert.equal(resolve('previous track').action.action, 'previous');
+  assert.equal(resolve('pause').action.action, 'pause');
+  assert.equal(resolve('resume').action.action, 'play');
+});
+
+/* ---------------- v9.0 APEX ---------------- */
+const { pollinationsUrl } = await import('../www/js/api.js');
+const { stripFillers } = await import('../www/js/nlp.js');
+
+test('wallpaper intent captures the topic honestly', () => {
+  for (const [q, topic] of [['make me a wallpaper of mountains and river', 'mountains and river'],
+                            ['wallpaper banao cyberpunk city', 'cyberpunk city'],
+                            ['set wallpaper of tony stark', 'tony stark']]) {
+    const r = resolve(q);
+    assert.ok(r && r.intent === 'wallpaper', 'wallpaper missed: ' + q);
+    assert.equal(r.action.topic, topic);
+  }
+  const none = resolve('change wallpaper');
+  assert.ok(none && none.intent === 'wallpaper' && !none.action.topic);
+});
+test('focus mode parses minutes, hours default honestly', () => {
+  assert.equal(resolve('focus for 45 minutes').action.minutes, 45);
+  assert.equal(resolve('focus for 2 hours').action.minutes, 120);
+  assert.equal(resolve('focus mode').action.minutes, 25); // pomodoro default
+  assert.equal(resolve('focus for 1 ghante').action.minutes, 60);
+  const off = resolve('stop focus');
+  assert.equal(off.intent, 'focus_mode');
+  assert.equal(off.action.off, true);
+  const band = resolve('focus mode band karo');
+  assert.equal(band.intent, 'focus_mode');
+  assert.equal(band.action.off, true);
+});
+test('sos + emergency contact + cancel all route', () => {
+  assert.equal(resolve('sos').intent, 'sos');
+  assert.equal(resolve('bachao').intent, 'sos');
+  assert.equal(resolve('cancel sos').intent, 'sos_cancel');
+  const set = resolve('my emergency contact is 98765 43210');
+  assert.equal(set.intent, 'sos_set_contact');
+  assert.equal(set.action.number, '9876543210');
+});
+test('car memory + sleep timer + dictation route', () => {
+  assert.equal(resolve('parked here').intent, 'park_save');
+  assert.equal(resolve('where is my car').intent, 'park_find');
+  assert.equal(resolve('gaadi kahan hai').intent, 'park_find');
+  assert.equal(resolve('stop music in 20 minutes').action.minutes, 20);
+  assert.equal(resolve('sleep timer for 1 hour').action.minutes, 60);
+  assert.equal(resolve('dictate a message').intent, 'dictate');
+});
+test('read page + watchers + history route', () => {
+  const rp = resolve('read https://example.com/story');
+  assert.equal(rp.intent, 'read_page');
+  assert.equal(rp.action.url, 'https://example.com/story');
+  const w = resolve('watch whatsapp for mummy');
+  assert.equal(w.intent, 'watch_add');
+  assert.equal(w.action.needle, 'mummy');
+  assert.equal(w.action.app, 'whatsapp');
+  const w2 = resolve('ping me when delivery otp comes');
+  assert.equal(w2.intent, 'watch_add');
+  assert.ok(w2.action.needle.includes('delivery'));
+  assert.equal(resolve('deleted messages').intent, 'notif_history');
+  assert.equal(resolve('whatsapp digest').intent, 'notif_digest');
+});
+test('pollinationsUrl is keyless and encodes the prompt', () => {
+  const u = pollinationsUrl('arc reactor, dark', { w: 1080, h: 1920, seed: 7 });
+  assert.ok(u.startsWith('https://image.pollinations.ai/prompt/'));
+  assert.ok(u.includes('arc%20reactor'));
+  assert.ok(u.includes('width=1080') && u.includes('seed=7') && u.includes('nologo=true'));
+});
+test('stripFillers removes ums and repeated stammers, keeps meaning', () => {
+  assert.equal(stripFillers('umm tell tell mummy i will be late'), 'Tell mummy i will be late');
+  const out = stripFillers('  uhh hello boss boss, basically meeting is at 5 you know ');
+  assert.ok(!/uhh/.test(out) && !/boss boss/i.test(out.replace(/boss/i, 'x')) && !/basically/.test(out), out);
+  assert.ok(out.startsWith('Hello'));
+});
