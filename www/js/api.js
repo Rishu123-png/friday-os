@@ -113,6 +113,49 @@ export function aqiLabel(v) {
 }
 
 /* ---------- Wikipedia (knowledge, no key) ---------- */
+/* ---------- v9.0 APEX: keyless image forge (A1) ---------- */
+/** pollinations.ai is free/keyless - returns a direct image URL. Pure helper. */
+export function pollinationsUrl(prompt, { w = 1080, h = 1920, seed = null } = {}) {
+  const p = encodeURIComponent(String(prompt || 'futuristic AI core, dark').trim().slice(0, 300));
+  const s = seed === null ? Math.floor(Math.random() * 99999) : seed;
+  return `https://image.pollinations.ai/prompt/${p}?width=${w}&height=${h}&nologo=true&seed=${s}&model=flux`;
+}
+
+/** Downloads the image as a data URL (needed for the native wallpaper call). */
+export async function fetchImageDataUrl(url, timeout = 45000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error('img_http_' + res.status);
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onload = () => resolve(rd.result);
+      rd.onerror = () => reject(new Error('img_read'));
+      rd.readAsDataURL(blob);
+    });
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- v9.0 APEX: article extraction for read-aloud (A9) ---------- */
+/** Keyless readability proxy: r.jina.ai turns any URL into clean markdown. */
+export async function fetchReadableUrl(url, timeout = 25000) {
+  const u = String(url || '').trim();
+  if (!/^https?:\/\//i.test(u)) return { ok: false, reason: 'bad_url' };
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const res = await fetch('https://r.jina.ai/' + u, { signal: ctl.signal });
+    clearTimeout(t);
+    if (!res.ok) return { ok: false, reason: 'http_' + res.status };
+    let text = (await res.text()).replace(/\[(?:Image|Link)\s*\d*[^\]]*\]\([^)]*\)/g, ' ').trim();
+    if (!text) return { ok: false, reason: 'empty' };
+    const firstLine = text.split('\n').map(x => x.trim()).find(x => x.length > 10) || '';
+    return { ok: true, text: text.slice(0, 12000), title: firstLine.replace(/^#\s+/, '').slice(0, 120) };
+  } catch (e) { clearTimeout(t); return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : 'network' }; }
+}
+
 export async function wikiSummary(query) {
   const key = 'wiki_' + query.toLowerCase().slice(0, 40);
   const hit = cacheGet(key, true);
