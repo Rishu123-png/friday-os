@@ -35,6 +35,7 @@ export const DEFAULTS = {
   offlineChat: true,
   porcupineKey: '',
   wakeKeyword: 'jarvis',
+  voskModelPath: '',
   // UI
   uiTheme: 'cyber',
   particleEffects: true,
