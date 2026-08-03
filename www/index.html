@@ -37,7 +37,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v9.0</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v9.1</span></div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
 
@@ -280,10 +280,19 @@
             <div class="toggle-switch"><input type="checkbox" id="offlineChat" checked><span class="toggle-slider"></span></div>
           </div>
           <div class="setting-item">
-            <label>Porcupine wake-word key</label>
-            <input type="password" id="porcupineKey" placeholder="Free at console.picovoice.ai (optional)" autocomplete="off">
+            <label>Wake word (your choice)</label>
+            <input type="text" id="wakeKeyword" placeholder="jarvis" autocomplete="off">
           </div>
-          <p class="hint">With a Porcupine key, "Hey FRIDAY" wake word uses a true always-on hotword engine (~1% CPU). Without it, the software listener is used.</p>
+          <div class="setting-item llm-actions">
+            <button class="chip-btn" id="voskDownload" type="button">⬇️ Get wake brain (~36MB)</button>
+            <button class="chip-btn" id="voskScan" type="button">🔍 Scan</button>
+          </div>
+          <p class="hint" id="voskStatusChip">Wake brain: checking…</p>
+          <div class="setting-item">
+            <label>Porcupine wake-word key</label>
+            <input type="password" id="porcupineKey" placeholder="Needs company email — optional" autocomplete="off">
+          </div>
+          <p class="hint"><b>No key? No problem.</b> Tap "Get wake brain" once — FRIDAY then wakes on YOUR word ("jarvis", "friday", anything), 100% offline, no account, no email. The Porcupine key (if you have one) uses even less battery and wins when both are set.</p>
         </div>
         <div class="settings-group">
           <h3>🧠 AI Core (On-Device Brain)</h3>
@@ -463,8 +472,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">9.0.0</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V9-APEX</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">9.1.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V9-1-WAKE-FREE</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
