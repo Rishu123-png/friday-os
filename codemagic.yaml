@@ -1,3 +1,4 @@
+
 workflows:
   friday-android:
     name: FRIDAY OS - Android APK
@@ -68,7 +69,7 @@ workflows:
         script: python3 native/patch_manifest.py
 
       - name: Add native dependencies (llama.cpp, geofencing; Porcupine optional)
-        script: python3 native/add_llama_dep.py
+        script: python3 native/add_llama_dep.py && python3 native/add_sherpa_dep.py
 
       - name: Build debug APK
         script: |
