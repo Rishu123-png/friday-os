@@ -560,7 +560,7 @@ test('media keys still route next/previous/pause/resume honestly', () => {
 
 /* ---------------- v9.0 APEX ---------------- */
 const { pollinationsUrl } = await import('../www/js/api.js');
-const { stripFillers } = await import('../www/js/nlp.js');
+const { stripFillers, parseWakeKeywords, pickWakeEngine } = await import('../www/js/nlp.js');
 
 test('wallpaper intent captures the topic honestly', () => {
   for (const [q, topic] of [['make me a wallpaper of mountains and river', 'mountains and river'],
@@ -626,4 +626,20 @@ test('stripFillers removes ums and repeated stammers, keeps meaning', () => {
   const out = stripFillers('  uhh hello boss boss, basically meeting is at 5 you know ');
   assert.ok(!/uhh/.test(out) && !/boss boss/i.test(out.replace(/boss/i, 'x')) && !/basically/.test(out), out);
   assert.ok(out.startsWith('Hello'));
+});
+test('v9.1 WAKE FREE: wake keyword parser keeps clean single tokens', () => {
+  assert.deepEqual(parseWakeKeywords('friday'), ['friday']);
+  assert.deepEqual(parseWakeKeywords('jarvis, friday  computer'), ['jarvis', 'friday', 'computer']);
+  assert.deepEqual(parseWakeKeywords('FRIDAY friday Friday'), ['friday']);
+  assert.deepEqual(parseWakeKeywords('hey friday! what up?? drop [unk]'), ['hey', 'what', 'drop']);
+  assert.deepEqual(parseWakeKeywords(''), []);
+  assert.deepEqual(parseWakeKeywords(null), []);
+  assert.ok(parseWakeKeywords('a b c d e f').length <= 4);
+});
+test('v9.1 WAKE FREE: engine picker is honest (key wins, then model, then fallback)', () => {
+  assert.equal(pickWakeEngine({ porcupineKey: 'abc', voskModelPath: '/x' }), 'porcupine');
+  assert.equal(pickWakeEngine({ porcupineKey: '  ', voskModelPath: '/data/vosk' }), 'vosk');
+  assert.equal(pickWakeEngine({}), 'fallback');
+  assert.equal(pickWakeEngine({ porcupineKey: '', voskModelPath: '' }), 'fallback');
+  assert.equal(pickWakeEngine(), 'fallback');
 });
