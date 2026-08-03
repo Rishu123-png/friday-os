@@ -13,11 +13,17 @@
 import { getSetting } from './store.js';
 import { applyPronunciations } from './memory.js';
 import { checkPermission, requestAll } from './native.js';
+import { parseWakeKeywords } from './nlp.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
 const WP = () => {
   const c = CAP();
   return c && c.Plugins ? c.Plugins.FridayWakeWord : null;
+};
+/* Keyless wake-word engine (FridayVosk / Vosk), v9.1 — no key, custom words */
+const VS = () => {
+  const c = CAP();
+  return c && c.Plugins ? c.Plugins.FridayVosk : null;
 };
 
 /* ---------- platform detection ---------- */
@@ -91,6 +97,17 @@ export function initRecognition(cbs = {}) {
     if (wp) {
       try {
         wp.addListener('wake', () => {
+          handlers.onWake && handlers.onWake();
+          setTimeout(() => listen(), 250);
+        });
+      } catch (_) {}
+    }
+    /* v9.1 Vosk wake listener — same contract, also registered ONCE */
+    const vs = VS();
+    if (vs) {
+      try {
+        vs.addListener('wake', () => {
+          wakeActive = false;               // engine keeps listening; this Listen is ours now
           handlers.onWake && handlers.onWake();
           setTimeout(() => listen(), 250);
         });
@@ -293,6 +310,22 @@ export function startWakeWord() {
         .catch(() => startNativeWakeLoop());
       return true;
     }
+
+    /* v9.1 WAKE FREE: keyless Vosk hotword when the model is downloaded.
+       No key, no account, works offline, any custom word. */
+    const vs = VS();
+    const voskPath = (getSetting('voskModelPath') || '').trim();
+    if (vs && voskPath) {
+      const kws = parseWakeKeywords(getSetting('wakeKeyword'));
+      vs.start({ modelPath: voskPath, keyword: kws.length ? kws.join(' ') : 'friday' })
+        .then(r => {
+          if (r && r.ok) wakeActive = true;
+          else startNativeWakeLoop();   // engine/model missing -> software loop
+        })
+        .catch(() => startNativeWakeLoop());
+      return true;
+    }
+
     startNativeWakeLoop();
     return true;
   }
@@ -349,6 +382,7 @@ export function stopWakeWord() {
   if (useNative()) {
     wakeActive = false;
     try { const wp = WP(); if (wp) wp.stop().catch(() => {}); } catch (_) {}
+    try { const vs = VS(); if (vs) vs.stop().catch(() => {}); } catch (_) {}
     NP().stopListening().catch(() => {});
     return;
   }
