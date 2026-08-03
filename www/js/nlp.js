@@ -286,3 +286,28 @@ export function safeMath(expr) {
   if (res === undefined || Number.isNaN(res)) return null;
   return Math.round(res * 1e10) / 1e10;
 }
+
+/* ---- v9.1 WAKE FREE: pure wake-word helpers (unit-tested) ---- */
+
+/** "friday, jarvis  computer" -> ['friday','jarvis','computer'].
+ *  Lowercase, single tokens, letters only, deduped, max 4. */
+export function parseWakeKeywords(text) {
+  const out = [];
+  for (const w of String(text || '').toLowerCase().split(/[\s,;/]+/)) {
+    if (!/^[a-z][a-z0-9']*$/.test(w)) continue;
+    if (w === 'unk' || w === '[unk]') continue;
+    if (out.indexOf(w) !== -1) continue;
+    out.push(w);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+/** Which hotword engine should run, honestly:
+ *  a Porcupine key always wins (true always-on engine);
+ *  else a downloaded Vosk model; else the software loop, not silence. */
+export function pickWakeEngine(s = {}) {
+  if ((s.porcupineKey || '').trim()) return 'porcupine';
+  if ((s.voskModelPath || '').trim()) return 'vosk';
+  return 'fallback';
+}
