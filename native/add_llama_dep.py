@@ -12,8 +12,12 @@
    Optional (flip the flag, the Java side is reflection-based so a build
    WITHOUT the AAR still compiles and falls back to the software loop):
      - ai.picovoice:porcupine-android     (always-on "Jarvis"-style hotword;
-                                           get a free AccessKey at
-                                           console.picovoice.ai)
+                                           needs a free AccessKey FROM A
+                                           COMPANY EMAIL at console.picovoice.ai)
+     - com.alphacephei:vosk-android       (v9.1 WAKE FREE: keyless offline
+                                           hotword, ANY custom word incl
+                                           "friday" - no account, no email,
+                                           ~36MB one-time model download)
 """
 import io, os, re, sys
 
@@ -35,6 +39,9 @@ HEALTH_CONNECT_VERSION = '1.1.0-alpha08'
 PORCUPINE_ENABLED = True      # <- set True + add your key in Settings to enable the hotword engine
 PORCUPINE_VERSION = '4.0.2'
 
+VOSK_ENABLED = True           # v9.1 WAKE FREE: keyless wake word (FridayVosk.java, reflection-based)
+VOSK_VERSION = '0.3.47'
+
 DEPS = [
     ('de.kherud:llama',
      'implementation "de.kherud:llama:%s"' % LLAMA_VERSION),
@@ -45,6 +52,10 @@ DEPS = [
 if PORCUPINE_ENABLED:
     DEPS.append(('ai.picovoice:porcupine-android',
                  'implementation "ai.picovoice:porcupine-android:%s"' % PORCUPINE_VERSION))
+
+if VOSK_ENABLED:
+    DEPS.append(('com.alphacephei:vosk-android',
+                 'implementation "com.alphacephei:vosk-android:%s"' % VOSK_VERSION))
 
 DEPS.append(('androidx.health.connect:connect-client',
              'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
