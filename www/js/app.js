@@ -3778,6 +3778,14 @@ function bindEvents() {
   if (llmLoad) llmLoad.addEventListener('click', llmLoadUI);
   if (llmUnload) llmUnload.addEventListener('click', llmUnloadUI);
   bind('#porcupineKey', 'porcupineKey', 'input');
+  bind('#wakeKeyword', 'wakeKeyword', 'input');
+  const voskDl = $('#voskDownload'), voskSc = $('#voskScan');
+  if (voskDl) voskDl.addEventListener('click', voskDownloadUI);
+  if (voskSc) voskSc.addEventListener('click', voskScanUI);
+  if (NAT.voskAddListener) NAT.voskAddListener('voskProgress', ev => {
+    const chip = $('#voskStatusChip');
+    if (chip && (ev.percent || 0) < 100) chip.textContent = `Wake brain: downloading… ${ev.percent || 0}%`;
+  });
 
   $('#systemsLine')?.addEventListener('click', () => {
     const rows = state.systemsRows || [];
@@ -3852,7 +3860,15 @@ function onSettingChange(key, v) {
   if (key === 'groqKey') updateBrainBadge();
   if (key === 'speechRate') $('#speechRateValue').textContent = v + 'x';
   if (key === 'speechPitch') $('#speechPitchValue').textContent = v;
-  if (key === 'wakeWord') { v ? V.startWakeWord() : V.stopWakeWord(); U.toast(v ? 'Wake word on — say "Hey Friday"' : 'Wake word off', '🎙️'); }
+  if (key === 'wakeWord') {
+    v ? V.startWakeWord() : V.stopWakeWord();
+    const w = ((S.getSetting('wakeKeyword') || 'friday').trim().split(/[\s,]+/)[0]) || 'friday';
+    U.toast(v ? `Wake word on — say "${w}"` : 'Wake word off', '🎙️');
+    if (v && !(S.getSetting('porcupineKey') || '').trim() && !(S.getSetting('voskModelPath') || '').trim()) {
+      setTimeout(() => U.toast('Tip: tap "Get wake brain" in Settings for a true offline hotword — free, 36MB, no account', '🎙️', 5600), 900);
+    }
+    refreshVoskStatus();
+  }
   if (key === 'showWidgets') $('#dashWidgets').style.display = v ? 'grid' : 'none';
   if (key === 'backgroundService' && NAT.isNative()) {
     v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
@@ -3939,6 +3955,49 @@ async function llmUnloadUI() {
   refreshLlmStatus();
 }
 
+/* ================= v9.1 WAKE FREE (keyless Vosk hotword UI) ================= */
+
+async function refreshVoskStatus() {
+  const chip = $('#voskStatusChip');
+  if (!chip) return;
+  if (!NAT.isNative()) { chip.textContent = 'Wake brain: web build — the keyless engine ships only in the installed APK.'; return; }
+  const st = await NAT.voskStatus();
+  if (!st || !st.ok) { chip.textContent = 'Wake brain: engine missing in this build — rebuild the APK.'; return; }
+  if (st.running) { chip.textContent = `Wake brain: ● listening for "${S.getSetting('wakeKeyword') || 'friday'}" — offline, keyless.`; return; }
+  if ((S.getSetting('voskModelPath') || '').trim() || st.defaultModelReady) {
+    chip.textContent = 'Wake brain: ○ ready — turn Wake Word on and say your word.'; return;
+  }
+  chip.textContent = 'Wake brain: not downloaded — tap "Get wake brain" once (36MB, then offline forever).';
+}
+
+async function voskDownloadUI() {
+  if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+  const chip = $('#voskStatusChip');
+  if (chip) chip.textContent = 'Wake brain: downloading… 0%';
+  U.toast('Downloading the wake brain (36MB, one time) — a small offline ear. No account, no key.', '🎙️');
+  const r = await NAT.voskDownload();
+  if (r && r.ok) {
+    S.setSetting('voskModelPath', r.path || '');
+    if (chip) chip.textContent = `Wake brain: ✅ ready (${r.mb || '?'}MB) — your word now wakes FRIDAY, offline.`;
+    U.toast('Wake brain ready! Turn Wake Word on and say your word.', '🎙️');
+    if (S.getSetting('wakeWord')) { V.stopWakeWord(); V.startWakeWord(); }
+  } else {
+    if (chip) chip.textContent = 'Wake brain: download failed — check internet and tap again.';
+    U.toast('Download failed: ' + (r && r.reason ? r.reason : 'network'), '⚠️');
+  }
+  refreshVoskStatus();
+}
+
+async function voskScanUI() {
+  if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+  const r = await NAT.voskScanModels();
+  const items = (r && r.items) || [];
+  if (!items.length) { U.toast('No wake model found — tap "Get wake brain" instead.', '🎙️'); return; }
+  S.setSetting('voskModelPath', items[0].path);
+  U.toast(`Wake brain found: ${items[0].name} (${items[0].mb}MB)`, '🎙️');
+  refreshVoskStatus();
+}
+
 function syncSettingsUI() {
   const set = (sel, val, prop = 'value') => { const e = $(sel); if (e) e[prop] = val; };
   set('#aiProvider', S.getSetting('aiProvider'));
@@ -3971,6 +4030,8 @@ function syncSettingsUI() {
   set('#llmModelPath', S.getSetting('llmModelPath') || '');
   refreshLlmStatus();
   set('#porcupineKey', S.getSetting('porcupineKey') || '');
+  set('#wakeKeyword', S.getSetting('wakeKeyword') || '');
+  refreshVoskStatus();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');
   const ic = $('#intentCount'); if (ic) ic.textContent = intentCount();

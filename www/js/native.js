@@ -467,3 +467,54 @@ export async function capabilities() {
   const r = await call('capabilities');
   return { native: true, ...(r.ok ? r : {}) };
 }
+
+/* ================= KEYLESS WAKE WORD (v9.1 - Vosk) =================
+   No key, no account, no internet after a one-time ~36MB model download.
+   ANY custom word works ("friday", "jarvis"...). Falls back gracefully:
+   w/o AAR -> not_installed, w/o model -> no_model, w/o mic -> no_mic. */
+const vosk = () => pluginNamed('FridayVosk');
+
+/** True when the FridayVosk plugin exists in the running APK. */
+export function voskAvailable() { return isNative() && !!vosk(); }
+
+export async function voskStatus() {
+  const p = vosk();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web', installed: false, running: false };
+  try { return await p.status(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error', installed: false, running: false }; }
+}
+
+export async function voskStart(modelPath, keyword = 'friday') {
+  const p = vosk();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.start({ modelPath: modelPath || '', keyword }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function voskStop() {
+  const p = vosk();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.stop(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function voskScanModels() {
+  const p = vosk();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web', items: [] };
+  try { return await p.scanModels(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error', items: [] }; }
+}
+
+export async function voskDownload(url) {
+  const p = vosk();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.downloadModel(url ? { url } : {}); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+/** Subscribe to wake-word engine events: 'wake' | 'voskProgress' | 'voskError'. */
+export function voskAddListener(event, cb) {
+  const p = vosk();
+  if (!p || typeof p.addListener !== 'function') return null;
+  try { return p.addListener(event, cb); } catch (_) { return null; }
+}
