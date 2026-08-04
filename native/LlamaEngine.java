@@ -67,6 +67,44 @@ public class LlamaEngine {
         }
     }
 
+    /* ================= v10.0 M1: embedding brain (semantic memory) ================= */
+    private Object embedModel;
+    private String embedPath;
+
+    public synchronized void loadEmbed(String path) throws Exception {
+        if (embedModel != null && path.equals(embedPath)) return;
+        unloadEmbed();
+
+        Class<?> mpClass = Class.forName("de.kherud.llama.ModelParameters");
+        Object params = mpClass.getDeclaredConstructor().newInstance();
+        invokeBest(params, new String[]{"setModel", "setModelPath"}, new Class[]{String.class}, path);
+        invokeBest(params, new String[]{"setContextSize", "setNCtx", "setNumCtx"}, new Class[]{int.class}, 512);
+        invokeBest(params, new String[]{"setThreads", "setNThreads"}, new Class[]{int.class}, 4);
+        invokeBest(params, new String[]{"setEmbedding", "setEmbeddings"}, new Class[]{boolean.class}, true);
+        invokeBest(params, new String[]{"setUseMmap"}, new Class[]{boolean.class}, true);
+        invokeBest(params, new String[]{"setUseMlock"}, new Class[]{boolean.class}, false);
+
+        Class<?> lmClass = Class.forName("de.kherud.llama.LlamaModel");
+        embedModel = lmClass.getDeclaredConstructor(mpClass).newInstance(params);
+        embedPath = path;
+    }
+
+    public synchronized void unloadEmbed() {
+        if (embedModel != null) {
+            try { embedModel.getClass().getMethod("close").invoke(embedModel); } catch (Throwable ignored) {}
+            embedModel = null;
+            embedPath = null;
+        }
+    }
+
+    public boolean embedLoaded() { return embedModel != null; }
+    public String embedLoadedPath() { return embedPath; }
+
+    public synchronized float[] embed(String text) throws Exception {
+        if (embedModel == null) throw new IllegalStateException("no_embed_model");
+        return (float[]) embedModel.getClass().getMethod("embed", String.class).invoke(embedModel, text);
+    }
+
     public void abort() { abort.set(true); }
 
     /* ---------- inference ---------- */
