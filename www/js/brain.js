@@ -715,6 +715,34 @@ I('screen_time', t => /\b(screen time|phone usage|usage report|kitna chalaya|how
   t => ({ say: null, action: { type: 'screen_time', days: /\bweek\b|\bhafte\b/.test(t) ? 7 : 1 } }), 6);
 
 /* ---- battery guard ---- */
+/* ---- v10.0 TR1: offline translator (ML Kit native engine) ---- */
+const TR_LANGS = {
+  hindi: 'hi', english: 'en', angrezi: 'en', marathi: 'mr', tamil: 'ta', telugu: 'te',
+  bengali: 'bn', bangla: 'bn', urdu: 'ur', gujarati: 'gu', kannada: 'kn', malayalam: 'ml',
+  punjabi: 'pa', spanish: 'es', french: 'fr', german: 'de', chinese: 'zh', japanese: 'ja',
+  arabic: 'ar', russian: 'ru', portuguese: 'pt', italian: 'it', korean: 'ko', thai: 'th'
+};
+I('translate', t => {
+    if (/\bscreen|page\b/.test(t)) return 0;   // screen translation belongs to vision
+    if (/\btranslate\b|\btranslation\b/.test(t)) return 1;
+    if (/\bko\s+[a-z]+\s+me(?:i|n)?\s*(?:bolo|translate|karo|likho|batao)\b/.test(t)) return 1;
+    if (/\bwhat is\s+.+\s+in\s+(hindi|english|marathi|tamil|telugu|bengali|urdu|spanish|french|german|chinese|japanese|arabic|russian)\s*\??$/.test(t)) return 1;
+    return 0;
+  },
+  t => {
+    let toName = null;
+    for (const name in TR_LANGS) {
+      if (new RegExp('\\b' + name + '\\b').test(t)) { toName = name; break; }
+    }
+    const to = toName ? TR_LANGS[toName] : 'hi';
+    const m = t.match(/^translate\s+(.+?)\s+(?:to|in|into)\s+[a-z]+\s*\??$/)
+      || t.match(/^(.+?)\s+ko\s+[a-z]+\s+me(?:i|n)?\s*(?:bolo|translate|karo|likho|batao)\s*\??$/)
+      || t.match(/^what is\s+(.+?)\s+in\s+[a-z]+\s*\??$/)
+      || t.match(/^translate\s+(.+?)\s*\??$/);
+    const payload = m ? m[1].trim() : '';
+    return { say: null, action: { type: 'translate', text: payload, to } };
+  }, 8);
+
 I('battery_guard', t => /\b(battery full|battery low|battery warn|battery alert|battery guard)\b/.test(t) ? 1 : 0,
   t => {
     if (/\b(low|kam)\b/.test(t)) {
@@ -843,13 +871,10 @@ I('whatsapp_schedule', t => (/\bschedule\b/.test(t) && /\bwhatsapp|message|msg\b
     } };
   }, 6);
 
-/* ---- quick inline translate (panel stays for the rest) ---- */
-I('quick_translate', t => /^translate\s+.+?\s+(to|in)\s+[a-z]+$/.test(t) ? 1 : 0,
-  t => {
-    const m = t.match(/^translate\s+(.+?)\s+(to|in)\s+([a-z]+)$/);
-    return m ? { say: null, action: { type: 'quick_translate', text: m[1], lang: m[3] } }
-             : { say: 'Opening translator.', action: { type: 'open_panel', panel: 'sub-translate', prefill: t } };
-  }, 6);
+/* ---- quick inline translate: MERGED into the v10.0 offline 'translate'
+   intent above (ML Kit engine). The old cloud-based quick_translate intent
+   was deleted to avoid a duplicate-resolver trap; case 'quick_translate'
+   in app.js stays as an action-level alias with the panel fallback. ---- */
 
 /* ---- wifi QR ---- */
 I('wifi_qr', t => /\bwifi\s*(qr|qr code)\b|\bshare wifi\b/.test(t) ? 1 : 0,

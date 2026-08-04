@@ -23,6 +23,8 @@ import * as HEALTH from './health.js';
 import * as I18N from './i18n.js';
 import * as LB from './localbrain.js';
 import * as AMB from './ambient.js';
+import * as CLARIFY from './clarify.js';
+import * as SEM from './semantic.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -70,6 +72,7 @@ async function init() {
   U.animateWaveform($('#voiceWaveform'), state);
 
   await V.initSynthesis();
+  setTimeout(() => { V.armSherpaVoice(); V.armSherpaEars(); }, 3000);   // v10.0: pick up downloaded packs at boot
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); $('#micContainer')?.classList.add('listening'); $('#inputWave')?.classList.add('on'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
@@ -285,6 +288,18 @@ async function handleInput(text, opts = {}) {
     doDictateFinish(text);
     return;
   }
+  /* v10.0 C1 CLARIFY: if FRIDAY asked a question last turn, this turn is the
+     ANSWER - merge it into the parked command instead of re-parsing alone. */
+  if (state.pendingClarify && !opts.noChain) {
+    const pending = state.pendingClarify;
+    state.pendingClarify = null;
+    const merged = CLARIFY.absorb(pending, text);
+    if (merged) {
+      addMsg('user', text);
+      return handleInput(merged, { ...opts, noChain: true, silentEcho: true });
+    }
+    /* not an answer -> treat as a brand-new command (fall through) */
+  }
   if (state.llmBusy) { state.llmBusy = false; LB.abortLocal(); }  // v8.2: new input stops on-device generation
   if (!opts.dedupeSkip) {
     const norm = text.toLowerCase().replace(/\s+/g, ' ');
@@ -315,6 +330,24 @@ async function handleInput(text, opts = {}) {
   }
 
   if (!opts.silentEcho) addMsg('user', text);
+
+  /* v10.0 C1: music with no source and no learned taste -> ask once,
+     learn forever ("YouTube pe ya Spotify pe?"). */
+  if (!opts.noChain && CLARIFY.needsMusicSource(text)) {
+    const q = CLARIFY.musicSourceQuestion();
+    askClarify(q.question, q.options);
+    state.pendingClarify = { slot: 'music_source', origText: text };
+    return;
+  }
+  /* learned taste applies silently to future music commands */
+  const musicPref = CLARIFY.getPref('music_source');
+  if (musicPref && !opts.noChain) {
+    const low = text.toLowerCase();
+    if (/\bplay\b|\bchalao\b|\bsunao\b/.test(low) && !/\byoutube|\byt\b|spotify|game|video/.test(low)
+        && /\b(song|gaana|music|gana)\b/.test(low)) {
+      text += musicPref === 'spotify' ? ' on spotify' : ' on youtube';
+    }
+  }
   S.remember('user', text);
   $('#textInput').value = '';
 
@@ -411,7 +444,20 @@ async function handleInput(text, opts = {}) {
     if (fixed !== text) hit = resolve(fixed, { lastTopic: state.lastTopic });
   }
   MEM.logEpisode({ text, intent: hit ? hit.intent : null, role: 'user' });
+  /* v10.0 M1: facts about the user's life get embedded for meaning-recall
+     (silent no-op when the memory brain is not downloaded). */
+  if (/\b(my|mera|meri|mere|mujhe|main|hamara|hamari)\b/i.test(text) && text.length > 12 && text.length < 240) {
+    SEM.rememberSemantic(text, { kind: 'fact' }).catch(() => {});
+  }
   if (hit) {
+    /* v10.0 C1: action resolved but a CRITICAL slot is empty -> ask ONE
+       short question instead of guessing wrong (JARVIS rule). */
+    const slotQ = CLARIFY.checkSlots(hit, text);
+    if (slotQ) {
+      askClarify(slotQ.question, slotQ.options);
+      state.pendingClarify = slotQ.pending;
+      return;
+    }
     state.lastTopic = hit.intent;
     state.lastSubject = hit.action?.query || hit.action?.word || hit.action?.dest || null;
     if (hit.expect) state.expect = hit.expect;
@@ -430,7 +476,25 @@ async function handleInput(text, opts = {}) {
   }
 
   // 2) CLOUD (only if key present)
-  if (AI.hasGroq()) return askGroq(text);
+  if (AI.hasGroq()) {
+    /* v10.0 C1: unmatched ACTION-ish command -> offer smart guesses first
+       (cheaper and more honest than a hallucinated "done").
+       C1 v2: if the meaning-router is armed (bge-small embed model), route
+       by MEANING first — auto-run high-confidence hits, suggest mid-band. */
+    if (/play|call|message|remind|alarm|translate|open|wallpaper|send|karo|banao|chalao|dikhao|lagao/i.test(text)) {
+      const r = await SEM.routeByMeaning(text, CLARIFY.SUGGEST_EXAMPLES);
+      if (r && r.decision === 'auto' && r.utter && r.utter !== text) return handleInput(r.utter, opts);
+      if (r && r.decision === 'suggest') {
+        const nm0 = CLARIFY.noMatchClarify(text);
+        const opts0 = [{ label: r.label, say: r.utter }].concat(nm0 ? nm0.options : []);
+        askClarify(`Pakka samajhna chahta hoon, Boss — "${r.label}" tha kya?`, opts0);
+        return;
+      }
+      const nm = CLARIFY.noMatchClarify(text);
+      if (nm) { askClarify(nm.question, nm.options); return; }
+    }
+    return askGroq(text);
+  }
 
   // 2.5) OFFLINE LLM CHAT — real conversation with no key, if a local
   //      model is installed (Settings -> Offline Coder -> chat model).
@@ -1075,6 +1139,31 @@ async function runAction(a, hit) {
       return true;
     }
 
+    case 'translate': {
+      const LANG_NAME = { hi: 'Hindi', en: 'English', mr: 'Marathi', ta: 'Tamil', te: 'Telugu', bn: 'Bengali',
+        ur: 'Urdu', gu: 'Gujarati', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', es: 'Spanish', fr: 'French',
+        de: 'German', zh: 'Chinese', ja: 'Japanese', ar: 'Arabic', ru: 'Russian', pt: 'Portuguese', it: 'Italian',
+        ko: 'Korean', th: 'Thai' };
+      const to = a.to || 'hi';
+      const name = LANG_NAME[to] || to;
+      if (!a.text) {
+        askClarify('Kya translate karoon, Boss? Bol do.');
+        state.pendingClarify = { slot: 'text', intent: 'translate', origText: 'translate', action: a };
+        return true;
+      }
+      const r = await NAT.translateText({ text: a.text, to, from: a.from || '' });
+      if (r && r.ok) {
+        reply(r.same ? `Ye already ${name} me hai, Boss: "${r.text}"` : `🌐 **${name}**: "${r.text}"`);
+      } else if (r && (r.reason === 'not_installed' || r.reason === 'engine_missing')) {
+        reply('Translator engine is build me nahi aaya (naya APK chahiye). Groq se try karun?');
+      } else if (r && r.reason === 'web') {
+        reply('Translator sirf installed app me chalta hai. Web build me Groq use karke translate kar sakti hoon.');
+      } else {
+        reply(`Pehli baar ${name} model download hota hai - ek baar internet on rakho, phir hamesha offline. Phir se try karo.`);
+      }
+      return true;
+    }
+
     case 'battery_guard': {
       if (a.kind === 'low') {
         S.setSetting('batteryWarnLow', a.level || 20);
@@ -1140,6 +1229,13 @@ async function runAction(a, hit) {
     }
 
     case 'quick_translate': {
+      /* v10.0: legacy alias — the offline ML Kit engine handles it now,
+         with the cloud API + panel as deeper fallbacks. */
+      const QL = { hindi: 'hi', english: 'en', marathi: 'mr', tamil: 'ta', telugu: 'te', bengali: 'bn',
+        urdu: 'ur', gujarati: 'gu', kannada: 'kn', spanish: 'es', french: 'fr', german: 'de', chinese: 'zh',
+        japanese: 'ja', arabic: 'ar', russian: 'ru' };
+      const tr = await NAT.translateText({ text: a.text, to: QL[a.lang] || a.lang || 'hi', from: '' });
+      if (tr && tr.ok) { reply(`🌐 "${a.text}" → **${tr.text}** (${a.lang})`); return true; }
       const r = await API.quickTranslate(a.text, a.lang);
       if (!r.ok) {
         reply('Opening the translator panel instead.');
@@ -2295,7 +2391,15 @@ async function askGroq(text) {
   }));
   const ctxBrief = MEM.buildContext({ maxFacts: 22, maxPatterns: 6 });
   const amb = await AMB.collectAmbient();   // v8.2: live telemetry in every cloud call
-  const sys = AI.systemPrompt() + (amb ? '\n\n' + amb : '') + (ctxBrief ? '\n\n' + ctxBrief : '') +
+  /* v10.0 M1: recall memories by MEANING (on-device embeddings, local-only) */
+  let semBlock = '';
+  try {
+    if ((S.getSetting('embedModelPath') || '').trim()) {
+      const hits = await SEM.recallSemantic(text, 2, 0.55);
+      if (hits.length) semBlock = '\n\nSEMANTIC MEMORY (recalled on-device by meaning):\n' + hits.map(h => '- ' + h.text).join('\n');
+    }
+  } catch (_) {}
+  const sys = AI.systemPrompt() + (amb ? '\n\n' + amb : '') + (ctxBrief ? '\n\n' + ctxBrief : '') + semBlock +
     '\nIf the user asks you to DO something (remind, alarm, call, message, note, weather...), use the appropriate tool. Confirm briefly afterward.';
   const msgs = [{ role: 'system', content: sys }, ...history, { role: 'user', content: text }];
 
@@ -3095,6 +3199,34 @@ function reply(text, opts = {}) {
   armTalkWait(text);
 }
 
+/* ---- v10.0 C1: clarifying questions with tappable quick-answer chips ---- */
+function askClarify(question, options) {
+  reply(question);
+  if (options && options.length) addClarifyChips(options);
+}
+
+function addClarifyChips(options) {
+  const box = $('#chatMessages');
+  if (!box) return;
+  const old = box.querySelector('.clarify-chips');
+  if (old) old.remove();
+  const row = document.createElement('div');
+  row.className = 'clarify-chips';
+  for (const opt of options.slice(0, 4)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'clarify-chip';
+    b.textContent = opt.label;
+    b.addEventListener('click', () => {
+      row.remove();
+      handleInput(opt.say, { fromVoice: false });
+    });
+    row.appendChild(b);
+  }
+  box.appendChild(row);
+  scrollBottom();
+}
+
 function addMsg(role, text, opts = {}) {
   const msg = { role, text, time: Date.now() };
   state.messages.push(msg);
@@ -3786,6 +3918,23 @@ function bindEvents() {
     const chip = $('#voskStatusChip');
     if (chip && (ev.percent || 0) < 100) chip.textContent = `Wake brain: downloading… ${ev.percent || 0}%`;
   });
+  /* v10.0: all hf pack downloads share one progress pipe into the active chip */
+  if (NAT.hfAddProgressListener) NAT.hfAddProgressListener(ev => {
+    const chip = state.hfChip ? $(state.hfChip) : null;
+    if (chip && (ev.percent || 0) < 100) chip.textContent = `${chip.dataset.base || 'Pack:'} downloading… ${ev.percent || 0}%`;
+  });
+  const vdl = $('#voiceDownload'), vtest = $('#voiceTest'), edl = $('#earsDownload'), mdl = $('#embedDownload');
+  if (vdl) vdl.addEventListener('click', sherpaVoiceDownloadUI);
+  if (vtest) vtest.addEventListener('click', async () => {
+    if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+    if (!V.isSherpaVoiceArmed()) { U.toast('Pehle voice pack download karo', '🔊'); return; }
+    NAT.sherpaSpeak('Neural voice online, Boss. Ab main pehle se zyada insaan lagti hoon, hain na?').catch(() => {});
+  });
+  if (edl) edl.addEventListener('click', sherpaEarsDownloadUI);
+  if (mdl) mdl.addEventListener('click', embedDownloadUI);
+  bind('#neuralVoice', 'neuralVoice', 'change', 'checked');
+  bind('#offlineEars', 'offlineEars', 'change', 'checked');
+  bind('#embedModelPath', 'embedModelPath', 'input');
 
   $('#systemsLine')?.addEventListener('click', () => {
     const rows = state.systemsRows || [];
@@ -3901,6 +4050,15 @@ function onSettingChange(key, v) {
     refreshLlmStatus();
   }
   if (key === 'llmModelPath') refreshLlmStatus();
+  if (key === 'neuralVoice') {
+    if (v) V.armSherpaVoice().then(ok => { if (!ok) U.toast('Pehle "Get neural voice" dabao (upar button)', '🔊'); refreshSherpaChips(); });
+    else { V.armSherpaVoice(); refreshSherpaChips(); }
+  }
+  if (key === 'offlineEars') {
+    if (v) V.armSherpaEars().then(ok => { if (!ok) U.toast('Pehle "Get offline ears" dabao (upar button)', '🎙️'); refreshSherpaChips(); });
+    else { V.armSherpaEars(); refreshSherpaChips(); }
+  }
+  if (key === 'embedModelPath') refreshEmbedChip();
 }
 
 /* ================= v8.2 AI CORE (on-device brain UI) ================= */
@@ -3998,6 +4156,106 @@ async function voskScanUI() {
   refreshVoskStatus();
 }
 
+/* ================= v10.0 JARVIS: pack downloads + chips ================= */
+
+async function refreshSherpaChips() {
+  const vc = $('#sherpaVoiceChip'), sc = $('#sherpaSttChip');
+  if (!NAT.isNative()) {
+    if (vc) vc.textContent = 'Neural voice: installed app only (not web).';
+    if (sc) sc.textContent = 'Offline ears: installed app only (not web).';
+    return;
+  }
+  const st = await NAT.sherpaStatus();
+  if (vc) vc.textContent = V.isSherpaVoiceArmed()
+    ? `Neural voice: ● LIVE${st && st.ttsLabel ? ' — ' + st.ttsLabel.split(':').pop() : ''}`
+    : ((S.getSetting('neuralVoiceCfg') || '') ? 'Neural voice: ○ pack ready — toggle on.' : 'Neural voice: using Android TTS (robotic).');
+  if (sc) sc.textContent = V.isSherpaSttArmed()
+    ? 'Offline ears: ● LIVE — moonshine tiny'
+    : ((S.getSetting('sherpaSttDir') || '') ? 'Offline ears: ○ pack ready — toggle on.' : 'Offline ears: using Google STT (needs internet).');
+}
+
+async function refreshEmbedChip() {
+  const chip = $('#embedStatusChip');
+  if (!chip) return;
+  const path = (S.getSetting('embedModelPath') || '').trim();
+  if (!NAT.isNative()) { chip.textContent = 'Memory brain: installed app only (not web).'; return; }
+  if (!path) { chip.textContent = 'Memory brain: not downloaded — meaning-recall off.'; return; }
+  let st = null;
+  try { st = await NAT.llmStatus(); } catch (_) {}
+  const cnt = SEM.semanticMemorySize();
+  chip.textContent = (st && st.embedLoaded)
+    ? `Memory brain: ● loaded — ${cnt} memories, meaning-recall ON.`
+    : `Memory brain: ○ set — loads on first recall (${cnt} memories).`;
+}
+
+async function sherpaVoiceDownloadUI() {
+  if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+  const chip = $('#sherpaVoiceChip');
+  state.hfChip = '#sherpaVoiceChip';
+  if (chip) { chip.dataset.base = 'Neural voice:'; chip.textContent = 'Neural voice: downloading… 0%'; }
+  U.toast('Downloading the neural voice (~75MB, one time, then offline)…', '🔊');
+  const r = await NAT.hfDownload({ repo: 'csukuangfj/vits-piper-en_US-lessac-medium', dest: 'voice-piper-en' });
+  if (!(r && r.ok && r.dir)) {
+    if (chip) chip.textContent = 'Neural voice: download failed — internet check karke phir try karo.';
+    return;
+  }
+  const files = r.files || [];
+  const onnx = files.find(f => /\.onnx$/i.test(f));
+  const hasTokens = files.some(f => /(^|\/)tokens\.txt$/i.test(f));
+  const hasEspeak = files.some(f => /^espeak-ng-data\//i.test(f));
+  if (!onnx || !hasTokens) { if (chip) chip.textContent = 'Neural voice: pack files incomplete — report this bug.'; return; }
+  const cfg = {
+    kind: 'vits',
+    modelPath: r.dir + '/' + onnx,
+    tokensPath: r.dir + '/tokens.txt',
+    lexiconPath: '',
+    dataDir: hasEspeak ? r.dir + '/espeak-ng-data' : '',
+    dictDir: ''
+  };
+  S.setSetting('neuralVoiceCfg', JSON.stringify(cfg));
+  S.setSetting('neuralVoice', true);
+  const chk = $('#neuralVoice'); if (chk) chk.checked = true;
+  const ok = await V.armSherpaVoice();
+  refreshSherpaChips();
+  if (ok) {
+    U.toast('Neural voice LIVE! "Test" dabao.', '🔊');
+    NAT.sherpaSpeak('Neural voice online, Boss. Ab main pehle se zyada insaan lagti hoon, hain na?').catch(() => {});
+  } else {
+    U.toast('Voice engine init failed (maybe rebuild pending)', '⚠️');
+  }
+}
+
+async function sherpaEarsDownloadUI() {
+  if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+  const chip = $('#sherpaSttChip');
+  state.hfChip = '#sherpaSttChip';
+  if (chip) { chip.dataset.base = 'Offline ears:'; chip.textContent = 'Offline ears: downloading… 0%'; }
+  U.toast('Downloading offline ears (~120MB, one time, then no-net dictation)…', '🎙️');
+  const r = await NAT.hfDownload({ repo: 'csukuangfj/sherpa-onnx-moonshine-tiny-en-int8', dest: 'ears-moonshine' });
+  if (!(r && r.ok && r.dir)) {
+    if (chip) chip.textContent = 'Offline ears: download failed — internet check karke phir try karo.';
+    return;
+  }
+  S.setSetting('sherpaSttDir', r.dir);
+  S.setSetting('offlineEars', true);
+  const chk = $('#offlineEars'); if (chk) chk.checked = true;
+  const ok = await V.armSherpaEars();
+  refreshSherpaChips();
+  U.toast(ok ? 'Offline ears LIVE! Ab basement me bhi sunungi.' : 'Ears engine init failed (maybe rebuild pending)', ok ? '🎙️' : '⚠️');
+}
+
+async function embedDownloadUI() {
+  if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
+  const chip = $('#embedStatusChip');
+  state.hfChip = '#embedStatusChip';
+  if (chip) { chip.dataset.base = 'Memory brain:'; chip.textContent = 'Memory brain: downloading… 0%'; }
+  U.toast('Downloading the memory brain (~30MB) — meaning-recall, fully on-device…', '🧠');
+  const r = await SEM.downloadEmbedModel();
+  refreshEmbedChip();
+  const inp = $('#embedModelPath'); if (inp && r.path) inp.value = r.path;
+  U.toast(r.ok ? 'Memory brain ready! "mera naam yaad rakhna" se shuru karo.' : 'Download failed — internet check karke phir try karo.', r.ok ? '🧠' : '⚠️');
+}
+
 function syncSettingsUI() {
   const set = (sel, val, prop = 'value') => { const e = $(sel); if (e) e[prop] = val; };
   set('#aiProvider', S.getSetting('aiProvider'));
@@ -4032,6 +4290,11 @@ function syncSettingsUI() {
   set('#porcupineKey', S.getSetting('porcupineKey') || '');
   set('#wakeKeyword', S.getSetting('wakeKeyword') || '');
   refreshVoskStatus();
+  set('#neuralVoice', !!S.getSetting('neuralVoice'), 'checked');
+  set('#offlineEars', !!S.getSetting('offlineEars'), 'checked');
+  set('#embedModelPath', S.getSetting('embedModelPath') || '');
+  refreshSherpaChips();
+  refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');
   const ic = $('#intentCount'); if (ic) ic.textContent = intentCount();

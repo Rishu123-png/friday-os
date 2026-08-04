@@ -12,7 +12,8 @@
 
 import { getSetting } from './store.js';
 import { applyPronunciations } from './memory.js';
-import { checkPermission, requestAll } from './native.js';
+import { checkPermission, requestAll, sherpaSpeak, sherpaStopSpeaking, sherpaTtsInit,
+  sherpaStatus, sherpaAddListener, sherpaSttInit, sherpaListen } from './native.js';
 import { parseWakeKeywords } from './nlp.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
@@ -49,6 +50,42 @@ let rec = null;          // web recognizer
 let wakeRec = null;      // web wake-word recognizer
 let listening = false;
 let wakeActive = false;
+
+/* ============ v10.0 T1/T2 sherpa (neural voice / offline ears) ============ */
+let sherpaVoiceArmed = false;   // neural TTS initialized + enabled
+let sherpaSttArmed = false;     // offline recognizer initialized + enabled
+
+export function isSherpaVoiceArmed() { return sherpaVoiceArmed; }
+export function isSherpaSttArmed() { return sherpaSttArmed; }
+
+/** init the neural voice from the stored pack config (settings 'neuralVoiceCfg'). */
+export async function armSherpaVoice() {
+  sherpaVoiceArmed = false;
+  if (!useNative()) return false;
+  if (!getSetting('neuralVoice')) return false;
+  let cfg = null;
+  try { cfg = JSON.parse(getSetting('neuralVoiceCfg') || 'null'); } catch (_) {}
+  if (!cfg || !cfg.modelPath) return false;
+  const st = await sherpaStatus();
+  if (st && st.ok && st.ttsReady) { sherpaVoiceArmed = true; return true; }
+  const r = await sherpaTtsInit(cfg);
+  sherpaVoiceArmed = !!(r && r.ok);
+  return sherpaVoiceArmed;
+}
+
+/** init the offline recognizer from the stored model dir (settings 'sherpaSttDir'). */
+export async function armSherpaEars() {
+  sherpaSttArmed = false;
+  if (!useNative()) return false;
+  if (!getSetting('offlineEars')) return false;
+  const dir = (getSetting('sherpaSttDir') || '').trim();
+  if (!dir) return false;
+  const st = await sherpaStatus();
+  if (st && st.ok && st.sttReady) { sherpaSttArmed = true; return true; }
+  const r = await sherpaSttInit(dir);
+  sherpaSttArmed = !!(r && r.ok);
+  return sherpaSttArmed;
+}
 let speaking = false;
 let handlers = {};
 let voices = [];
@@ -73,6 +110,16 @@ export async function initSynthesis() {
         speaking = false;
         if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
       });
+      /* v10.0 sherpa mirrors the SAME contract so the pipeline never notices */
+      try {
+        sherpaAddListener('ttsStart', () => { speaking = true; });
+        sherpaAddListener('ttsDone', () => {
+          clearTimeout(speakWatch);
+          speaking = false;
+          if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
+        });
+        sherpaAddListener('sttEnd', () => { listening = false; });
+      } catch (_) {}
       return nativeReady;
     } catch (e) {
       console.warn('[voice] native TTS init failed', e);
@@ -226,7 +273,12 @@ export function listen() {
     ensureMicPermission().then(ok => {
       if (!ok) { handlers.onError && handlers.onError('mic-denied'); return; }
       NP().startListening({ lang: getSetting('voiceLang'), partial: true })
-        .catch(e => handlers.onError && handlers.onError(normListenErr(e)));
+        .catch(e => {
+          const kind = normListenErr(e);
+          /* v10.0 T2: Google ear needs network; sherpa ear needs none */
+          if ((kind === 'network' || kind === 'server' || kind === 'audio') && sherpaSttArmed) { sherpaEarsListen(); return; }
+          handlers.onError && handlers.onError(kind);
+        });
     });
     return true;
   }
@@ -420,6 +472,51 @@ function cleanForSpeech(text) {
   return out;
 }
 
+/* v10.0 T1: speak one line through the neural engine; falls back honestly */
+function sherpaSay(clean, { onStart, onEnd }) {
+  stopCurrent();
+  speaking = true;
+  pendingEnd = () => { disarmBargeIn(); onEnd && onEnd(); };
+  onStart && onStart();
+  sherpaSpeak(clean, { speed: parseFloat(getSetting('speechRate')) || 1 })
+    .then(r => {
+      if (r && r.ok) {
+        armBargeIn();
+        clearTimeout(speakWatch);
+        const est = 2600 + clean.split(/\s+/).length * 640;   // synth latency + playback
+        speakWatch = setTimeout(releaseStuckSpeech, Math.min(est, 20000));
+      } else {
+        /* neural engine said no -> classic engine takes this line, honestly */
+        sherpaVoiceArmed = false;
+        speaking = false; pendingEnd = null;
+        speak(clean, { onStart, onEnd });
+      }
+    })
+    .catch(() => {
+      sherpaVoiceArmed = false;
+      speaking = false; pendingEnd = null;
+      speak(clean, { onStart, onEnd });
+    });
+}
+
+/* v10.0 T2: one offline ear-shot through sherpa when the Google ear is down */
+function sherpaEarsListen() {
+  listening = true;
+  handlers.onStart && handlers.onStart();
+  sherpaListen().then(r => {
+    listening = false;
+    handlers.onEnd && handlers.onEnd();
+    if (r && r.ok && (r.text || '').trim()) {
+      handlers.onFinal && handlers.onFinal(r.text.trim());
+    } else {
+      handlers.onError && handlers.onError('no-speech');
+    }
+  }).catch(() => {
+    listening = false;
+    handlers.onError && handlers.onError('unknown');
+  });
+}
+
 export function speak(text, { onStart, onEnd } = {}) {
   if (!getSetting('voiceOutput') || !text) { onEnd && onEnd(); return false; }
 
@@ -428,6 +525,8 @@ export function speak(text, { onStart, onEnd } = {}) {
 
   /* ---- native path ---- */
   if (useNative()) {
+    /* v10.0 T1: neural voice first when armed; classic engine is the fallback */
+    if (sherpaVoiceArmed) { sherpaSay(clean, { onStart, onEnd }); return true; }
     stopCurrent();               // stop previous sentence WITHOUT touching feed epochs
     speaking = true;
     pendingEnd = () => { disarmBargeIn(); onEnd && onEnd(); };
@@ -521,6 +620,7 @@ function stopCurrent({ bump = false } = {}) {
     pendingEnd = null;
     disarmBargeIn();
     NP().stopSpeaking().catch(() => {});
+    if (sherpaVoiceArmed) sherpaStopSpeaking().catch(() => {});
     if (release) { try { release(); } catch (_) {} }
     return;
   }
