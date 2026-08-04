@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRIDAY OS — Console</title>
+<style>
+  :root { --bg:#070b14; --card:#0d1424; --line:#1c2b45; --txt:#dbe7ff; --dim:#7d90b8; --accent:#00d4ff; --ok:#2ecc71; --bad:#ff5c5c; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; padding:24px; }
+  header { display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+  header h1 { font-size:22px; letter-spacing:1px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--bad); display:inline-block; }
+  .dot.ok { background:var(--ok); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  .card h2 { font-size:15px; text-transform:uppercase; letter-spacing:1.5px; color:var(--accent); margin-bottom:12px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+  input, button, select { background:#0a1222; border:1px solid var(--line); color:var(--txt); border-radius:8px; padding:9px 12px; font-size:14px; }
+  input { flex:1; min-width:200px; }
+  button { cursor:pointer; background:var(--accent); color:#04121f; font-weight:600; border:none; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--dim); }
+  button.danger { background:transparent; border:1px solid var(--bad); color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:1px; }
+  .dim { color:var(--dim); font-size:13px; }
+  .engine { display:inline-block; padding:3px 9px; border-radius:20px; border:1px solid var(--line); font-size:12px; margin:2px; }
+  .engine.on { border-color:var(--ok); color:var(--ok); }
+  #toast { position:fixed; bottom:18px; right:18px; background:#0d1424; border:1px solid var(--accent); padding:10px 16px; border-radius:8px; display:none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="healthDot"></span>
+  <h1>FRIDAY OS — Server Console</h1>
+  <span class="dim" id="healthText">connecting…</span>
+</header>
+
+<div class="card">
+  <h2>Connection</h2>
+  <div class="row">
+    <input id="token" type="password" placeholder="FRIDAY_TOKEN (if set on the server)">
+    <input id="base" type="url" placeholder="Server base URL, e.g. http://localhost:8000" value="http://localhost:8000">
+    <button id="connect">Connect</button>
+  </div>
+  <div id="engines"></div>
+</div>
+
+<div class="card">
+  <h2>Facts — what FRIDAY knows about you</h2>
+  <div class="row">
+    <input id="factKey" placeholder="key e.g. user.name">
+    <input id="factValue" placeholder="value e.g. Rishu">
+    <button id="addFact">Add fact</button>
+  </div>
+  <table>
+    <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
+    <tbody id="factRows"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Notes</h2>
+  <div class="row">
+    <input id="noteText" placeholder="note text…">
+    <button id="addNote">Add note</button>
+  </div>
+  <table><tbody id="noteRows"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>Danger</h2>
+  <button class="danger" id="wipe">Wipe ALL memory for this user</button>
+  <span class="dim" style="margin-left:10px">(facts + notes, cannot be undone)</span>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let BASE = 'http://localhost:8000';
+let TOKEN = '';
+function h(extra) {
+  const hd = { 'Content-Type': 'application/json', ...extra };
+  if (TOKEN) hd['Authorization'] = 'Bearer ' + TOKEN;
+  return hd;
+}
+function toast(m) { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+async function j(path, opts) {
+  const r = await fetch(BASE + path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
+  return r.json();
+}
+async function refreshHealth() {
+  try {
+    const d = await j('/health', { headers: h() });
+    $('#healthDot').classList.add('ok');
+    $('#healthText').textContent = `v${d.version} · model ${d.model}`;
+    $('#engines').innerHTML = Object.entries(d.engines || {}).map(([k, v]) =>
+      `<span class="engine ${v !== 'not-installed' && v !== 'no-key' ? 'on' : ''}">${k}: ${v}</span>`).join('');
+  } catch (e) {
+    $('#healthDot').classList.remove('ok');
+    $('#healthText').textContent = 'offline — ' + e.message;
+    $('#engines').innerHTML = '';
+  }
+}
+async function refreshMemory() {
+  try {
+    const d = await j('/v1/memory', { headers: h() });
+    $('#factRows').innerHTML = (d.facts || []).map(f =>
+      `<tr><td><code>${esc(f.key)}</code></td><td>${esc(f.value)}</td>
+       <td><button class="ghost" data-del="${esc(f.key)}">✕</button></td></tr>`).join('')
+      || '<tr><td colspan="3" class="dim">No facts yet.</td></tr>';
+    $('#noteRows').innerHTML = (d.notes || []).map(n =>
+      `<tr><td>${esc(n.text)}</td><td class="dim">${new Date(n.ts * 1000).toLocaleString()}</td></tr>`).join('')
+      || '<tr><td class="dim">No notes yet.</td></tr>';
+    document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      try { await j('/v1/memory/fact?key=' + encodeURIComponent(b.dataset.del), { method: 'DELETE', headers: h() }); refreshMemory(); }
+      catch (e) { toast(e.message); }
+    }));
+  } catch (e) { toast(e.message); }
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+$('#connect').addEventListener('click', () => {
+  BASE = ($('#base').value || BASE).replace(/\/+$/, '');
+  TOKEN = $('#token').value.trim();
+  refreshHealth(); refreshMemory();
+});
+$('#addFact').addEventListener('click', async () => {
+  const key = $('#factKey').value.trim(), value = $('#factValue').value.trim();
+  if (!key || !value) return toast('key and value required');
+  try { await j('/v1/memory/fact', { method: 'POST', headers: h(), body: JSON.stringify({ key, label: key, value }) }); $('#factKey').value = $('#factValue').value = ''; refreshMemory(); }
+  catch (e) { toast(e.message); }
+});
+$('#addNote').addEventListener('click', async () => {
+  const text = $('#noteText').value.trim();
+  if (!text) return;
+  try { await j('/v1/memory/note', { method: 'POST', headers: h(), body: JSON.stringify({ text }) }); $('#noteText').value = ''; refreshMemory(); }
+  catch (e) { toast(e.message); }
+});
+$('#wipe').addEventListener('click', async () => {
+  if (!confirm('Wipe ALL server memory for this user?')) return;
+  try { await j('/v1/memory', { method: 'DELETE', headers: h() }); refreshMemory(); toast('Memory wiped'); }
+  catch (e) { toast(e.message); }
+});
+refreshHealth(); refreshMemory();
+</script>
+</body>
+</html>
