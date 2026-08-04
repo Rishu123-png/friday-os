@@ -338,7 +338,7 @@ test('find phone + tools + payments + misc intents', () => {
   assert.ok(ws.action.name.includes('mummy') && ws.action.msg.includes('good night'));
   assert.ok(ws.action.time > Date.now());
   const tr = resolve('translate kaise ho to spanish');
-  assert.ok(tr && tr.intent === 'quick_translate' && tr.action.lang === 'spanish' && tr.action.text === 'kaise ho');
+  assert.ok(tr && tr.intent === 'translate' && tr.action.to === 'es' && tr.action.text === 'kaise ho'); // v10: merged offline intent
   const qr = resolve('make wifi qr');
   assert.ok(qr && qr.intent === 'wifi_qr');
   const sl = resolve('summarize this link https://example.com/story');
@@ -642,4 +642,82 @@ test('v9.1 WAKE FREE: engine picker is honest (key wins, then model, then fallba
   assert.equal(pickWakeEngine({}), 'fallback');
   assert.equal(pickWakeEngine({ porcupineKey: '', voskModelPath: '' }), 'fallback');
   assert.equal(pickWakeEngine(), 'fallback');
+});
+/* ================= v10.0 JARVIS tests ================= */
+const CL = await import('../www/js/clarify.js');
+const LBX = await import('../www/js/localbrain.js');
+const SM = await import('../www/js/semantic.js');
+
+test('v10 C1: music without source triggers the ask-once question', () => {
+  assert.ok(CL.needsMusicSource('play kesariya'));
+  assert.ok(CL.needsMusicSource('kesariya gaana chalao'));
+  assert.ok(!CL.needsMusicSource('play kesariya on youtube'));
+  assert.ok(!CL.needsMusicSource('play candy crush'));
+  assert.ok(!CL.needsMusicSource('open whatsapp'));
+});
+test('v10 C1: answering "youtube" merges, learns, and never asks again', () => {
+  const pending = { slot: 'music_source', origText: 'play tum hi ho' };
+  const merged = CL.absorb(pending, 'youtube bhai');
+  assert.ok(/on youtube$/.test(merged), merged);
+  assert.equal(CL.getPref('music_source'), 'youtube');
+  assert.ok(!CL.needsMusicSource('play arijit singh'));   // learned -> no more questions
+});
+test('v10 C1: slot rules + merge for reminder topic', () => {
+  const hit = { intent: 'remind', action: { type: 'remind' } };
+  const q = CL.checkSlots(hit, 'remind me');
+  assert.ok(q && q.slot === 'text');
+  const merged = CL.absorb(q.pending, 'paani peena');
+  assert.ok(/paani peena/.test(merged));
+  assert.equal(CL.checkSlots({ intent: 'remind', action: { type: 'remind', text: 'x' } }, 'remind me about x'), null);
+});
+test('v10 C1: no-match suggestions are close and useful', () => {
+  const s = CL.suggestFor('moring brief');
+  assert.ok(s.length >= 1 && /Morning/.test(s[0].label));
+  const nm = CL.noMatchClarify('morning brif karo');
+  assert.ok(nm && nm.options.length >= 1);
+  assert.equal(CL.noMatchClarify('xqz lmnop fvck'), null);
+});
+test('v10 B1: detects 2026 model families and builds their templates', () => {
+  assert.equal(LBX.detectModelFamily('gemma-3-4b-it-Q4_K_M.gguf'), 'gemma');
+  assert.equal(LBX.detectModelFamily('Qwen3-4B-Instruct-2507-Q4_K_M.gguf'), 'chatml');
+  assert.equal(LBX.detectModelFamily('Phi-4-mini-instruct-Q4_K_M.gguf'), 'phi');
+  assert.equal(LBX.detectModelFamily('Llama-3.2-3B-Instruct-Q4_K_M.gguf'), 'llama');
+  const g = LBX.buildLocalPrompt('SYS', 'hello', 'gemma');
+  assert.ok(g.includes('<start_of_turn>user') && g.includes('<start_of_turn>model'));
+  const q = LBX.buildLocalPrompt('SYS', 'hello', 'chatml');
+  assert.ok(q.includes('<|im_start|>system') && q.includes('<|im_start|>assistant'));
+  const p = LBX.buildLocalPrompt('SYS', 'hello', 'phi');
+  assert.ok(p.includes('<|user|>hello<|end|><|assistant|>'));
+  const l = LBX.buildLocalPrompt('SYS', 'hello', 'llama');
+  assert.ok(l.includes('<|start_header_id|>'));
+  assert.ok(LBX.stopsForFamily('gemma').includes('<end_of_turn>'));
+  assert.ok(LBX.stopsForFamily('chatml').includes('<|im_end|>'));
+});
+test('v10 M1: vector math is correct and b64 round-trips', () => {
+  assert.equal(Math.round(SM.cosine([1, 0], [1, 0]) * 1000) / 1000, 1);
+  assert.equal(SM.cosine([1, 0], [0, 1]), 0);
+  const v = new Float32Array([0.5, -1.25, 3.0]);
+  const back = SM.b64ToVec(SM.vecToB64(v));
+  assert.ok(Math.abs(back[0] - 0.5) < 1e-6 && Math.abs(back[1] + 1.25) < 1e-6);
+  const hits = SM.topK([1, 0], [{ vec: [0.9, 0.1], id: 'a' }, { vec: [0, 1], id: 'b' }], 1);
+  assert.equal(hits[0].item.id, 'a');
+  assert.equal(SM.routeDecision(0.8), 'auto');
+  assert.equal(SM.routeDecision(0.6), 'suggest');
+  assert.equal(SM.routeDecision(0.3), 'none');
+});
+test('v10 TR1: offline translator intent parses honestly', () => {
+  let r = resolve('translate good morning to hindi');
+  assert.equal(r.intent, 'translate');
+  assert.equal(r.action.text, 'good morning');
+  assert.equal(r.action.to, 'hi');
+  r = resolve('translate i love you in french');
+  assert.equal(r.action.to, 'fr');
+  r = resolve('i love you ko hindi me bolo');
+  assert.equal(r.intent, 'translate');
+  assert.equal(r.action.text, 'i love you');
+  r = resolve('what is dhanyavaad in english');
+  assert.equal(r.action.text, 'dhanyavaad');
+  assert.equal(r.action.to, 'en');
+  const scr = resolve('translate the screen');
+  assert.ok(!scr || scr.intent !== 'translate' );  // screen translation stays with vision
 });
