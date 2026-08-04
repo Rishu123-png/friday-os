@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FRIDAY OS — notification small icon (BUG #1 fix).
+     White-on-transparent vector so it works as a status-bar icon on all
+     Android versions. Copied into the Android project by codemagic.yaml.
+     Used by: capacitor.config.json + www/js/app.js (LocalNotifications),
+     and the FridayService/FridayBubbleService foreground notifications. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- simple filled "AI core / spark" glyph -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2 L13.8,9.2 L21,11 L13.8,12.8 L12,20 L10.2,12.8 L3,11 L10.2,9.2 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.5,15.5 L19.2,18.2 L21.9,18.9 L19.2,19.6 L18.5,22.3 L17.8,19.6 L15.1,18.9 L17.8,18.2 Z" />
+</vector>
