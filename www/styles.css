@@ -878,3 +878,12 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .llm-actions{display:flex;gap:.6rem;justify-content:flex-start}
 /* Mission checklist spacing */
 .message.proactive .message-bubble li{list-style:none}
+
+/* ---- v10.0 C1 clarifying quick-answer chips ---- */
+.clarify-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px 44px; }
+.clarify-chip {
+  background: rgba(0, 212, 255, 0.09); border: 1px solid rgba(0, 212, 255, 0.45);
+  color: var(--fg, #cfefff); border-radius: 999px; padding: 8px 14px;
+  font-family: inherit; font-size: 13px; cursor: pointer; transition: all 0.15s ease;
+}
+.clarify-chip:hover, .clarify-chip:active { background: rgba(0, 212, 255, 0.25); transform: translateY(-1px); }
