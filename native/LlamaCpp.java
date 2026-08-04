@@ -115,8 +115,54 @@ public class LlamaCpp extends Plugin {
         JSObject r = new JSObject();
         r.put("loaded", engine.isLoaded());
         r.put("modelPath", engine.loadedPath());
+        r.put("embedLoaded", engine.embedLoaded());
+        r.put("embedPath", engine.embedLoadedPath());
         r.put("maxRamMB", rt.maxMemory() / 1048576);
         r.put("freeRamMB", rt.freeMemory() / 1048576);
         call.resolve(r);
+    }
+
+    /* ================= v10.0 M1: semantic embeddings ================= */
+
+    @PluginMethod
+    public void loadEmbedModel(final PluginCall call) {
+        final String path = call.getString("filePath", "");
+        if (path.isEmpty()) { call.reject("filePath required"); return; }
+        io.submit(() -> {
+            try {
+                engine.loadEmbed(path);
+                call.resolve(new JSObject().put("ok", true));
+            } catch (ClassNotFoundException e) {
+                call.reject("LLAMA_BINDING_MISSING - add the llama.cpp dependency (see native/llama_setup.md)");
+            } catch (Exception t) {
+                call.reject(t.getMessage() != null ? t.getMessage() : "embed_load_failed", t);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void unloadEmbedModel(final PluginCall call) {
+        io.submit(() -> {
+            try { engine.unloadEmbed(); } catch (Throwable ignored) {}
+            call.resolve(new JSObject().put("ok", true));
+        });
+    }
+
+    @PluginMethod
+    public void embed(final PluginCall call) {
+        final String text = call.getString("text", "");
+        if (text.isEmpty()) { call.resolve(new JSObject().put("ok", false).put("reason", "empty_text")); return; }
+        io.submit(() -> {
+            try {
+                float[] v = engine.embed(text);
+                org.json.JSONArray arr = new org.json.JSONArray();
+                for (float f : v) arr.put(f);
+                call.resolve(new JSObject().put("ok", true).put("vec", arr).put("dims", v.length));
+            } catch (IllegalStateException noModel) {
+                call.resolve(new JSObject().put("ok", false).put("reason", "no_embed_model"));
+            } catch (Throwable t) {
+                call.resolve(new JSObject().put("ok", false).put("reason", t.getMessage() != null ? t.getMessage() : "embed_failed"));
+            }
+        });
     }
 }
