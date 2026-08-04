@@ -518,3 +518,114 @@ export function voskAddListener(event, cb) {
   if (!p || typeof p.addListener !== 'function') return null;
   try { return p.addListener(event, cb); } catch (_) { return null; }
 }
+
+/* ================= v10.0 M1: on-device embeddings (semantic memory) ================= */
+export async function llmEmbedLoad(path) {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { await p.loadEmbedModel({ filePath: path }); return { ok: true }; }
+  catch (e) { return { ok: false, reason: e?.message || 'load_failed' }; }
+}
+
+export async function llmEmbedUnload() {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { await p.unloadEmbedModel(); return { ok: true }; }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function llmEmbed(text) {
+  const p = llama();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.embed({ text }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+/* ================= v10.0 JARVIS: generic HuggingFace repo downloader ================= */
+export async function hfDownload({ repo, dest }) {
+  if (!isNative() || !plugin()) return { ok: false, reason: 'web' };
+  try { return await plugin().hfDownload({ repo, dest }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+/** progress events during hf repo downloads */
+export function hfAddProgressListener(cb) {
+  const p = plugin();
+  if (!p || typeof p.addListener !== 'function') return null;
+  try { return p.addListener('hfProgress', cb); } catch (_) { return null; }
+}
+
+/* ================= v10.0 TR1: offline ML Kit translator ================= */
+const trPlugin = () => pluginNamed('FridayTranslate');
+
+export async function translateStatus() {
+  const p = trPlugin();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web', installed: false };
+  try { return await p.status(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error', installed: false }; }
+}
+
+export async function translateText({ text, to, from }) {
+  const p = trPlugin();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.translate({ text, to: to || 'hi', from: from || '' }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+/* ================= v10.0 T1/T2: sherpa-onnx (neural voice + offline ears) ================= */
+const sherpa = () => pluginNamed('FridaySherpa');
+
+export function sherpaAvailable() { return isNative() && !!sherpa(); }
+
+export async function sherpaStatus() {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.status(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function sherpaTtsInit(cfg) {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.ttsInit(cfg); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function sherpaSpeak(text, opts = {}) {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.speak({ text, sid: opts.sid || 0, speed: opts.speed || 1.0 }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function sherpaStopSpeaking() {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.stopSpeaking(); } catch (e) { return { ok: false }; }
+}
+
+export async function sherpaSttInit(modelDir) {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.sttInit({ modelDir }); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function sherpaListen() {
+  const p = sherpa();
+  if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
+  try { return await p.listenOnce(); }
+  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+}
+
+export async function sherpaStopListen() {
+  const p = sherpa();
+  if (!p) return { ok: false };
+  try { return await p.stopListen(); } catch (e) { return { ok: false }; }
+}
+
+export function sherpaAddListener(event, cb) {
+  const p = sherpa();
+  if (!p || typeof p.addListener !== 'function') return null;
+  try { return p.addListener(event, cb); } catch (_) { return null; }
+}

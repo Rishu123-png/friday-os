@@ -36,6 +36,12 @@ export const DEFAULTS = {
   porcupineKey: '',
   wakeKeyword: 'jarvis',
   voskModelPath: '',
+  // v10.0 JARVIS packs
+  neuralVoice: false,
+  neuralVoiceCfg: '',
+  offlineEars: false,
+  sherpaSttDir: '',
+  embedModelPath: '',
   // UI
   uiTheme: 'cyber',
   particleEffects: true,
