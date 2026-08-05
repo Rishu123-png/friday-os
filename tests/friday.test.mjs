@@ -1490,3 +1490,196 @@ test('devx: diagnostics dashboard rows cover services + metrics', () => {
   assert.ok(rows.some(r => /Battery/.test(r.k)));
   assert.ok(rows.some(r => /AI latency/.test(r.k) && r.v === '300 ms'));
 });
+
+/* ================= v13.0 PHASE 11: SECX (Security & Privacy) ================= */
+const SECX = await import('../www/js/secx.js');
+
+test('secx: permission registry explains and lists dependent features', () => {
+  assert.ok(SECX.explainPerm('mic').includes('voice'));
+  assert.ok(SECX.featuresAffected('camera').includes('qr'));
+  assert.equal(SECX.explainPerm('nope'), 'Permission needed for that feature.');
+  assert.equal(SECX.featuresAffected('nope').length, 0);
+});
+
+test('secx: PIN is stored as a hash, never plaintext', async () => {
+  const r = await SECX.setAppPin('1234');
+  assert.ok(r.ok);
+  const stored = JSON.parse(localStorage.getItem('friday_settings') || '{}').appPinHash || '';
+  assert.ok(/^[0-9a-f]{64}$/.test(stored), 'stored value is a SHA-256 hex hash');
+  assert.ok(!stored.includes('1234'), 'plaintext never stored');
+  assert.equal(await SECX.verifyAppPin('1234'), true);
+  assert.equal(await SECX.verifyAppPin('9999'), false);
+  assert.equal((await SECX.setAppPin('12')).ok, false, 'too-short PIN rejected');
+});
+
+test('secx: AES-GCM encrypt/decrypt round-trips and rejects wrong secret', async () => {
+  const e = await SECX.encryptJSON({ secret: 'pass123' }, 'master');
+  assert.ok(e.ok);
+  const d = await SECX.decryptJSON(e.value, 'master');
+  assert.ok(d.ok);
+  assert.equal(d.value.secret, 'pass123');
+  const bad = await SECX.decryptJSON(e.value, 'wrong');
+  assert.equal(bad.ok, false);
+});
+
+test('secx: secure storage tiers + temp cleanup', async () => {
+  await SECX.securePut('api_key', { k: 'abc' }, 'pin');
+  const got = await SECX.secureGet('api_key', 'pin');
+  assert.ok(got.ok && got.value.k === 'abc');
+  SECX.privatePut('tmp_photo', 'x');
+  SECX.privatePut('keep_me', 'y');
+  const removed = SECX.clearTemp();
+  assert.equal(removed, 1);
+  assert.equal(SECX.privateGet('keep_me'), 'y');
+  assert.equal(SECX.privateGet('tmp_photo'), undefined);
+});
+
+test('secx: API security enforces HTTPS and validates requests', () => {
+  assert.equal(SECX.httpsOnly('http://api.insecure.com/x'), false);
+  assert.equal(SECX.httpsOnly('https://api.ok.com/x'), true);
+  assert.equal(SECX.httpsOnly('http://localhost:8000/health'), true, 'localhost dev allowed');
+  assert.deepEqual(SECX.validateRequest({ a: 'x' }, { a: 'string' }), { ok: true });
+  assert.equal(SECX.validateRequest({ a: 5 }, { a: 'string' }).ok, false);
+  assert.equal(SECX.validateRequest({}, { a: 'string' }).ok, false);
+});
+
+test('secx: integrity checker reports corrupted storage', () => {
+  localStorage.setItem('friday_notes', '{not json');
+  const issues = SECX.checkDb();
+  assert.ok(issues.some(i => i.includes('friday_notes')));
+  localStorage.removeItem('friday_notes');
+  assert.equal(SECX.checkDb().length, 0);
+});
+
+test('secx: privacy report is local-first by default', () => {
+  const p = SECX.privacyReport();
+  assert.equal(p.localFirst, true);
+  assert.equal(p.cloud, false);
+  assert.ok(p.neverUploads.includes('camera photos'));
+});
+
+test('secx: threat detector turns counts into suggestions', () => {
+  const alerts = SECX.detectThreats({ invalidConfig: 0, failedAuth: 5, crashes: 6, apiFailures: 10, corruption: 1, total: 22 });
+  assert.ok(alerts.some(a => a.id === 'auth_brute' && a.sev === 'crit'));
+  assert.ok(alerts.some(a => a.id === 'crash_storm'));
+  assert.ok(alerts.some(a => a.id === 'corrupt_storage'));
+  assert.ok(alerts.every(a => a.fix && a.fix.length > 5));
+});
+
+test('secx: audit log is timestamped, searchable and capped', () => {
+  SECX.audit('test_event', 'hello world');
+  SECX.audit('other', 'xyz');
+  const all = SECX.auditLog();
+  assert.equal(all[0].event, 'other');
+  assert.equal(all[0].ts > 0, true);
+  assert.ok(SECX.auditSearch('hello').some(e => e.event === 'test_event'));
+});
+
+/* ================= v13.1 PHASE 12: PERFX (Performance) ================= */
+const PERFX = await import('../www/js/perfx.js');
+
+test('perfx: startup plan separates critical/background/later', () => {
+  const p = PERFX.startupPlan();
+  assert.ok(p.critical.includes('secx'));
+  assert.ok(p.later.includes('vision'));
+  assert.ok(p.later.includes('coder'));
+  assert.ok(p.background.includes('devx'));
+});
+
+test('perfx: throttle limits a burst to one call per window', async () => {
+  let n = 0;
+  const t = PERFX.throttle(() => n++, 40);
+  for (let i = 0; i < 5; i++) t();          // burst: 1 leading + 1 trailing
+  await new Promise(r => setTimeout(r, 90)); // trailing fires
+  assert.equal(n, 2);
+  t();                                       // new window
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(n, 3);
+});
+
+test('perfx: leak detector flags fast-growing keys only', () => {
+  const now = Date.now();
+  const samples = [
+    { key: 'notes', kb: 100, at: now - 86400e3 },
+    { key: 'notes', kb: 2200, at: now - 1000 },
+    { key: 'mem', kb: 50, at: now - 86400e3 },
+    { key: 'mem', kb: 90, at: now - 1000 }
+  ];
+  const leaks = PERFX.detectLeaks(samples);
+  assert.equal(leaks.length, 1);
+  assert.equal(leaks[0].key, 'notes');
+});
+
+test('perfx: battery gate defers only heavy features on critical battery', () => {
+  assert.equal(PERFX.batteryGate('vision', { level: 10, charging: false }).ok, false);
+  assert.equal(PERFX.batteryGate('vision', { level: 10, charging: true }).ok, true, 'charging overrides');
+  assert.equal(PERFX.batteryGate('vision', { level: 50, charging: false }).ok, true);
+  assert.equal(PERFX.batteryGate('voice', { level: 5, charging: false }).ok, true, 'non-heavy not gated');
+});
+
+test('perfx: priority scheduler runs critical first', async () => {
+  const order = [];
+  PERFX.schedule(() => { order.push('low'); }, { priority: PERFX.PRIORITY.LOW });
+  PERFX.schedule(() => { order.push('crit'); }, { priority: PERFX.PRIORITY.CRITICAL });
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(order[0], 'crit');
+  assert.equal(order[1], 'low');
+});
+
+test('perfx: animation policy respects reduced-motion and battery', () => {
+  const rm = PERFX.animationPolicy({ reducedMotion: true });
+  assert.equal(rm.particles, false);
+  assert.equal(rm.blur, false);
+  const low = PERFX.animationPolicy({ battery: 15, charging: false });
+  assert.equal(low.radar, false);
+  const full = PERFX.animationPolicy({ battery: 90, charging: true });
+  assert.equal(full.radar, true);
+});
+
+test('perfx: AI cache round-trips with TTL and respects the switch', () => {
+  PERFX.aiCacheSet('what is x', 'answer', 5);
+  assert.equal(PERFX.aiCacheGet('what is x'), 'answer');
+  // different prompt → miss
+  assert.equal(PERFX.aiCacheGet('what is y'), null);
+});
+
+/* ================= v13.2 PHASE 13: CINEX (Cinematic UX) ================= */
+const CINEX = await import('../www/js/cinex.js');
+
+test('cinex: AI-state tones map to glow/ring classes', () => {
+  assert.equal(CINEX.toneOf('LISTENING').glow, 'listen');
+  assert.equal(CINEX.toneOf('SPEAKING').ring, 'wave');
+  assert.equal(CINEX.toneOf('ERROR').glow, 'alert');
+  assert.ok(CINEX.orbClasses('EXECUTING').includes('orb-violet'));
+  assert.ok(CINEX.orbClasses('EXECUTING').includes('ring-spin'));
+  assert.equal(CINEX.toneOf('GARBAGE').tone, 'cyan', 'unknown → READY fallback');
+});
+
+test('cinex: effects policy turns off FX for low battery', () => {
+  const p = CINEX.effectsPolicy({ battery: 12, charging: false });
+  assert.equal(p.radar, false);
+  assert.equal(p.glow, false);
+  const full = CINEX.effectsPolicy({ battery: 90, charging: true });
+  assert.equal(full.glow, true);
+});
+
+test('cinex: rootClasses encodes a11y settings', () => {
+  assert.ok(CINEX.rootClasses().includes('hc') === CINEX.a11ySettings().highContrast);
+});
+
+test('cinex: HUD extra rows include RAM/CPU/Net with severity', () => {
+  const rows = CINEX.hudExtraRows({ ram: { usedPct: 90, pressure: 'high' }, cpu: 30, net: { wifi: true, online: true }, battery: 18 });
+  assert.ok(rows.some(r => r.k === 'RAM' && r.sev === 'warn'));
+  assert.ok(rows.some(r => r.k === 'Battery' && r.sev === 'warn'));
+  assert.ok(rows.some(r => r.k === 'Net' && r.v === 'Wi-Fi'));
+});
+
+test('cinex: event feed fade timing is per-kind with a default', () => {
+  assert.equal(CINEX.feedFade('automation'), 5000);
+  assert.equal(CINEX.feedFade('planner'), 6000);
+  assert.equal(CINEX.feedFade('unknown-thing'), CINEX.feedFade('default'));
+});
+
+test('cinex: layout hint detects orientation', () => {
+  assert.ok(['portrait', 'landscape', 'tablet'].includes(CINEX.layoutHint()));
+});
