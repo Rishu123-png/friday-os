@@ -25,6 +25,7 @@ import * as LB from './localbrain.js';
 import * as AMB from './ambient.js';
 import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
+import * as SERVER from './server.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -184,6 +185,17 @@ async function init() {
   MEM.learnPatterns();
   AUTO.start(execAction);
   initNative();
+
+  /* v10.1 FRIDAY Cloud: health check + one-time memory pull (cross-device) */
+  if (SERVER.isConfigured()) {
+    serverHealthCheck();
+    syncServerMemory();
+  }
+  /* PWA shortcuts (?action=voice|chat|qr) — was dead code */
+  const act = new URLSearchParams(location.search).get('action');
+  if (act === 'voice') setTimeout(() => V.listen(), 1500);
+  else if (act === 'qr') setTimeout(() => { U.openPanel('camera'); openCamera('qr'); }, 1500);
+  else if (act === 'chat') U.showView('chat');
   setTimeout(checkShareInbox, 1800);                    // v9.0 (A2): cold-start share
   document.addEventListener('visibilitychange', () => {  // warm-start share
     if (!document.hidden) checkShareInbox();
@@ -218,10 +230,40 @@ function startClock() {
 function updateBrainBadge() {
   const el = $('#aiStatus');
   if (!el) return;
-  const on = AI.hasGroq();
+  const on = AI.hasGroq() || SERVER.isConfigured();
   el.innerHTML = `<span class="dot ${on ? 'cloud' : ''}"></span> ${on ? 'Cloud' : 'Offline'}`;
   const sp = $('#sysProvider');
-  if (sp) sp.textContent = on ? 'Groq' : 'Local';
+  if (sp) sp.textContent = SERVER.isConfigured() ? 'FRIDAY Cloud' : on ? 'Groq' : 'Local';
+}
+
+/* ---------- v10.1 FRIDAY Cloud helpers ---------- */
+async function serverHealthCheck() {
+  const h = await SERVER.health().catch(() => null);
+  const chip = $('#serverStatusChip');
+  if (chip) {
+    chip.textContent = h && h.ok
+      ? `FRIDAY Cloud: ● online (${h.engines?.llm === 'groq' ? 'Groq brain' : 'no key on server'})`
+      : 'FRIDAY Cloud: ○ unreachable — check URL & token';
+    chip.classList.toggle('ok', !!(h && h.ok));
+  }
+}
+
+/* Pull server-side facts/notes once and merge into local memory. */
+async function syncServerMemory() {
+  try {
+    if (Date.now() - (S.getSetting('serverMemSyncedAt') || 0) < 6 * 3600e3) return;
+    const mem = await SERVER.pullMemory();
+    if (!mem || !mem.ok) return;
+    S.setSetting('serverMemSyncedAt', Date.now());
+    for (const f of mem.facts || []) {
+      if (f.key && f.value && !MEM.getFact(f.key)) MEM.saveFact({ key: f.key, label: f.label || f.key, value: f.value });
+    }
+    if (mem.notes && mem.notes.length) {
+      const have = S.getList(KEYS.NOTES).map(n => n.text);
+      mem.notes.slice(0, 20).forEach(n => { if (!have.includes(n.text)) S.addItem(KEYS.NOTES, { text: n.text }); });
+      refresh('notes');
+    }
+  } catch (e) { /* offline — retry next boot */ }
 }
 
 /* ================= INPUT PIPELINE ================= */
@@ -366,6 +408,8 @@ async function handleInput(text, opts = {}) {
     const f = learned[0];
     if (f.key === 'user.name') { S.setSetting('userName', f.value); syncSettingsUI(); }
     U.toast(`Learned: ${f.label} — ${f.value}`, '🧠', 2200);
+    /* v10.1: push learned facts to the FRIDAY Cloud server (cross-device) */
+    learned.forEach(ff => SERVER.rememberFact({ key: ff.key, label: ff.label, value: ff.value }).catch(() => {}));
   }
 
   // follow-up capture ("What should I remind you about?")
@@ -475,8 +519,8 @@ async function handleInput(text, opts = {}) {
     }
   }
 
-  // 2) CLOUD (only if key present)
-  if (AI.hasGroq()) {
+  // 2) CLOUD (server mode or Groq key present)
+  if (AI.hasGroq() || SERVER.isConfigured()) {
     /* v10.0 C1: unmatched ACTION-ish command -> offer smart guesses first
        (cheaper and more honest than a hallucinated "done").
        C1 v2: if the meaning-router is armed (bge-small embed model), route
@@ -539,6 +583,46 @@ async function streamLocalChat(text) {
   } catch (e) {
     thinking(false);
     reply(AI.offlineReply(text));
+  }
+}
+
+/* v10.1 FRIDAY Cloud chat: fully streamed from the backend (no key, no
+   model downloads). The server injects memory + runs its own tool loop. */
+async function streamServerChat(text) {
+  thinking(true);
+  let el = null, acc = '', rafPending = false;
+  const flush = () => {
+    rafPending = false;
+    if (!el) return;
+    el.querySelector('.message-bubble').innerHTML = U.renderRich(acc);
+    scrollBottom();
+  };
+  try {
+    const history = state.messages.slice(-10).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant', content: m.text
+    }));
+    const final = await SERVER.chat([...history, { role: 'user', content: text }], {
+      onToken: (_, sofar) => {
+        acc = sofar;
+        if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true, source: 'live' }); }
+        if (!rafPending) { rafPending = true; requestAnimationFrame(flush); }
+      }
+    });
+    thinking(false);
+    const out = (final || acc).trim() || AI.offlineReply(text);
+    if (el) {
+      acc = out; flush();
+      const rec = state.messages[state.messages.length - 1];
+      if (rec) { rec.text = out; saveChat(); }
+    } else {
+      addMsg('ai', out, { source: 'live' });
+    }
+    S.remember('ai', out);
+    V.speak(out, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(out); } });
+    armTalkWait(out);
+  } catch (e) {
+    thinking(false);
+    reply(errMsg(e));
   }
 }
 
@@ -666,7 +750,8 @@ async function runAction(a, hit) {
       return true;
     }
     case 'contact_lookup': {
-      const hit = await NAT.findContact(a.name);
+      /* v10.1 fix: fall back to locally-saved contacts (web/browser mode) */
+      const hit = await contactByName(a.name);
       if (hit) {
         if (a.mode === 'call') return runAction({ type: 'call', number: hit.phone, name: hit.name }, {});
         if (a.mode === 'sms') return runAction({ type: 'sms', number: hit.phone, body: a.body, name: hit.name }, {});
@@ -1488,9 +1573,13 @@ async function runAction(a, hit) {
       let target = null;
       if (m) {
         let hh = parseInt(m[1], 10);
+        const mm = m[2] ? parseInt(m[2], 10) : -1;   // v10.1 fix: match minutes too
         if (m[3] === 'pm' && hh < 12) hh += 12;
         if (m[3] === 'am' && hh === 12) hh = 0;
-        target = list.find(x => parseInt(x.time.split(':')[0], 10) === hh);
+        target = list.find(x => {
+          const [xh, xm] = x.time.split(':').map(Number);
+          return xh === hh && (mm < 0 || xm === mm);
+        });
       }
       if (!target && list.length === 1) target = list[0];
       if (!target) { reply(`Which one? ` + list.map(x => AUTO.describeAlarm(x)).join(', ')); return true; }
@@ -1790,6 +1879,8 @@ async function doBriefing() {
              3) curated offline templates                        */
 async function doCode(prompt) {
   if (CODER.ready()) return streamLocalCode(prompt);
+  /* v10.1: FRIDAY Cloud generates code server-side — no 1GB download */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false) return streamServerCode(prompt);
   if (CODER.engineAvailable() && !CODER.installedModelId()) {
     U.openPanel('sub-coder');
     $('#codeResult').innerHTML = U.renderRich(
@@ -1859,6 +1950,36 @@ async function streamLocalCode(prompt) {
       : m === 'NO_MODEL' ? 'Download a model in Settings → Offline Coder.'
       : m === 'BUSY' ? 'Still generating the previous answer — one moment.'
       : 'Offline coder failed: ' + m);
+  }
+}
+
+/* v10.1: stream code from the FRIDAY Cloud backend (no model download). */
+async function streamServerCode(prompt) {
+  U.openPanel('sub-coder');
+  const out = $('#codeResult');
+  out.innerHTML = '<div class="agent-thinking">Generating on FRIDAY Cloud…</div>';
+  let acc = '', live = null, rafPending = false;
+  const flush = () => {
+    rafPending = false;
+    if (!acc) return;
+    if (!live) { out.innerHTML = ''; live = document.createElement('div'); out.appendChild(live); }
+    live.innerHTML = U.renderRich(acc);
+  };
+  try {
+    const final = await SERVER.chat([
+      { role: 'system', content: 'You are an expert programmer. Output complete, working, production-ready code with fenced code blocks and a language tag. Include setup/run notes. No placeholders or TODOs.' },
+      { role: 'user', content: prompt }
+    ], {
+      onToken: (_, sofar) => {
+        acc = sofar;
+        if (!rafPending) { rafPending = true; requestAnimationFrame(flush); }
+      }
+    });
+    if (final && final !== acc) acc = final;
+    flush();
+    reply('Code ready — generated on FRIDAY Cloud, no download needed.');
+  } catch (e) {
+    out.innerHTML = U.emptyState('Server coder failed: ' + (e.message || e));
   }
 }
 
@@ -2384,6 +2505,9 @@ async function askGroq(text) {
     const done = await askLocalFirst(text);
     if (done) return;
   }
+  /* v10.1 FRIDAY Cloud: server brain first — no key in the app,
+     server runs its own tools + memory and streams the answer. */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false) return streamServerChat(text);
   thinking(true);
   const history = state.messages.slice(-10).map(m => ({
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -2476,6 +2600,11 @@ async function askGroq(text) {
 
 function errMsg(e) {
   const m = String(e.message || e);
+  if (m.includes('SERVER_NO_KEY')) return 'FRIDAY Cloud is up, but it has no Groq key set on the server. Add GROQ_API_KEY to the server .env.';
+  if (m.includes('SERVER_BAD_KEY')) return 'FRIDAY Cloud says its Groq key is wrong. Fix GROQ_API_KEY on the server.';
+  if (m.includes('SERVER_RATE_LIMIT')) return 'FRIDAY Cloud is rate-limited. Wait a moment and try again.';
+  if (m.includes('SERVER_HTTP')) return 'FRIDAY Cloud answered with an error — check the server URL and that it is running.';
+  if (m.includes('SERVER_')) return 'FRIDAY Cloud error: ' + m.slice(0, 140);
   if (m.includes('BAD_KEY')) return 'That Groq key was rejected. Check it in Settings.';
   if (m.includes('RATE_LIMIT')) return 'Groq rate limit hit. Wait a moment, or switch to offline mode.';
   if (m.includes('NO_KEY')) return 'No key set. Running offline.';
@@ -3935,6 +4064,10 @@ function bindEvents() {
   bind('#neuralVoice', 'neuralVoice', 'change', 'checked');
   bind('#offlineEars', 'offlineEars', 'change', 'checked');
   bind('#embedModelPath', 'embedModelPath', 'input');
+  /* v10.1 FRIDAY Cloud (backend server mode) */
+  bind('#serverUrl', 'serverUrl', 'input');
+  bind('#serverToken', 'serverToken', 'input');
+  bind('#serverMode', 'serverMode', 'change', 'checked');
 
   $('#systemsLine')?.addEventListener('click', () => {
     const rows = state.systemsRows || [];
@@ -4059,6 +4192,11 @@ function onSettingChange(key, v) {
     else { V.armSherpaEars(); refreshSherpaChips(); }
   }
   if (key === 'embedModelPath') refreshEmbedChip();
+  if (key === 'serverUrl' || key === 'serverMode') {
+    updateBrainBadge();
+    if (key === 'serverUrl') serverHealthCheck();
+    if (SERVER.isConfigured()) syncServerMemory();
+  }
 }
 
 /* ================= v8.2 AI CORE (on-device brain UI) ================= */
@@ -4293,6 +4431,9 @@ function syncSettingsUI() {
   set('#neuralVoice', !!S.getSetting('neuralVoice'), 'checked');
   set('#offlineEars', !!S.getSetting('offlineEars'), 'checked');
   set('#embedModelPath', S.getSetting('embedModelPath') || '');
+  set('#serverUrl', S.getSetting('serverUrl') || '');
+  set('#serverToken', S.getSetting('serverToken') || '');
+  set('#serverMode', S.getSetting('serverMode') !== false, 'checked');
   refreshSherpaChips();
   refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
@@ -4333,7 +4474,7 @@ async function startQuiz(topic) {
   thinking(false);
   if (!qs || !qs.length) { reply('Could not build a quiz on that. Try "quiz me on photosynthesis" or "quiz me on Indian history".'); return; }
   state.quiz = { topic, qs: qs.slice(0, 5), i: 0, score: 0 };
-  reply(`📝 **Quiz: ${topic}** - 5 questions, answer in one line.\\n\\n**Q1.** ${state.quiz.qs[0].q}`);
+  reply(`📝 **Quiz: ${topic}** - 5 questions, answer in one line.\n\n**Q1.** ${state.quiz.qs[0].q}`);
   state.expect = 'quiz_answer';
 }
 
@@ -4356,6 +4497,6 @@ function quizAnswer(text) {
        qz.score >= 3 ? ' - solid. One more round?' : ' - keep practicing, you will get there.'));
     return true;
   }
-  reply(`${good ? '✅ Correct!' : '❌ Answer: **' + cur.a + '**'}\\n\\n**Q${qz.i + 1}.** ${qz.qs[qz.i].q}\\n\\n(Score: ${qz.score})`);
+  reply(`${good ? '✅ Correct!' : '❌ Answer: **' + cur.a + '**'}\n\n**Q${qz.i + 1}.** ${qz.qs[qz.i].q}\n\n(Score: ${qz.score})`);
   return true;
 }
