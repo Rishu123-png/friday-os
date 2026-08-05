@@ -20,15 +20,25 @@
 </head>
 <body>
   <!-- Boot Screen -->
-  <div id="bootScreen" class="boot-screen">
+  <div id="bootScreen" class="boot-screen" data-stage="black">
+    <div class="boot-fx" aria-hidden="true"><div class="b-hex"></div><div class="b-radar"></div><div class="b-scanlines"></div></div>
     <div class="boot-content">
       <div class="boot-logo">
         <div class="core-ring"><div class="core-inner"></div></div>
       </div>
       <h1 class="boot-title">FRIDAY</h1>
       <p class="boot-subtitle">Personal AI Operating System</p>
+      <div id="bootStageLines" class="b-stage"></div>
+      <div id="bootServices" class="b-services" hidden>
+        <div class="b-hub">CORE</div>
+        <span data-svc="voice"></span><span data-svc="memory"></span><span data-svc="vision"></span>
+        <span data-svc="automation"></span><span data-svc="notifications"></span>
+      </div>
+      <div id="bootScan" class="b-scan" hidden></div>
+      <div id="bootWelcome" class="b-welcome" hidden></div>
       <div class="boot-progress"><div class="boot-progress-bar"></div></div>
       <p class="boot-status">Initializing systems...</p>
+      <p class="b-skip">tap anywhere to skip</p>
     </div>
   </div>
 
@@ -37,7 +47,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v10.3</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v11.2</span></div>
       <div id="suitChip" class="suit-chip" hidden>Suit:</div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
@@ -45,7 +55,7 @@
     <!-- Dashboard View (v5) -->
     <div class="dashboard" id="dashboard">
       <!-- AI Core + Waveform -->
-      <div class="ai-core-section">
+      <div class="ai-core-section" id="aiCoreWrap">
         <canvas id="coreCanvas"></canvas>
         <div class="core-visual">
           <div class="hologram-ring ring-1"></div>
@@ -87,6 +97,28 @@
         <div class="mic-pulse delay"></div>
       </div>
       <p class="systems-line" id="systemsLine">SYSTEMS CHECK...</p>
+
+      <!-- ===== v11.1 PHASE 3: The HUD — living command center =====
+           Layer 3 (live ring) + Layer 4 (service lights) + Layer 8 (context cards)
+           + Layer 5 (event feed) + Layer 7 (command dock). Every value REAL. -->
+      <div class="hud" id="hud">
+        <!-- v11.2 VOX: mic live-dot (Android-level honesty) + formal state line -->
+        <div class="hud-voxline">
+          <span id="micDot" class="mic-dot" title="Mic active"></span>
+          <span id="voxState" class="vox-state">READY</span>
+        </div>
+        <div class="hud-widgets" id="hudWidgets"></div>
+        <div class="hud-context" id="hudContext"></div>
+        <div class="hud-status" id="hudStatus"></div>
+        <div class="hud-feed" id="hudFeed"></div>
+        <div class="hud-dock" id="hudDock">
+          <button type="button" class="hud-dock-btn" data-dock="voice" title="Voice">🎙️</button>
+          <button type="button" class="hud-dock-btn" data-dock="camera" title="Vision">👁️</button>
+          <button type="button" class="hud-dock-btn" data-dock="auto" title="Automation">⚙️</button>
+          <button type="button" class="hud-dock-btn" data-dock="memory" title="Memory">🧠</button>
+          <button type="button" class="hud-dock-btn hud-sos" data-dock="sos" title="Emergency">🆘</button>
+        </div>
+      </div>
 
       <!-- Quick Actions -->
       <div class="quick-actions" id="quickActions">
@@ -344,6 +376,23 @@
           <p class="hint">Permissions puchhega: Phone + Calls (decline ke liye) + Overlay + SMS/WhatsApp.</p>
         </div>
         <div class="settings-group">
+          <h3>🎬 Cinematic Boot (v11.1 IGNITION)</h3>
+          <p class="hint">Har line REAL system check dikhati hai — "movie feel, zero fake". First launch full version, baad me short (tap = skip anytime).</p>
+          <div class="setting-item">
+            <label>Boot style</label>
+            <select id="bootMode">
+              <option value="auto">Auto (full first time, short after)</option>
+              <option value="full">Full movie — every time</option>
+              <option value="short">Short &amp; fast</option>
+              <option value="off">Off (straight to HUD)</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Soft boot sound</label>
+            <div class="toggle-switch"><input type="checkbox" id="bootSound"><span class="toggle-slider"></span></div>
+          </div>
+        </div>
+        <div class="settings-group">
           <h3>📬 FRIDAY Inbox (v10.3 — WhatsApp ka jawab)</h3>
           <p class="hint">Bolo: <b>"whatsapp pe kya aaya?"</b> ya <b>"uska jawab do"</b> — FRIDAY message padhega, tumhari memory se jawab <b>draft</b> karega, aur <b>sirf tumhare "bhejo" bolne pe</b> quick-reply se bhejega. Tum bolo tabhi, warna kuch nahi bhejta. Notification access ON hona chahiye.</p>
           <div class="setting-item">
@@ -381,6 +430,32 @@
           <p class="hint">Memory brain lets FRIDAY remember facts by MEANING (on-device, local-only): "meri bike ka number kya tha?" works even without exact words.</p>
         </div>
 <div class="settings-group">
+          <h3>🎙️ Voice Engine 2.0 (v11.2 VOX)</h3>
+          <p class="hint"><b>Formal state machine:</b> OFFLINE → READY → LISTENING → UNDERSTANDING → THINKING → EXECUTING → SPEAKING. Orb + feed + status line har state ko follow karte hain — koi fake animation nahi.</p>
+          <div class="setting-item">
+            <label>Wake words (comma se alag)</label>
+            <input type="text" id="wakeWords" placeholder="hey friday, friday, computer" autocomplete="off">
+          </div>
+          <p class="hint">Default: hey friday / hello friday / friday / computer. <b>Jarvis</b> optional hai — kahani ke diwane add kar sakte hain. Wake brain (Vosk) me custom words bhi chalte hain.</p>
+          <div class="setting-item">
+            <label>Barge-in sensitivity <span id="wakeSensValue">60</span></label>
+            <input type="range" id="wakeSensitivity" min="0" max="100" step="5" value="60">
+          </div>
+          <p class="hint">Jitna zyada, utna halka bolne pe FRIDAY ruk jayegi. 0 = bas cheekh pe rukti hai.</p>
+          <div class="setting-item">
+            <label>Dangerous command pe "pakka?" puchho</label>
+            <div class="toggle-switch"><input type="checkbox" id="dangerConfirm" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>FRIDAY bolti hai to music duck karo</label>
+            <div class="toggle-switch"><input type="checkbox" id="duckAudio" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Orb + feed voice states follow kare (VOX)</label>
+            <div class="toggle-switch"><input type="checkbox" id="voxFeedback" checked><span class="toggle-slider"></span></div>
+          </div>
+        </div>
+        <div class="settings-group">
           <h3>🔊 Voice Settings</h3>
           <div class="setting-item">
             <label>Voice Output</label>
@@ -498,6 +573,9 @@
             <div class="toggle-switch"><input type="checkbox" id="bootStart"><span class="toggle-slider"></span></div>
           </div>
           <div class="setting-item">
+            <button type="button" class="btn-secondary" id="batteryExemptBtn">🔋 Battery: FRIDAY ko maariye mat (OPPO optimization off)</button>
+          </div>
+          <div class="setting-item">
             <label>Announce notifications</label>
             <div class="toggle-switch"><input type="checkbox" id="announceNotifications" checked><span class="toggle-slider"></span></div>
           </div>
@@ -554,8 +632,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">10.3.0</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V10-3-HERALD</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">11.2.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V11-2-VOX</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -779,5 +857,6 @@
   </script>
   <script type="module" src="js/app.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a263fff23d2affc8',t:'MTc4NTkxNDAxMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2656296282b302d',t:'MTc4NTkyODUzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
