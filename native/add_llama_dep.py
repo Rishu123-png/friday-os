@@ -43,7 +43,7 @@ VOSK_ENABLED = True           # v9.1 WAKE FREE: keyless wake word (FridayVosk.ja
 VOSK_VERSION = '0.3.47'
 
 TRANSLATE_ENABLED = True      # v10.0 JARVIS: offline 50+ language translator (FridayTranslate.java, reflection-based)
-TRANSLATE_VERSION = '17.0.9'
+TRANSLATE_VERSION = '17.0.3'   # latest published on dl.google.com (maven-metadata verified; 17.0.9 does NOT exist)
 LANGUAGE_ID_VERSION = '17.0.6'
 
 DEPS = [
