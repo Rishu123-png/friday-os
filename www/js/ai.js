@@ -9,6 +9,7 @@
 
 import { getSetting, setSetting } from './store.js';
 import { pick } from './nlp.js';
+import * as SERVER from './server.js';
 
 export const GROQ_MODELS = [
   { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B — best all-round', ctx: '128k' },
@@ -79,7 +80,18 @@ export function hasGroq() {
   return !!(getSetting('groqKey') || '').trim();
 }
 
+/** True when the FRIDAY Cloud backend is configured (server mode). */
+export function hasServer() {
+  return SERVER.isConfigured();
+}
+
 export async function callGroq(messages, { stream = false, onToken = null, maxTokens = 1024, temperature = 0.7, model = null } = {}) {
+  /* v10.1 FRIDAY Cloud: server brain first — no API key in the app,
+     server runs its own tool loop + memory. */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
+    const full = await SERVER.chat(messages, { onToken });
+    return full;
+  }
   const key = (getSetting('groqKey') || '').trim();
   if (!key) throw new Error('NO_KEY');
 
@@ -183,6 +195,11 @@ export const TOOLS = [
 
 /** First-pass, non-streaming call that may return tool_calls. */
 export async function callGroqTools(messages, { model = null } = {}) {
+  /* v10.1 FRIDAY Cloud: the server runs the tool loop internally and
+     streams the final answer — so no client-side tool pass needed. */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
+    return { content: '' };   // no tool_calls → pass 2 (callGroq) streams from server
+  }
   const key = (getSetting('groqKey') || '').trim();
   if (!key) throw new Error('NO_KEY');
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
