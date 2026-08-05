@@ -15,6 +15,7 @@ import { applyPronunciations } from './memory.js';
 import { checkPermission, requestAll, sherpaSpeak, sherpaStopSpeaking, sherpaTtsInit,
   sherpaStatus, sherpaAddListener, sherpaSttInit, sherpaListen } from './native.js';
 import { parseWakeKeywords } from './nlp.js';
+import * as SERVER from './server.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
 const WP = () => {
@@ -517,11 +518,36 @@ function sherpaEarsListen() {
   });
 }
 
-export function speak(text, { onStart, onEnd } = {}) {
+export function speak(text, { onStart, onEnd, _noServer } = {}) {
   if (!getSetting('voiceOutput') || !text) { onEnd && onEnd(); return false; }
 
   const clean = cleanForSpeech(text);
   if (!clean) { onEnd && onEnd(); return false; }
+
+  /* ---- v10.1 FRIDAY Cloud TTS: server synthesizes — no neural-voice
+         download needed in Settings. Falls back to the classic engine
+         (once, guarded by _noServer) if the server is down. ---- */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false && !_noServer) {
+    stopCurrent();
+    speaking = true;
+    pendingEnd = () => { disarmBargeIn(); onEnd && onEnd(); };
+    onStart && onStart();
+    SERVER.ttsAndPlay(clean).then(audio => {
+      clearTimeout(speakWatch);
+      const est = 1600 + clean.split(/\s+/).length * 560;
+      speakWatch = setTimeout(releaseStuckSpeech, Math.min(est, 20000));
+      audio.onended = () => {
+        clearTimeout(speakWatch);
+        speaking = false;
+        if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
+      };
+      armBargeIn();
+    }).catch(() => {
+      speaking = false; pendingEnd = null;
+      speak(clean, { onStart, onEnd, _noServer: true });
+    });
+    return true;
+  }
 
   /* ---- native path ---- */
   if (useNative()) {
