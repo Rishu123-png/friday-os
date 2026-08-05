@@ -1689,3 +1689,23 @@ test('cinex: event feed fade timing is per-kind with a default', () => {
 test('cinex: layout hint detects orientation', () => {
   assert.ok(['portrait', 'landscape', 'tablet'].includes(CINEX.layoutHint()));
 });
+
+/* ================= v14.1: PHOTO share/save/describe intents ================= */
+test('brain: photo_send resolves and extracts the contact', () => {
+  const a = resolve('send this photo to papa on whatsapp');
+  assert.equal(a.intent, 'photo_send');
+  assert.equal(a.action.type, 'send_image');
+  assert.equal(a.action.contact, 'papa');
+  const b = resolve('yeh photo mummy ko bhejo');
+  assert.equal(b.intent, 'photo_send');
+  const c = resolve('send this photo on whatsapp');   // no contact → asks
+  assert.equal(c.intent, 'photo_send');
+  assert.equal(c.action.contact, '');
+});
+test('brain: photo_save and photo_describe intents', () => {
+  assert.equal(resolve('save this photo').intent, 'photo_save');
+  assert.equal(resolve('photo download karo').intent, 'photo_save');
+  assert.equal(resolve('what is this photo').intent, 'photo_describe');
+  assert.equal(resolve('yeh photo kya hai').intent, 'photo_describe');
+  assert.notEqual(resolve('make an image of a cyberpunk city').intent, 'photo_send');
+});
