@@ -31,6 +31,9 @@ import { CORE, Bus, Logger, formatLogEntry } from './fridaycore.js';   // v11 Ph
 import * as IGN from './ignite.js';   // v11.1 Phase 2: cinematic boot
 import * as HUD from './hud.js';      // v11.1 Phase 3: living HUD
 import * as VOX from './vox.js';      // v11.2 Phase 4: Voice Engine 2.0 — formal state machine
+import * as MEMEX from './memex.js';  // v11.3 Phase 5: Cognitive Memory Engine
+import * as VISIONX from './visionx.js'; // v11.3 Phase 6: AI Vision System
+import * as AUTOX from './autox.js';  // v11.3 Phase 7: Intelligent Automation Engine
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -45,7 +48,17 @@ const bootFridayCore = () => {
           + (V.isWakeActive && V.isWakeActive() ? ' · ears on' : '') })
     });
     CORE.register('memory', {
-      health: () => ({ ok: true, detail: ((S.getList('friday_facts') || []).length) + ' facts' })
+      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.facts + ' facts · ' + d.summaries + ' digests' }; }
+    });
+    /* v11.3: Phase 5/6/7 engines report as services too */
+    CORE.register('cognition', {
+      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.retrievalMs + 'ms recall · ' + d.preferenceRows + ' prefs' }; }
+    });
+    CORE.register('visionx', {
+      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.vision + ' scans · ' + d.qr + ' qr' }; }
+    });
+    CORE.register('autox', {
+      health: () => { const d = AUTOX.dashRows(); return { ok: true, detail: d.enabled + '/' + d.rules + ' rules' + (d.last ? ' · ok ' + (d.okRate ?? '—') + '%' : '') }; }
     });
     CORE.register('vision', { health: () => ({ ok: true, detail: 'camera on demand' }) });
     CORE.register('automation', { health: () => ({ ok: true, detail: 'routines+alarms' }) });
@@ -187,6 +200,7 @@ function hudInit() {
   const refreshWidgets = async () => {
     let b = null;
     try { b = await D.battery(); } catch (_) {}
+    if (b) Bus.emit('autox:battery', { level: b.level, charging: !!b.charging });   // v11.3 Phase 7: existing 30s poll doubles as trigger — zero new wakeups
     const w = [];
     if (b) w.push({ k: 'BATTERY', value: HUD.batteryLabel(b.level, b.charging) });
     try {
@@ -372,6 +386,21 @@ async function init() {
   if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
   bootFridayCore();   // v11 Phase 1: central controller takes attendance (fire-and-forget)
   hudInit();          // v11.1 Phase 3: living HUD (widgets, feed, dock, orb states)
+  /* v11.3: Phase 7 engine rides existing events — zero new polling */
+  try { AUTOX.start(async (action, meta) => {
+    const v = AUTOX.validateRule({ when: meta.event, then: action, confirm: true });
+    if (!v.ok || (action && /\?/.test(action))) {   // question-shaped action → speak, don't execute
+      return reply(action);                          // seed rules speak their suggestion honestly
+    }
+    return handleInput(action, { silentEcho: true, dedupeSkip: true, _confirmed: true });
+  }); } catch (e) {}
+  /* v11.3 Phase 5: daily digest + cleanup of expired vision memories */
+  setTimeout(() => { try {
+    const s = MEMEX.dailyDigest(new Date().toDateString(), 'ke sessions me');
+    const c = MEMEX.cleanup();
+    if (s && s.tasks.length) hudPush('🧠', `${s.tasks.length} task${s.tasks.length > 1 ? 's' : ''} kal/parso se pending`);
+    if (c && c.visionRemoved) Logger.info('memex', 'cleanup removed ' + c.visionRemoved + ' stale scans');
+  } catch (_) {} }, 7000);
   loadWeatherWidget();
 
   /* v7.7 HUD: arc-reactor rings (battery/steps) + systems status line */
@@ -761,6 +790,7 @@ async function handleInput(text, opts = {}) {
     if (fixed !== text) hit = resolve(fixed, { lastTopic: state.lastTopic });
   }
   MEM.logEpisode({ text, intent: hit ? hit.intent : null, role: 'user' });
+  if (hit && hit.intent) { try { MEMEX.trackUse(hit.intent); } catch (_) {} }   // v11.3: preference learner
   /* v10.0 M1: facts about the user's life get embedded for meaning-recall
      (silent no-op when the memory brain is not downloaded). */
   if (/\b(my|mera|meri|mere|mujhe|main|hamara|hamari)\b/i.test(text) && text.length > 12 && text.length < 240) {
@@ -825,6 +855,16 @@ async function handleInput(text, opts = {}) {
   reply(AI.offlineReply(text));
 }
 
+/* v11.3 Phase 5: deep-recall block for AI prompts — only relevant memories,
+   local retrieval (<100ms). Nothing injected → empty string, zero tokens burned. */
+function memexBrief(text) {
+  try {
+    const hits = MEMEX.retrieve(text, { k: 3 }).filter(h => h.rel >= 0.34 && h.src !== 'fact');
+    if (!hits.length) return '';
+    return '\n\nDEEP MEMORY (recalled locally, may reference if natural):' + hits.map(h => '\n- ' + h.text.slice(0, 140)).join('');
+  } catch (_) { return ''; }
+}
+
 /* Fully-offline LLM chat: memory brief + streamed tokens, no network. */
 async function streamLocalChat(text) {
   thinking(true);
@@ -837,7 +877,9 @@ async function streamLocalChat(text) {
   };
   try {
     const final = await CODER.chat(text, {
-      context: MEM.buildContext(),
+      /* v11.3 Phase 5: on top of facts+patterns, inject RELEVANT deep recall
+         (vision scans, digests, hot memories) — spec: only relevant memories. */
+      context: MEM.buildContext() + memexBrief(text),
       history: state.messages.slice(-6).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text })),
       maxTokens: 700,
       onToken: (_, sofar) => {
@@ -1982,6 +2024,67 @@ async function runAction(a, hit) {
       return true;
     }
     case 'forget': { MEM.wipeMemory(); PRO.resetProactive(); reply('Memory wiped. Clean slate.'); return true; }
+
+    /* ============ v11.3 PHASE 5: cognitive memory actions ============ */
+    case 'mem_dashboard': {
+      const d = MEMEX.dashboard();
+      reply([
+        `🧠 **Memory Dashboard (dev)**`,
+        `Facts: ${d.facts} · Episodes: ${d.episodes} · Digests: ${d.summaries}`,
+        `Vision: ${d.vision} scans · QR: ${d.qr} · Pref rows: ${d.preferenceRows}`,
+        `Storage: ${MEMEX.fmtBytes(d.storageBytes)} · Retrieval: ${d.retrievalMs}ms (${d.probeHits} hits)`,
+        `Embeddings: ${d.embeddings} · Last cloud sync: ${d.lastSync}`,
+        d.topPreferences.length ? `Favourite commands: ` + d.topPreferences.map(p => `${p.intent}×${p.n}`).join(', ') : 'Preferences abhi bann rahi hain (3+ uses pe track hota hai).'
+      ].join('\n'));
+      return true;
+    }
+    case 'mem_deep_recall': {
+      const hits = MEMEX.retrieve(a.query || '', { k: 5 });
+      if (!hits.length) return reply(`Memory me "${a.query}" se kuch nahi mila, Boss.`, {});
+      reply(`Deep recall — "${a.query}":\n` + hits.map(h => `• [${h.src}] ${h.text.slice(0, 90)}`).join('\n'));
+      return true;
+    }
+    case 'mem_digest': {
+      const sums = S.getList(MEMEX.SKEYS.SUMMARIES);
+      if (!sums.length) return reply('Abhi koi digest nahi — kal se har din ka summary banega automatically.');
+      const s0 = sums[0];
+      reply(`📅 **${s0.day}** — ${s0.summary}` +
+        (s0.tasks.length ? `\nTasks: ${s0.tasks.map(t => '• ' + t).join(' ')}` : '') +
+        (s0.followups.length ? `\nOpen questions: ${s0.followups.map(t => '• ' + t).join(' ')}` : ''));
+      return true;
+    }
+
+    /* ============ v11.3 PHASE 6: vision memory actions ============ */
+    case 'qr_history': {
+      const h = VISIONX.qrHistory();
+      if (!h.length) return reply('Koi QR scan nahi hai abhi tak. Camera dock se 👁️ dabao.');
+      reply('QR history:\n' + h.slice(0, 8).map(x => `• [${x.type}] ${String(x.value).slice(0, 60)} (${new Date(x.ts).toLocaleDateString()})`).join('\n'));
+      return true;
+    }
+    case 'vision_memory': {
+      const v = VISIONX.visionMemory();
+      if (!v.length) return reply('Vision memory khaali hai — kuch scan karo to main yaad rakh dunga.');
+      reply('Vision memory:\n' + v.slice(0, 6).map(m => '• ' + VISIONX.visionCaption(m)).join('\n'));
+      return true;
+    }
+
+    /* ============ v11.3 PHASE 7: automation rule actions ============ */
+    case 'rules_list': {
+      const rs = AUTOX.rules();
+      if (!rs.length) return reply('Koi automation rule nahi. Seed rules seed ho jaate hain boot pe.');
+      reply('⚙️ Automation rules:\n' + rs.slice(0, 10).map(r =>
+        `${r.enabled ? '🟢' : '⚪'} ${r.name || r.then.slice(0, 30)} — when: ${r.when}${r.when === 'time' ? ' @' + r.at : r.when === 'battery_low' ? ' <' + (r.level ?? 20) + '%' : ''}`
+      ).join('\n') + '\nBolo: "rule off Battery guard" ya Settings me toggles.');
+      return true;
+    }
+    case 'rule_toggle': {
+      const rs = AUTOX.rules();
+      const hit2 = rs.find(r => (r.name || '').toLowerCase().includes((a.name || '').toLowerCase()));
+      if (!hit2) return reply(`"${a.name}" naam ka rule nahi mila. "rules dikha" bolkar list dekho.`);
+      AUTOX.toggleRule(hit2.id, a.on);
+      reply(`${hit2.name || hit2.then.slice(0, 30)} — ab ${a.on ? 'ON 🟢' : 'OFF ⚪'}.`);
+      return true;
+    }
     case 'screenshot': {
       if (NAT.isNative()) {
         const r = await NAT.performGlobalAction('screenshot');
@@ -2861,7 +2964,7 @@ async function askGroq(text) {
       if (hits.length) semBlock = '\n\nSEMANTIC MEMORY (recalled on-device by meaning):\n' + hits.map(h => '- ' + h.text).join('\n');
     }
   } catch (_) {}
-  const sys = AI.systemPrompt() + (amb ? '\n\n' + amb : '') + (ctxBrief ? '\n\n' + ctxBrief : '') + semBlock +
+  const sys = AI.systemPrompt() + (amb ? '\n\n' + amb : '') + (ctxBrief ? '\n\n' + ctxBrief : '') + semBlock + memexBrief(text) +
     '\nIf the user asks you to DO something (remind, alarm, call, message, note, weather...), use the appropriate tool. Confirm briefly afterward.';
   const msgs = [{ role: 'system', content: sys }, ...history, { role: 'user', content: text }];
 
@@ -4038,6 +4141,58 @@ function pickNativePhoto() {
   });
 }
 
+/* v11.3 PHASE 6: document scanner — pure pipeline, zero network:
+   photo → grayscale → histogram normalize → raw RGB → pure PDF writer.
+   The file downloads locally; nothing uploads anywhere. */
+async function saveScanPdf(src, ocrText) {
+  U.toast('Building PDF…', '📄', 1800);
+  try {
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const cx = cv.getContext('2d');
+    cx.drawImage(img, 0, 0);
+    const id = cx.getImageData(0, 0, cv.width, cv.height);
+    const N = cv.width * cv.height;
+    const gray = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { const o = i * 4; gray[i] = (id.data[o] * 3 + id.data[o + 1] * 6 + id.data[o + 2]) / 10 | 0; }
+    const norm = VISIONX.normalizeGray(gray);
+    const rgb = new Uint8Array(N * 3);
+    for (let i = 0; i < N; i++) { rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = norm[i]; }
+    /* PDF XObject needs FlateDecode — rawFixedDeflate wraps bytes in a VALID
+       zlib stream (stored blocks). No libs, no network, opens everywhere. */
+    const packed = rawFixedDeflate(rgb);
+    const pdf = VISIONX.buildPdf({ data: packed, width: cv.width, height: cv.height }, 'FRIDAY scan — ' + (ocrText || '').split('\n')[0].slice(0, 40));
+    const blob = new Blob([pdf], { type: 'application/pdf' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'friday-scan-' + Date.now() + '.pdf';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    VISIONX.remember({ kind: 'doc', text: (ocrText || '').slice(0, 1200) });
+    U.toast('PDF saved (searchable OCR text stored in vision memory)', '📄', 2600);
+  } catch (e) {
+    U.toast('PDF failed: ' + (e && e.message), '⚠️', 3000);
+  }
+}
+
+/* Minimal VALID zlib stream (stored deflate blocks + adler32). No libs —
+   guaranteed to decode in every PDF/DEFLATE reader ever shipped. */
+function rawFixedDeflate(data) {
+  const out = [0x78, 0x01];    // zlib CMF/FLG (no compression preset)
+  for (let i = 0; i < data.length; i += 65535) {
+    const chunk = data.subarray(i, i + 65535);
+    const last = (i + 65535) >= data.length ? 1 : 0;
+    out.push(last, chunk.length & 0xff, (chunk.length >> 8) & 0xff,
+             (~chunk.length) & 0xff, ((~chunk.length) >> 8) & 0xff);
+    for (let j = 0; j < chunk.length; j++) out.push(chunk[j]);
+  }
+  let s1 = 1, s2 = 0;
+  for (let i = 0; i < data.length; i++) { s1 = (s1 + data[i]) % 65521; s2 = (s2 + s1) % 65521; }
+  out.push((s2 >> 8) & 0xff, s2 & 0xff, (s1 >> 8) & 0xff, s1 & 0xff);
+  return new Uint8Array(out);
+}
+
 /* Auto-describe the capture with the Groq vision model and SPEAK it -
    "Friday, what am I looking at?" finally answers out loud. */
 async function describeNativePhoto(dataUrl) {
@@ -4104,8 +4259,14 @@ function startScan() {
       clearInterval(scanLoop);
       D.buzz();
       closeCamera();
+      /* v11.3 Phase 6: QR history + vision memory (searchable via memex) */
+      try {
+        const rec = VISIONX.qrLog(r.value);
+        VISIONX.remember({ kind: 'qr', text: r.value });
+        hudPush('📷', 'qr saved (' + rec.type + ') — "qr history dikha" to revisit');
+      } catch (_) {}
       const isUrl = /^https?:\/\//.test(r.value);
-      addMsg('ai', `Scanned: ${r.value}`, isUrl ? { link: r.value } : {});
+      addMsg('ai', `Scanned (${VISIONX.qrType(r.value)}): ${r.value}`, isUrl ? { link: r.value } : {});
       V.speak('Code scanned.');
     }
   }, 700);
@@ -4332,10 +4493,19 @@ function bindEvents() {
     try {
       const r = await VIS.ocr(src, m => { out.textContent = m; });
       if (!r.text) { out.textContent = 'No readable text found. Try better lighting or get closer.'; return; }
-      out.innerHTML = `<div class="ocr-out">${U.escapeHtml(r.text)}</div>
-        <div class="dim">Confidence ${r.confidence}%</div>
-        <button class="tool-add-btn" id="ocrCopy">Copy text</button>`;
-      $('#ocrCopy').onclick = () => D.copy(r.text).then(() => U.toast('Text copied', '📋'));
+      /* v11.3 Phase 6: clean + classify + remember + homework-mode offer */
+      const clean = VISIONX.cleanOcr(r.text);
+      const kind = VISIONX.classifyDoc(clean);
+      VISIONX.remember({ kind: 'ocr', text: clean.slice(0, 1200) });
+      const eqs = VISIONX.mathLines(clean);
+      out.innerHTML = `<div class="ocr-out">${U.escapeHtml(clean)}</div>
+        <div class="dim">Confidence ${r.confidence}% · Doc: ${kind}</div>
+        <button class="tool-add-btn" id="ocrCopy">Copy text</button>
+        <button class="tool-add-btn" id="ocrSolve">${eqs.length ? '🧮 Homework solve karo' : '🤓 Explain karo'}</button>
+        <button class="tool-add-btn" id="ocrPdf">📄 PDF save</button>`;
+      $('#ocrCopy').onclick = () => D.copy(clean).then(() => U.toast('Text copied', '📋'));
+      $('#ocrSolve').onclick = () => { U.showView('chat'); handleInput(VISIONX.homeworkPrompt(clean), { silentEcho: true, fromVoice: false }); };
+      $('#ocrPdf').onclick = () => saveScanPdf(src, clean);
       V.speak(r.lines.slice(0, 3).join('. '));
     } catch (e) {
       out.textContent = 'OCR failed: ' + e.message + (navigator.onLine ? '' : ' (needs internet on first use)');
@@ -4365,6 +4535,10 @@ function bindEvents() {
   bind('#dangerConfirm', 'dangerConfirm', 'change', 'checked');
   bind('#duckAudio', 'duckAudio', 'change', 'checked');
   bind('#voxFeedback', 'voxFeedback', 'change', 'checked');
+  /* v11.3 COGNITION settings */
+  bind('#autoEngine', 'autoEngine', 'change', 'checked');
+  { const mr = $('#memDashRefresh'); if (mr) mr.addEventListener('click', renderMemDash); }
+  renderRulesList();
   bind('#speechRate', 'speechRate', 'input');
   bind('#speechPitch', 'speechPitch', 'input');
   bind('#voiceLang', 'voiceLang');
@@ -4513,8 +4687,8 @@ function bindEvents() {
   D.onShake(() => { if (!state.listening) { D.buzz(); V.listen(); } });
 
   // online/offline
-  addEventListener('online', () => { U.toast('Back online'); AUTO.runTrigger('online'); });
-  addEventListener('offline', () => { U.toast('Offline - local engine active'); AUTO.runTrigger('offline'); });
+  addEventListener('online', () => { U.toast('Back online'); AUTO.runTrigger('online'); Bus.emit('autox:net', { online: true }); });   // v11.3
+  addEventListener('offline', () => { U.toast('Offline - local engine active'); AUTO.runTrigger('offline'); Bus.emit('autox:net', { online: false }); });   // v11.3
 
   // back button closes panels
   addEventListener('popstate', () => { if (U.anyPanelOpen()) U.closeAllPanels(); });
@@ -4905,11 +5079,55 @@ function syncSettingsUI() {
   set('#duckAudio', S.getSetting('duckAudio') !== false, 'checked');
   set('#voxFeedback', S.getSetting('voxFeedback') !== false, 'checked');
   { const ws = $('#wakeSensValue'); if (ws) ws.textContent = S.getSetting('wakeSensitivity') || 60; }
+  set('#autoEngine', S.getSetting('autoEngine') !== false, 'checked');            // v11.3
+  renderRulesList();                                                            // v11.3
   refreshSherpaChips();
   refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
   const sp = $('#speechPitchValue'); if (sp) sp.textContent = S.getSetting('speechPitch');
   const ic = $('#intentCount'); if (ic) ic.textContent = intentCount();
+}
+
+/* v11.3 PHASE 5: Memory Dashboard renderer (dev page, REAL numbers only) */
+function renderMemDash() {
+  const out = $('#memDashOut');
+  if (!out) return;
+  try {
+    const d = MEMEX.dashboard();
+    out.textContent = [
+      `facts ${d.facts} · digests ${d.summaries} · episodes ${d.episodes}`,
+      `vision ${d.vision} · qr ${d.qr} · prefs ${d.preferenceRows}`,
+      `storage ${MEMEX.fmtBytes(d.storageBytes)} · retrieval ${d.retrievalMs}ms (${d.probeHits} hits)`,
+      `embeddings: ${d.embeddings}`,
+      `last sync: ${d.lastSync}`,
+      d.topPreferences.length ? 'prefs: ' + d.topPreferences.map(p => p.intent + '×' + p.n).join(', ') : 'prefs: (3+ uses pe track)'
+    ].join('\n');
+  } catch (e) { out.textContent = 'dashboard error: ' + (e && e.message); }
+}
+
+/* v11.3 PHASE 7: Rules list with toggle switches (Settings) */
+function renderRulesList() {
+  const box = $('#ruleList');
+  if (!box) return;
+  const rs = AUTOX.rules();
+  if (!rs.length) { box.innerHTML = '<p class="hint">Koi rule nahi abhi.</p>'; return; }
+  box.innerHTML = '';
+  rs.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'setting-item rule-row';
+    const label = document.createElement('label');
+    label.textContent = (r.name || r.then.slice(0, 28)) + '  ·  ' + r.when +
+      (r.when === 'battery_low' ? ' <' + (r.level ?? 20) + '%' : r.when === 'time' ? ' @' + (r.at || '--:--') : '');
+    const wrap = document.createElement('div');
+    wrap.className = 'toggle-switch';
+    const inp = document.createElement('input');
+    inp.type = 'checkbox'; inp.checked = !!r.enabled;
+    inp.addEventListener('change', () => { AUTOX.toggleRule(r.id, inp.checked); U.toast(`${r.name || 'Rule'} ${inp.checked ? 'ON' : 'OFF'}`, '⚙️', 1400); });
+    const span = document.createElement('span'); span.className = 'toggle-slider';
+    wrap.appendChild(inp); wrap.appendChild(span);
+    row.appendChild(label); row.appendChild(wrap);
+    box.appendChild(row);
+  });
 }
 
 /* ================= SERVICE WORKER ================= */

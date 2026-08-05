@@ -540,6 +540,36 @@ I('recall', t => /\b(do you remember|what did i say about|recall|remind me what)
     return { say: null, action: { type: 'recall', query: q } };
   }, 4);
 
+/* v11.3 PHASE 5: cognitive memory intents */
+I('mem_dashboard', t => /\b(memory (dashboard|stats|report|stata)|kitna yaad|memex)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'mem_dashboard' } }), 6);
+I('mem_deep_recall', t => /\b(deep search|search memory for|memex find|yaad me dhundo)\b/.test(t) ? 1 : 0,
+  t => {
+    const q = cleanSubject(t.replace(/\b(deep search|search memory for|memex find|yaad me dhundo|for)\b/gi, ''));
+    return { say: null, action: { type: 'mem_deep_recall', query: q || t } };
+  }, 7);
+I('mem_digest', t => /\b(what did we do|day summary|aaj kya hua|kal kya hua|digest)\b/.test(t) && !/notification|whatsapp|telegram/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'mem_digest' } }), 6);
+
+/* v11.3 PHASE 6: vision engine intents */
+I('qr_history', t => /\b(qr history|qr scan(ning)? history|kya scan kiya|scanned codes?)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'qr_history' } }), 6);
+I('vision_memory', t => /\b(what did i scan|scan memory|dekha tha kya|vision memory)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'vision_memory' } }), 6);
+I('homework', t => /\b(homework|home work|solve (this|karo|mera)|assignment|numericals?)\b/.test(t) && !/youtube|video/.test(t) ? 1 : 0,
+  () => ({ say: 'Camera khol ke homework pe point karo — main padh ke solve kar dunga. 📐',
+           action: { type: 'camera', mode: 'photo' } }), 6);
+
+/* v11.3 PHASE 7: automation engine intents */
+I('rules_list', t => /\b(automation rules?|my rules?|active rules?|list rules?|rules dikha)\b/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'rules_list' } }), 6);
+I('rule_toggle', t => /\b(rule|automation)\s+(on|off|enable|disable|band|chalu)\s+(.+)/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/\b(?:rule|automation)\s+(on|off|enable|disable|band|chalu)\s+(.+)/);
+    const off = /\b(off|disable|band)\b/.test(m[1]);
+    return { say: null, action: { type: 'rule_toggle', name: m[2].trim(), on: !off } };
+  }, 7);
+
 I('forget', t => /\b(forget everything|wipe your memory|forget me|erase memory)\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'forget' } }), 5);
 
