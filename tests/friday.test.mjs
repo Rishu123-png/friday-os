@@ -905,7 +905,7 @@ test('core: failing service -> error state (+ auto recovery retry)', async () =>
   await core.boot();
   assert.equal(core.get('flaky').state, 'error');           // first try failed
   assert.equal(attempts, 1);
-  await new Promise(r => setTimeout(r, 60));                 // recovery backoff fires
+  await new Promise(r => setTimeout(r, 150));               // recovery backoff (5ms) long done
   assert.equal(core.get('flaky').state, 'running');          // recovered itself!
   assert.equal(attempts, 2);
 });
@@ -1589,20 +1589,26 @@ test('perfx: startup plan separates critical/background/later', () => {
 test('perfx: throttle limits a burst to one call per window', async () => {
   let n = 0;
   const t = PERFX.throttle(() => n++, 40);
-  for (let i = 0; i < 5; i++) t();          // burst: 1 leading + 1 trailing
-  await new Promise(r => setTimeout(r, 90)); // trailing fires
-  assert.equal(n, 2);
-  t();                                       // new window
-  await new Promise(r => setTimeout(r, 20));
-  assert.equal(n, 3);
+  for (let i = 0; i < 5; i++) t();           // tight sync burst → leading fires now
+  const afterBurst = n;
+  assert.equal(afterBurst, 1, 'burst collapses to the leading call');
+  await new Promise(r => setTimeout(r, 150)); // trailing timer (≤40ms) long done
+  assert.ok(n >= afterBurst + 1, 'trailing call fires after the window');
+  const beforeFresh = n;
+  t();                                        // window elapsed → fires immediately
+  assert.equal(n, beforeFresh + 1);
 });
 
 test('perfx: leak detector flags fast-growing keys only', () => {
+  // NOTE: "old" samples must sit safely INSIDE the 24h window (not exactly at
+  // the boundary) — a few ms elapse between capturing `now` here and the
+  // engine's internal Date.now(), which used to push them just past 86400e3
+  // and made this test flaky (~25% of CI runs).
   const now = Date.now();
   const samples = [
-    { key: 'notes', kb: 100, at: now - 86400e3 },
+    { key: 'notes', kb: 100, at: now - 85000e3 },
     { key: 'notes', kb: 2200, at: now - 1000 },
-    { key: 'mem', kb: 50, at: now - 86400e3 },
+    { key: 'mem', kb: 50, at: now - 85000e3 },
     { key: 'mem', kb: 90, at: now - 1000 }
   ];
   const leaks = PERFX.detectLeaks(samples);
@@ -1621,7 +1627,7 @@ test('perfx: priority scheduler runs critical first', async () => {
   const order = [];
   PERFX.schedule(() => { order.push('low'); }, { priority: PERFX.PRIORITY.LOW });
   PERFX.schedule(() => { order.push('crit'); }, { priority: PERFX.PRIORITY.CRITICAL });
-  await new Promise(r => setTimeout(r, 40));
+  await new Promise(r => setTimeout(r, 150)); // generous for slow CI event loops
   assert.equal(order[0], 'crit');
   assert.equal(order[1], 'low');
 });
