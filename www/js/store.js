@@ -63,6 +63,10 @@ export const DEFAULTS = {
   serverMemSyncedAt: 0,
   // v10.2 JARVIS zero-setup: suit keeps its own systems updated (WiFi, silent)
   autoSetup: true,
+  // v10.3 HERALD: call guard (decline + explainer) + inbox drafts
+  callGuard: false,
+  callGuardTemplate: 'Boss is busy right now — bataiye kya kaam hai, main unhe bata dunga. — FRIDAY',
+  callGuardMode: 'sms',
   // telephony
   waCountryCode: '91'
 };
