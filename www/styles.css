@@ -1029,3 +1029,11 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 @keyframes orbSpeak { 0%,100% { transform: scale(1);} 50% { transform: scale(1.06);} }
 @keyframes orbExec { 0% { transform: scale(.9); opacity: 1;} 100% { transform: scale(1.15); opacity: 0;} }
 @keyframes orbErr { 0%,100% { opacity: 1;} 50% { opacity: .25;} }
+
+/* ================= v12.1 Phase 9: INTELX suggestion cards ================= */
+.suggest-card { background: linear-gradient(135deg, rgba(0,212,255,.09), rgba(0,0,0,.28)); border: 1px solid rgba(0,212,255,.35); border-radius: 12px; padding: 10px 12px; margin: 8px 0 8px 44px; max-width: 86%; animation: suggestIn .25s ease-out; }
+.suggest-body { font-size: 13px; line-height: 1.45; margin-bottom: 8px; }
+.suggest-actions { display: flex; gap: 8px; }
+.suggest-go { background: var(--accent, #00d4ff); color: #04121f; border: none; font-weight: 600; }
+.suggest-x { background: transparent; border: 1px solid rgba(0,212,255,.35); color: var(--dim, #7d90b8); }
+@keyframes suggestIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
