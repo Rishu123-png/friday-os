@@ -25,6 +25,7 @@ import * as LB from './localbrain.js';
 import * as AMB from './ambient.js';
 import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
+import * as SUIT from './suit.js';
 import * as SERVER from './server.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
@@ -74,6 +75,7 @@ async function init() {
 
   await V.initSynthesis();
   setTimeout(() => { V.armSherpaVoice(); V.armSherpaEars(); }, 3000);   // v10.0: pick up downloaded packs at boot
+  setTimeout(autoSetupSuit, 9000);   // v10.2: suit systems update THEMSELVES (WiFi, silent)
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); $('#micContainer')?.classList.add('listening'); $('#inputWave')?.classList.add('on'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
@@ -4068,6 +4070,10 @@ function bindEvents() {
   bind('#serverUrl', 'serverUrl', 'input');
   bind('#serverToken', 'serverToken', 'input');
   bind('#serverMode', 'serverMode', 'change', 'checked');
+  /* v10.2: JARVIS zero-setup — suit keeps itself updated (WiFi, silent) */
+  bind('#autoSetup', 'autoSetup', 'change', 'checked');
+  const asRun = $('#autoSetupNow');
+  if (asRun) asRun.addEventListener('click', () => { U.toast('Suit systems check…', '🦾'); autoSetupSuit(); });
 
   $('#systemsLine')?.addEventListener('click', () => {
     const rows = state.systemsRows || [];
@@ -4266,19 +4272,69 @@ async function refreshVoskStatus() {
   chip.textContent = 'Wake brain: not downloaded — tap "Get wake brain" once (36MB, then offline forever).';
 }
 
-async function voskDownloadUI() {
+/* ============ v10.2.0: Suit Auto-Setup — JARVIS never says ============
+   "Sir, download this first". On WiFi the suit quietly keeps its systems
+   up-to-date: memory brain → wake brain → neural voice → offline ears. */
+function suitChip(show, html) {
+  let chip = $('#suitChip');
+  if (!chip) return;
+  chip.hidden = !show;
+  if (html != null) chip.innerHTML = html;
+}
+
+function netFacts() {
+  const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection || {};
+  return { online: navigator.onLine !== false, saveData: !!c.saveData, type: c.type || c.effectiveType || '' };
+}
+
+async function autoSetupSuit() {
+  if (!NAT.isNative()) return;
+  if (S.getSetting('autoSetup') === false) return;              // user opted out in Settings
+  if (!SUIT.wifiOk(netFacts())) {
+    addEventListener('online', () => setTimeout(autoSetupSuit, 5000), { once: true }); // retry when net returns
+    return;
+  }
+  const queue = SUIT.planAutoSetup(k => S.getSetting(k));
+  if (!queue.length) return;                                     // suit already up-to-date — say nothing
+  state.autoSetupRunning = true;
+  suitChip(true); state.hfChip = '#suitChip';
+  const chip = $('#suitChip'); if (chip) chip.dataset.base = 'Suit:';
+  const runners = {
+    memory: embedDownloadUI, wake: voskDownloadUI,
+    voice: sherpaVoiceDownloadUI, ears: sherpaEarsDownloadUI
+  };
+  let n = 0;
+  for (const pack of queue) {
+    n++;
+    suitChip(true, SUIT.suitLine(n, queue.length, pack.label));
+    try { await runners[pack.id](true); } catch (_) { /* failed pack: skip quietly, honest reason stays in Settings chips */ }
+    refreshSherpaChips(); refreshEmbedChip(); refreshVoskStatus();
+  }
+  suitChip(true, SUIT.suitDoneLine());
+  state.autoSetupRunning = false;
+  setTimeout(() => suitChip(false), 6000);
+}
+
+async function voskDownloadUI(quiet) {
+  quiet = (quiet === true);
   if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
-  const chip = $('#voskStatusChip');
-  if (chip) chip.textContent = 'Wake brain: downloading… 0%';
-  U.toast('Downloading the wake brain (36MB, one time) — a small offline ear. No account, no key.', '🎙️');
+  const chip = quiet ? $('#suitChip') : $('#voskStatusChip');
+  if (!quiet) {
+    if (chip) chip.textContent = 'Wake brain: downloading… 0%';
+    U.toast('Downloading the wake brain (36MB, one time) — a small offline ear. No account, no key.', '🎙️');
+  }
   const r = await NAT.voskDownload();
   if (r && r.ok) {
     S.setSetting('voskModelPath', r.path || '');
-    if (chip) chip.textContent = `Wake brain: ✅ ready (${r.mb || '?'}MB) — your word now wakes FRIDAY, offline.`;
-    U.toast('Wake brain ready! Turn Wake Word on and say your word.', '🎙️');
+    if (!quiet) {
+      const sc = $('#voskStatusChip');
+      if (sc) sc.textContent = `Wake brain: ✅ ready (${r.mb || '?'}MB) — your word now wakes FRIDAY, offline.`;
+      U.toast('Wake brain ready! Turn Wake Word on and say your word.', '🎙️');
+    }
     if (S.getSetting('wakeWord')) { V.stopWakeWord(); V.startWakeWord(); }
-  } else {
-    if (chip) chip.textContent = 'Wake brain: download failed — check internet and tap again.';
+  } else if (!quiet) {
+    const sc = $('#voskStatusChip');
+    if (sc) sc.textContent = 'Wake brain: download failed — check internet and tap again.';
     U.toast('Download failed: ' + (r && r.reason ? r.reason : 'network'), '⚠️');
   }
   refreshVoskStatus();
@@ -4326,15 +4382,16 @@ async function refreshEmbedChip() {
     : `Memory brain: ○ set — loads on first recall (${cnt} memories).`;
 }
 
-async function sherpaVoiceDownloadUI() {
+async function sherpaVoiceDownloadUI(quiet) {
+  quiet = (quiet === true);
   if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
-  const chip = $('#sherpaVoiceChip');
-  state.hfChip = '#sherpaVoiceChip';
-  if (chip) { chip.dataset.base = 'Neural voice:'; chip.textContent = 'Neural voice: downloading… 0%'; }
-  U.toast('Downloading the neural voice (~75MB, one time, then offline)…', '🔊');
+  const chip = quiet ? $('#suitChip') : $('#sherpaVoiceChip');
+  state.hfChip = quiet ? '#suitChip' : '#sherpaVoiceChip';
+  if (chip) { chip.dataset.base = quiet ? 'Suit:' : 'Neural voice:'; if (!quiet) chip.textContent = 'Neural voice: downloading… 0%'; }
+  if (!quiet) U.toast('Downloading the neural voice (~75MB, one time, then offline)…', '🔊');
   const r = await NAT.hfDownload({ repo: 'csukuangfj/vits-piper-en_US-lessac-medium', dest: 'voice-piper-en' });
   if (!(r && r.ok && r.dir)) {
-    if (chip) chip.textContent = 'Neural voice: download failed — internet check karke phir try karo.';
+    if (!quiet && chip) chip.textContent = 'Neural voice: download failed — internet check karke phir try karo.';
     return;
   }
   const files = r.files || [];
@@ -4355,6 +4412,7 @@ async function sherpaVoiceDownloadUI() {
   const chk = $('#neuralVoice'); if (chk) chk.checked = true;
   const ok = await V.armSherpaVoice();
   refreshSherpaChips();
+  if (quiet) return;
   if (ok) {
     U.toast('Neural voice LIVE! "Test" dabao.', '🔊');
     NAT.sherpaSpeak('Neural voice online, Boss. Ab main pehle se zyada insaan lagti hoon, hain na?').catch(() => {});
@@ -4363,15 +4421,16 @@ async function sherpaVoiceDownloadUI() {
   }
 }
 
-async function sherpaEarsDownloadUI() {
+async function sherpaEarsDownloadUI(quiet) {
+  quiet = (quiet === true);
   if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
-  const chip = $('#sherpaSttChip');
-  state.hfChip = '#sherpaSttChip';
-  if (chip) { chip.dataset.base = 'Offline ears:'; chip.textContent = 'Offline ears: downloading… 0%'; }
-  U.toast('Downloading offline ears (~120MB, one time, then no-net dictation)…', '🎙️');
+  const chip = quiet ? $('#suitChip') : $('#sherpaSttChip');
+  state.hfChip = quiet ? '#suitChip' : '#sherpaSttChip';
+  if (chip) { chip.dataset.base = quiet ? 'Suit:' : 'Offline ears:'; if (!quiet) chip.textContent = 'Offline ears: downloading… 0%'; }
+  if (!quiet) U.toast('Downloading offline ears (~120MB, one time, then no-net dictation)…', '🎙️');
   const r = await NAT.hfDownload({ repo: 'csukuangfj/sherpa-onnx-moonshine-tiny-en-int8', dest: 'ears-moonshine' });
   if (!(r && r.ok && r.dir)) {
-    if (chip) chip.textContent = 'Offline ears: download failed — internet check karke phir try karo.';
+    if (!quiet && chip) chip.textContent = 'Offline ears: download failed — internet check karke phir try karo.';
     return;
   }
   S.setSetting('sherpaSttDir', r.dir);
@@ -4379,18 +4438,21 @@ async function sherpaEarsDownloadUI() {
   const chk = $('#offlineEars'); if (chk) chk.checked = true;
   const ok = await V.armSherpaEars();
   refreshSherpaChips();
+  if (quiet) return;
   U.toast(ok ? 'Offline ears LIVE! Ab basement me bhi sunungi.' : 'Ears engine init failed (maybe rebuild pending)', ok ? '🎙️' : '⚠️');
 }
 
-async function embedDownloadUI() {
+async function embedDownloadUI(quiet) {
+  quiet = (quiet === true);
   if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
-  const chip = $('#embedStatusChip');
-  state.hfChip = '#embedStatusChip';
-  if (chip) { chip.dataset.base = 'Memory brain:'; chip.textContent = 'Memory brain: downloading… 0%'; }
-  U.toast('Downloading the memory brain (~30MB) — meaning-recall, fully on-device…', '🧠');
+  const chip = quiet ? $('#suitChip') : $('#embedStatusChip');
+  state.hfChip = quiet ? '#suitChip' : '#embedStatusChip';
+  if (chip) { chip.dataset.base = quiet ? 'Suit:' : 'Memory brain:'; if (!quiet) chip.textContent = 'Memory brain: downloading… 0%'; }
+  if (!quiet) U.toast('Downloading the memory brain (~30MB) — meaning-recall, fully on-device…', '🧠');
   const r = await SEM.downloadEmbedModel();
   refreshEmbedChip();
   const inp = $('#embedModelPath'); if (inp && r.path) inp.value = r.path;
+  if (quiet) return;
   U.toast(r.ok ? 'Memory brain ready! "mera naam yaad rakhna" se shuru karo.' : 'Download failed — internet check karke phir try karo.', r.ok ? '🧠' : '⚠️');
 }
 
@@ -4434,6 +4496,7 @@ function syncSettingsUI() {
   set('#serverUrl', S.getSetting('serverUrl') || '');
   set('#serverToken', S.getSetting('serverToken') || '');
   set('#serverMode', S.getSetting('serverMode') !== false, 'checked');
+  set('#autoSetup', S.getSetting('autoSetup') !== false, 'checked');
   refreshSherpaChips();
   refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';
