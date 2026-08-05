@@ -808,3 +808,55 @@ test('hotfix: absorbable separates answers from fresh commands (screenshot cases
   assert.ok(CL.absorbable('youtube', parkedMusic));
   assert.ok(!CL.absorbable('play kesariya on youtube', parkedMusic));  // full command -> fresh (runs itself)
 });
+
+/* ---------------- v10.3 HERALD: inbox + call guard ---------------- */
+const HERALD = await import('../www/js/herald.js');
+
+test('herald: pickLatestInbox filters pkg, age, empty text, sorts newest-first', () => {
+  const now = 1000000;
+  const items = [
+    { pkg: 'com.whatsapp', title: 'Ramesh', text: 'kal meeting hai', when: now - 1000 },
+    { pkg: 'com.instagram.android', title: 'X', text: 'ignore me', when: now - 500 },
+    { pkg: 'com.whatsapp', title: 'Suresh', text: '', when: now - 100 },
+    { pkg: 'com.whatsapp.w4b', title: 'Dukaan', text: 'payment aaya kya', when: now - 2000 },
+    { pkg: 'com.whatsapp', title: 'Purana', text: 'bahut purana', when: now - 7 * 3600e3 }
+  ];
+  const got = HERALD.pickLatestInbox(items, 'whatsapp', 6 * 3600e3, now);
+  assert.equal(got.length, 2);
+  assert.equal(got[0].who, 'Ramesh');       // newest first
+  assert.equal(got[1].who, 'Dukaan');       // whatsapp business included
+});
+
+test('herald: inboxSummary speaks naturally', () => {
+  const one = HERALD.inboxSummary([{ who: 'Ramesh', text: 'kal meeting hai', when: 1, pkg: 'com.whatsapp' }]);
+  assert.ok(one.includes('Ramesh') && one.includes('message'));
+  assert.equal(HERALD.inboxSummary([]), '');
+});
+
+test('herald: buildExplainer fills placeholders + guards length', () => {
+  const t = HERALD.buildExplainer('Boss busy — {number} se baad me baat karega', { number: '9999' });
+  assert.ok(t.includes('9999'));
+  const def = HERALD.buildExplainer('', { number: '1' });
+  assert.ok(def.includes('FRIDAY'));
+});
+
+test('herald: explainerAllowed = one per caller per gap (spam never)', () => {
+  const map = { '98765': 1000 };
+  assert.ok(!HERALD.explainerAllowed(map, '98765', 600000, 1001));   // just handled
+  assert.ok(HERALD.explainerAllowed(map, '98765', 600000, 700000));  // gap passed
+  assert.ok(HERALD.explainerAllowed(map, '11111', 600000, 1001));    // new caller
+});
+
+test('herald: brain intents — whatsapp flow nahi takrata', () => {
+  const chk = resolve('whatsapp pe kya aaya hai');
+  assert.ok(chk && chk.action && chk.action.type === 'inbox_check');
+  const rep = resolve('uska jawab do');
+  assert.ok(rep && rep.action && rep.action.type === 'inbox_reply');
+  const snd = resolve('bhejo');
+  assert.ok(snd && snd.action && snd.action.type === 'inbox_send');
+  const guard = resolve('call guard on karo');
+  assert.ok(guard && guard.action && guard.action.type === 'call_guard' && guard.action.on === true);
+  // direct reply with text STILL goes to old reply_notif — no collision
+  const direct = resolve('reply whatsapp on my way');
+  assert.ok(direct && direct.action && direct.action.type === 'reply_notif');
+});
