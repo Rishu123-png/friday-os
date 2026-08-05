@@ -996,6 +996,14 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .hud-dock-btn:active { transform: scale(.88); box-shadow: 0 0 14px rgba(0,212,255,.5); }
 .hud-sos { border-color: rgba(255,82,82,.5); }
 
+/* ===== v11.3 COGNITION: memory dashboard + automation rules ===== */
+.mem-dash { display: flex; flex-direction: column; gap: 8px; }
+.sys-pre { font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.5; color: #7fd4ff;
+  background: rgba(0, 30, 60, .4); border: 1px solid rgba(0, 212, 255, .18); border-radius: 8px;
+  padding: 10px 12px; white-space: pre-wrap; word-break: break-word; margin: 0; }
+.rule-list { display: flex; flex-direction: column; gap: 0; }
+.rule-row label { font-size: 12px; color: #bfe9ff; flex: 1; }
+
 /* ===== v11.2 VOX: mic live-dot + formal voice state line ===== */
 .hud-voxline { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 2px 0 0; min-height: 14px; }
 .mic-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(127,212,255,.14); border: 1px solid rgba(127,212,255,.25); transition: background .25s ease, box-shadow .25s ease; }

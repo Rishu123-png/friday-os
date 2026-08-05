@@ -47,7 +47,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v11.2</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v11.3</span></div>
       <div id="suitChip" class="suit-chip" hidden>Suit:</div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
@@ -376,6 +376,23 @@
           <p class="hint">Permissions puchhega: Phone + Calls (decline ke liye) + Overlay + SMS/WhatsApp.</p>
         </div>
         <div class="settings-group">
+          <h3>🧠 Memory Dashboard (v11.3 COGNITION — dev)</h3>
+          <div id="memDash" class="mem-dash">
+            <button type="button" class="btn-secondary" id="memDashRefresh">Refresh stats</button>
+            <pre id="memDashOut" class="sys-pre">—</pre>
+          </div>
+          <p class="hint">Har din ka conversation digest automatically banta hai (local). Bolo: <b>"aaj kya hua"</b>, <b>"memory dashboard"</b>, <b>"deep search battery"</b>. Pinned/important memories kabhi auto-delete nahi hoti.</p>
+        </div>
+        <div class="settings-group">
+          <h3>⚙️ Automation Rules (v11.3 Phase 7)</h3>
+          <div class="setting-item">
+            <label>Automation engine</label>
+            <div class="toggle-switch"><input type="checkbox" id="autoEngine" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div id="ruleList" class="rule-list"></div>
+          <p class="hint">Rules event-driven hain — battery/timer polling nahi. Risky actions (delete/money/calls) pe confirm zaroor milta hai. Bolo: <b>"automation rules dikha"</b> ya <b>"rule off Battery guard"</b>.</p>
+        </div>
+        <div class="settings-group">
           <h3>🎬 Cinematic Boot (v11.1 IGNITION)</h3>
           <p class="hint">Har line REAL system check dikhati hai — "movie feel, zero fake". First launch full version, baad me short (tap = skip anytime).</p>
           <div class="setting-item">
@@ -632,8 +649,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">11.2.0</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V11-2-VOX</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">11.3.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V11-3-COGNITION</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -857,6 +874,5 @@
   </script>
   <script type="module" src="js/app.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2656296282b302d',t:'MTc4NTkyODUzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2659f7e7e4a59ba',t:'MTc4NTkzMTAzMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
