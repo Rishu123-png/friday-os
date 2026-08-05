@@ -271,8 +271,9 @@ export async function quote() {
 
 /* ---------- Translate (LibreTranslate mirrors / MyMemory — keyless) ---------- */
 export async function translate(text, from = 'auto', to = 'en') {
-  // MyMemory: free, no key, CORS open
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from === 'auto' ? 'en' : from}|${to}`;
+  // v10.1 fix: "auto" actually detects the script instead of assuming English
+  const src = from === 'auto' ? (/[ऀ-ॿ]/.test(text) ? 'hi' : 'en') : from;
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${src}|${to}`;
   const d = await j(url);
   const out = d.responseData?.translatedText;
   if (!out) throw new Error('Translation failed');
@@ -320,11 +321,19 @@ export async function deepResearch(query) {
   try {
     const rss = 'https://news.google.com/rss/search?q=' + encodeURIComponent(query)
       + '&hl=en-IN&gl=IN&ceid=IN:en';
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 9000);
-    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(rss), { signal: ctrl.signal });
-    clearTimeout(to);
-    const xml = await r.text();
+    /* v10.1: fetch through FRIDAY Cloud when configured (public proxies are flaky) */
+    const SERVER = await import('./server.js');
+    let xml = '';
+    if (SERVER.isConfigured()) {
+      const r = await SERVER.fetchRaw(rss);
+      xml = (r && r.ok && r.text) || '';
+    } else {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 9000);
+      const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(rss), { signal: ctrl.signal });
+      clearTimeout(to);
+      xml = await r.text();
+    }
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
     const items = [...doc.querySelectorAll('item')].slice(0, 4);
     for (const it of items) {
