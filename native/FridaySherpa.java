@@ -1,3 +1,4 @@
+
 package com.rishu.fridayos;
 
 import android.Manifest;
@@ -71,6 +72,23 @@ public class FridaySherpa extends Plugin {
         catch (Throwable t) { return false; }
     }
 
+    /* v10.2.2 STABILITY: a native abort() inside sherpa (bad/corrupt/missing
+       model file) KILLS the whole app process and a Java try/catch can never
+       intercept that. So we strictly validate EVERY path before letting the
+       file pointer anywhere near the native engine. Returns '' when OK. */
+    private static boolean fileOk(String p, long minBytes) {
+        if (p == null || p.isEmpty()) return false;
+        File f = new File(p);
+        return f.isFile() && f.length() >= minBytes;
+    }
+
+    private static boolean dirOk(String p) {
+        if (p == null || p.isEmpty()) return false;
+        File d = new File(p);
+        String[] kids = d.list();
+        return d.isDirectory() && kids != null && kids.length > 0;
+    }
+
     @PluginMethod
     public void status(PluginCall call) {
         JSObject r = ok();
@@ -91,6 +109,19 @@ public class FridaySherpa extends Plugin {
         io.submit(() -> {
             try {
                 if (!nativesOk()) { call.resolve(fail("engine_missing")); return; }
+                /* v10.2.2: files MUST be whole before native init, else abort */
+                final String modelPath = str(call.getString("modelPath", ""));
+                final String tokensPath = str(call.getString("tokensPath", ""));
+                final String lexiconPath = str(call.getString("lexiconPath", ""));
+                final String dataDir = str(call.getString("dataDir", ""));
+                final String dictDir = str(call.getString("dictDir", ""));
+                final String voicesPath = str(call.getString("voicesPath", ""));
+                if (!fileOk(modelPath, 1048576)) { call.resolve(fail("bad_files:model")); return; }
+                if (!fileOk(tokensPath, 10)) { call.resolve(fail("bad_files:tokens")); return; }
+                if ("kokoro".equals(kind) && !fileOk(voicesPath, 1024)) { call.resolve(fail("bad_files:voices")); return; }
+                if (!lexiconPath.isEmpty() && !fileOk(lexiconPath, 10)) { call.resolve(fail("bad_files:lexicon")); return; }
+                if (!dataDir.isEmpty() && !dirOk(dataDir)) { call.resolve(fail("bad_files:data_dir")); return; }
+                if (!dictDir.isEmpty() && !dirOk(dictDir)) { call.resolve(fail("bad_files:dict_dir")); return; }
                 closeTts();
                 OfflineTtsModelConfig.Builder mb = OfflineTtsModelConfig.builder()
                     .setNumThreads(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)))
@@ -232,8 +263,17 @@ public class FridaySherpa extends Plugin {
             try {
                 if (!nativesOk()) { call.resolve(fail("engine_missing")); return; }
                 closeRec();
-                if (dir.isEmpty() || !new File(dir, "tokens.txt").exists()) {
+                if (dir.isEmpty() || !fileOk(new File(dir, "tokens.txt").getAbsolutePath(), 10)) {
                     call.resolve(fail("no_model_dir")); return;
+                }
+                /* v10.2.2: ALL moonshine files must be whole — a partial
+                   download aborts natively and kills the app. */
+                final String[] need = { "preprocess.onnx", "encode.int8.onnx",
+                                        "uncached_decode.int8.onnx", "cached_decode.int8.onnx" };
+                for (String n : need) {
+                    if (!fileOk(new File(dir, n).getAbsolutePath(), 1024)) {
+                        call.resolve(fail("bad_files:" + n)); return;
+                    }
                 }
                 rec = new OfflineRecognizer(OfflineRecognizerConfig.builder()
                     .setFeatureConfig(FeatureConfig.builder().setSampleRate(16000).setFeatureDim(80).build())
