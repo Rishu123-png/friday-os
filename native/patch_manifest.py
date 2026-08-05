@@ -29,6 +29,7 @@ PERMS = [
     "android.permission.READ_SMS",
     "android.permission.RECEIVE_SMS",
     "android.permission.READ_PHONE_STATE",
+    "android.permission.ANSWER_PHONE_CALLS",
     "android.permission.SYSTEM_ALERT_WINDOW",
     "android.permission.WRITE_SETTINGS",
     "android.permission.ACCESS_NOTIFICATION_POLICY",
@@ -112,6 +113,16 @@ SERVICES = """
             android:name=".FridayGeofenceReceiver"
             android:enabled="true"
             android:exported="false"/>
+
+        <!-- v10.3 HERALD: Call Guard (decline+explainer; works even when app asleep) -->
+        <receiver
+            android:name=".FridayCallGuard"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.PHONE_STATE"/>
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".FridayWidgetProvider"
