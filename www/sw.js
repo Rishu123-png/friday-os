@@ -11,6 +11,11 @@ const ASSETS = [
   './js/ai.js', './js/api.js', './js/device.js', './js/voice.js', './js/ui.js',
   './js/vision.js', './js/templates.js', './js/memory.js', './js/proactive.js',
   './js/nlu.js', './js/automation.js', './js/native.js', './js/coder.js',
+  /* v10.1: the previously-missing modules — without these a fresh install
+     with no network fails to boot (app.js imports all of them) */
+  './js/ambient.js', './js/clarify.js', './js/embeddings.js', './js/hacker.js',
+  './js/health.js', './js/i18n.js', './js/localbrain.js', './js/semantic.js',
+  './js/vault.js', './js/server.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
