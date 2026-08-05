@@ -28,7 +28,10 @@ public class FridayNotificationService extends NotificationListenerService {
     private static FridayNotificationService instance;
 
     /* ---- reply-target registry: package -> what's needed to answer ---- */
-    private static final Map<String, ReplyTarget> REPLIES = new HashMap<>();
+    /* v11.0.1 AUDIT-PART3 fix (RACE): this map is written on the notification-
+       listener thread (captureReplyAction) and read/removed on the Capacitor
+       bridge thread (replyNotification) — plain HashMap can corrupt/kill. */
+    private static final Map<String, ReplyTarget> REPLIES = java.util.Collections.synchronizedMap(new HashMap<>());
     private static String lastReplyApp = "";
 
     private static class ReplyTarget {
@@ -105,24 +108,29 @@ public class FridayNotificationService extends NotificationListenerService {
     /** 1 = sent, 2 = reply action refused/expired, 0 = nothing replyable found */
     public static int reply(Context ctx, String app, String text) {
         try {
-            ReplyTarget t = null;
-            String usedApp = "";
-
-            if (app != null && !app.isEmpty()) {
-                String q = app.toLowerCase();
-                for (Map.Entry<String, ReplyTarget> e : REPLIES.entrySet()) {
-                    if (e.getKey().toLowerCase().contains(q)) {
-                        t = e.getValue();
-                        usedApp = e.getKey();
-                        break;
+            ReplyTarget t;
+            String usedApp;
+            synchronized (FridayNotificationService.class) {   // v11.0.1 race fix (map iteration must be atomic)
+                t = null;
+                usedApp = "";
+                if (app != null && !app.isEmpty()) {
+                    String q = app.toLowerCase();
+                    for (Map.Entry<String, ReplyTarget> e : REPLIES.entrySet()) {
+                        if (e.getKey().toLowerCase().contains(q)) {
+                            t = e.getValue();
+                            usedApp = e.getKey();
+                            break;
+                        }
                     }
                 }
+                if (t == null && !lastReplyApp.isEmpty()) {
+                    t = REPLIES.get(lastReplyApp);
+                    usedApp = lastReplyApp;
+                }
+                if (t == null || t.intent == null) return 0;
+                REPLIES.remove(usedApp);
+                if (usedApp.equals(lastReplyApp)) lastReplyApp = "";
             }
-            if (t == null && !lastReplyApp.isEmpty()) {
-                t = REPLIES.get(lastReplyApp);
-                usedApp = lastReplyApp;
-            }
-            if (t == null || t.intent == null) return 0;
 
             Bundle results = new Bundle();
             results.putCharSequence(t.remoteKey, text);
@@ -132,8 +140,6 @@ public class FridayNotificationService extends NotificationListenerService {
                     fill, results);
 
             t.intent.send(ctx, 0, fill);
-            REPLIES.remove(usedApp);
-            if (usedApp.equals(lastReplyApp)) lastReplyApp = "";
             return 1;
         } catch (PendingIntent.CanceledException e) {
             return 2;    // notification was dismissed already
@@ -155,8 +161,10 @@ public class FridayNotificationService extends NotificationListenerService {
                 t.intent = a.actionIntent;
                 t.remoteKey = key;
                 t.when = System.currentTimeMillis();
-                REPLIES.put(pkg, t);
-                lastReplyApp = pkg;
+                synchronized (FridayNotificationService.class) {   // v11.0.1 race fix
+                    REPLIES.put(pkg, t);
+                    lastReplyApp = pkg;
+                }
                 return;   // one reply action per notification is enough
             }
         } catch (Exception ignored) {}
