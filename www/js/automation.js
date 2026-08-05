@@ -11,8 +11,7 @@
      app_open  — when FRIDAY launches
      interval  — every N minutes */
 
-import { KEYS, getList, saveList, addItem, removeItem, updateItem, getSetting } from './store.js';
-import { parseTime, humanTime } from './nlp.js';
+import { getList, saveList, addItem, removeItem, updateItem } from './store.js';
 
 const ROUTINES = 'friday_routines';
 const ALARMS = 'friday_alarms';
