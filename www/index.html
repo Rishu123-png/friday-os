@@ -42,6 +42,10 @@
     </div>
   </div>
 
+  <!-- v13 Phase 13: cinematic ambience layers (CINEX toggles via html[data-fx]) -->
+  <div class="radar-sweep" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
   <!-- Main App -->
   <div id="app" class="app hidden">
     <!-- Status Bar -->
@@ -415,6 +419,59 @@
           <div class="setting-item">
             <button type="button" class="btn-secondary" id="inboxTestBtn">Try: draft a reply to latest WhatsApp</button>
           </div>
+        </div>
+        <div class="settings-group">
+          <h3>🛡 Security &amp; Privacy (Phase 11)</h3>
+          <div class="setting-item">
+            <label>App lock (PIN, never stored in plaintext)</label>
+            <div class="toggle-switch"><input type="checkbox" id="appLock"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item" id="appPinRow" style="display:none">
+            <label>Set / change PIN (4-8 digits)</label>
+            <input type="password" id="appPin" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="****">
+          </div>
+          <div class="setting-item">
+            <label>Cloud AI consent (privacy-first: cloud only if ON)</label>
+            <div class="toggle-switch"><input type="checkbox" id="cloudConsent"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Audit trail (permissions, automation, security events)</label>
+            <div class="toggle-switch"><input type="checkbox" id="auditEnabled" checked><span class="toggle-slider"></span></div>
+          </div>
+          <p class="hint" id="secxStatusChip">Security engine: checking…</p>
+        </div>
+        <div class="settings-group">
+          <h3>⚡ Performance &amp; Cinematic (Phase 12-13)</h3>
+          <div class="setting-item">
+            <label>Performance monitor (FPS / CPU / RAM / AI latency)</label>
+            <div class="toggle-switch"><input type="checkbox" id="perfMonitor"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Battery gate (defer heavy AI when critically low)</label>
+            <div class="toggle-switch"><input type="checkbox" id="batteryGate" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>AI response cache (short TTL)</label>
+            <div class="toggle-switch"><input type="checkbox" id="aiCache" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Cinematic mode (holographic glow, radar, scanlines)</label>
+            <div class="toggle-switch"><input type="checkbox" id="cinematic" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>High contrast</label>
+            <div class="toggle-switch"><input type="checkbox" id="highContrast"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Text scale</label>
+            <select id="textScale">
+              <option value="1">Normal</option>
+              <option value="1.1">Slightly larger</option>
+              <option value="1.25">Larger</option>
+              <option value="1.5">Largest</option>
+            </select>
+          </div>
+          <p class="hint">Reduced motion follows your system setting automatically. Say <b>"performance stats"</b> or <b>"audit log"</b> anytime.</p>
         </div>
         <div class="settings-group">
           <h3>🧠 AI Core (On-Device Brain)</h3>
@@ -875,5 +932,5 @@
   <script type="module" src="js/app.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
 <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2659f7e7e4a59ba',t:'MTc4NTkzMTAzMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2660799480941b6',t:'MTc4NTkzNTI5Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2668e1faef247d2',t:'MTc4NTk0MDgwNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
