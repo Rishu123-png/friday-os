@@ -104,6 +104,21 @@ public class ContextCompat {
     public static int checkSelfPermission(Context c, String p) { return 0; }
 }
 EOF
+cat > /tmp/capstubs/src/androidx/core/content/FileProvider.java << 'EOF'
+package androidx.core.content;
+import android.content.Context;
+import android.net.Uri;
+import java.io.File;
+public class FileProvider extends android.content.ContentProvider {
+    public static Uri getUriForFile(Context c, String authority, File file) { return Uri.parse("content://" + authority + "/share/" + file.getName()); }
+    public boolean onCreate() { return true; }
+    public android.database.Cursor query(Uri u, String[] p, String s, String[] a, String o) { return null; }
+    public String getType(Uri u) { return "image/jpeg"; }
+    public Uri insert(Uri u, android.content.ContentValues v) { return null; }
+    public int delete(Uri u, String s, String[] a) { return 0; }
+    public int update(Uri u, android.content.ContentValues v, String s, String[] a) { return 0; }
+}
+EOF
 cat > /tmp/capstubs/src/com/rishu/fridayos/R.java << 'EOF'
 package com.rishu.fridayos;
 public final class R {
