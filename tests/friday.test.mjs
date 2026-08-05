@@ -860,3 +860,225 @@ test('herald: brain intents — whatsapp flow nahi takrata', () => {
   const direct = resolve('reply whatsapp on my way');
   assert.ok(direct && direct.action && direct.action.type === 'reply_notif');
 });
+
+/* ---------------- v11.0 Phase 1: FridayCore ---------------- */
+const FCORE = await import('../www/js/fridaycore.js');
+
+test('core: event bus delivers payload + listener errors are isolated', () => {
+  FCORE.Bus._reset();
+  let got = 0, crashed = 0;
+  FCORE.Bus.on('ping', p => { got += p.n; });
+  FCORE.Bus.on('ping', () => { crashed++; throw new Error('boom'); });
+  FCORE.Bus.on('ping', p => { got += p.n * 10; });
+  const delivered = FCORE.Bus.emit('ping', { n: 1 });
+  assert.equal(delivered, 2);          // thrower ran but errored (isolated), 2 delivered clean
+  assert.equal(got, 11);               // 1 + 1*10
+  assert.equal(crashed, 1);            // the thrower threw, others survived
+});
+
+test('core: once fires exactly once, off detaches', () => {
+  FCORE.Bus._reset();
+  let n = 0;
+  FCORE.Bus.once('x', () => n++);
+  FCORE.Bus.emit('x'); FCORE.Bus.emit('x');
+  assert.equal(n, 1);
+  const off = FCORE.Bus.on('y', () => n++);
+  off(); FCORE.Bus.emit('y');
+  assert.equal(n, 1);
+});
+
+test('core: service lifecycle boot -> running, healthMap reports', async () => {
+  const core = new FCORE.FridayCore();
+  core.register('alpha', { health: () => ({ ok: true, detail: 'fine' }) });
+  const h = await core.boot();
+  assert.equal(core.get('alpha').state, 'running');
+  assert.ok(h.alpha.ok && h.alpha.detail === 'fine');
+});
+
+test('core: failing service -> error state (+ auto recovery retry)', async () => {
+  const core = new FCORE.FridayCore({ maxRetries: 1, baseBackoffMs: 5 });
+  let attempts = 0;
+  core.register('flaky', {
+    init: async () => { attempts++; if (attempts === 1) throw new Error('dead on arrival'); },
+    health: () => ({ ok: true })
+  });
+  await core.boot();
+  assert.equal(core.get('flaky').state, 'error');           // first try failed
+  assert.equal(attempts, 1);
+  await new Promise(r => setTimeout(r, 60));                 // recovery backoff fires
+  assert.equal(core.get('flaky').state, 'running');          // recovered itself!
+  assert.equal(attempts, 2);
+});
+
+test('core: pause/resume/stop transitions', async () => {
+  const core = new FCORE.FridayCore();
+  core.register('svc', {});
+  await core.boot();
+  assert.ok(await core.pause('svc'));
+  assert.equal(core.get('svc').state, 'paused');
+  assert.ok(await core.resume('svc'));
+  assert.equal(core.get('svc').state, 'running');
+  assert.ok(await core.stop('svc'));
+  assert.equal(core.get('svc').state, 'stopped');
+});
+
+test('core: logger ring caps + timestamps + format', () => {
+  FCORE.Logger.info('test', 'hello');
+  const last = FCORE.Logger.all().pop();
+  assert.ok(last.ts > 0 && last.mod === 'test' && last.level === 'info');
+  assert.match(FCORE.formatLogEntry(last), /\d{2}:\d{2}:\d{2}/);
+});
+
+/* ---------------- v11.1 PHASE 2+3: IGNITION + HUD ---------------- */
+const IGN = await import('../www/js/ignite.js');
+const HUD2 = await import('../www/js/hud.js');
+
+test('ignite: bootPlan modes (first-run full, short after, off, reduced-motion)', () => {
+  assert.equal(IGN.bootPlan({ mode: 'auto', firstRun: true }).mode, 'full');
+  assert.equal(IGN.bootPlan({ mode: 'auto', firstRun: false }).mode, 'short');
+  assert.equal(IGN.bootPlan({ mode: 'full', firstRun: false }).mode, 'full');
+  assert.equal(IGN.bootPlan({ mode: 'off' }).stages.length, 0);
+  assert.equal(IGN.bootPlan({ mode: 'auto', firstRun: false, reduced: true }).stages.length, 3);
+  assert.ok(IGN.bootPlan({ mode: 'auto', firstRun: true }).stages.includes('services'));
+  assert.ok(IGN.bootPlan({ mode: 'auto', firstRun: true }).minMs <= 9000);   // ~6-10s spec
+});
+
+test('ignite: welcomeLines twitch with the real clock', () => {
+  assert.ok(IGN.welcomeLines(8, 'Boss')[0].includes('Morning'));
+  assert.ok(IGN.welcomeLines(14, 'Boss')[0].includes('Afternoon'));
+  assert.ok(IGN.welcomeLines(21, 'Boss')[0].includes('Evening'));
+  assert.ok(IGN.welcomeLines(21, 'Rishu')[1].includes('Rishu'));
+});
+
+test('ignite: stageProgress never exceeds 100', () => {
+  assert.equal(IGN.stageProgress(0, 7), 14);   // (idx+1)/total, total = last index
+  assert.equal(IGN.stageProgress(7, 7), 100);
+});
+
+test('hud: labels are honest (battery/storage/net)', () => {
+  assert.equal(HUD2.batteryLabel(81, false), '81%');
+  assert.ok(HUD2.batteryLabel(18, false).includes('🪫'));
+  assert.ok(HUD2.batteryLabel(18, true).includes('⚡'));
+  assert.equal(HUD2.batteryLabel(null), '');
+  assert.equal(HUD2.storageLabel(1073741824, 4294967296), '1.0/4.0 GB');
+  assert.equal(HUD2.netLabel(false), 'Offline');
+  assert.equal(HUD2.netLabel(true, true), 'Cloud ●');
+});
+
+test('hud: contextCards only for real situations', () => {
+  assert.equal(HUD2.contextCards({ batteryPct: 60 }).length, 0);         // nothing = no cards
+  assert.ok(HUD2.contextCards({ batteryPct: 15 }).length >= 1);          // low battery
+  assert.ok(HUD2.contextCards({ notifCount: 20 })[0].id === 'notif');
+  assert.ok(HUD2.contextCards({ reminderText: 'exam revision' })[0].id === 'rem');
+});
+
+test('hud: orb state machine priorities', () => {
+  assert.equal(HUD2.orbStateFrom({ listening: true, speaking: true }), 'listening');
+  assert.equal(HUD2.orbStateFrom({ speaking: true }), 'speaking');
+  assert.equal(HUD2.orbStateFrom({ thinking: true }), 'thinking');
+  assert.equal(HUD2.orbStateFrom({ error: true, listening: true }), 'error');
+  assert.equal(HUD2.orbStateFrom({}), 'idle');
+  assert.ok(HUD2.ORB_STATES.includes('sleeping'));
+});
+
+test('hud: feed rings at cap', () => {
+  let f = [];
+  for (let i = 0; i < 10; i++) f = HUD2.pushFeed(f, 'x', 'line ' + i);
+  assert.equal(f.length, 6);
+  assert.ok(f[5].text.includes('line 9'));
+});
+
+/* ================= v11.2 VOX: Voice Engine 2.0 ================= */
+const VOX = await import('../www/js/vox.js');
+
+test('vox: full conversation loop is legal', () => {
+  const loop = ['OFFLINE','INITIALIZING','READY','LISTENING','UNDERSTANDING','THINKING','EXECUTING','SPEAKING','WAITING','READY'];
+  for (let i = 1; i < loop.length; i++) assert.ok(VOX.can(loop[i-1], loop[i]), loop[i-1] + '→' + loop[i]);
+});
+
+test('vox: error is reachable from anywhere, recovery only via init/ready', () => {
+  for (const s of VOX.STATES) assert.ok(VOX.can(s, 'ERROR'), s + '→ERROR');
+  assert.ok(!VOX.can('ERROR', 'SPEAKING'));
+  assert.ok(VOX.can('ERROR', 'INITIALIZING'));
+});
+
+test('vox: barge-in interrupt SPEAKING→LISTENING is a legal state hop', () => {
+  assert.ok(VOX.can('SPEAKING', 'LISTENING'));
+  assert.ok(VOX.can('SLEEPING', 'LISTENING'));      // wake fire from sleep
+  assert.ok(!VOX.can('SLEEPING', 'SPEAKING'));      // sleeping → speaking is noise
+});
+
+test('vox: wakeList dedupes, trims and sorts longest-first', () => {
+  const w = VOX.wakeList(' hey friday, friday,computer , hello friday ');
+  assert.deepEqual(w, ['hello friday', 'hey friday', 'computer', 'friday']);
+  assert.equal(VOX.wakeList('').length, 0);
+});
+
+test('vox: wakeMatch hits phrase, stripWake keeps the command', () => {
+  const list = VOX.wakeList('hey friday, friday, computer');
+  assert.equal(VOX.wakeMatch('hey friday open whatsapp', list), 'hey friday');
+  assert.equal(VOX.stripWake('hey friday, open whatsapp', list), 'open whatsapp');
+  assert.equal(VOX.stripWake('friday battery batao', list), 'battery batao');
+  assert.equal(VOX.wakeMatch('kuch bhi random baat', list), null);
+  // longest-first matters: "friday" alone in "hey friday" must not win
+  assert.equal(VOX.wakeMatch('okay computer kya time hai', list), 'computer');
+});
+
+test('vox: wake cooldown kills echo retriggers', () => {
+  assert.ok(VOX.wakeCooldownOk(0, 1000));
+  assert.ok(!VOX.wakeCooldownOk(1000, 2000, 2600));
+  assert.ok(VOX.wakeCooldownOk(1000, 5000, 2600));
+});
+
+test('vox: sensitivity slider maps high→whisper threshold', () => {
+  assert.ok(VOX.bargeRms(100) < VOX.bargeRms(0));
+  assert.ok(VOX.bargeRms(60) > 2 && VOX.bargeRms(60) < 6);
+});
+
+test('vox: VAD classifies speech vs noise vs silence', () => {
+  assert.equal(VOX.vadClass(9, 4), 'speech');
+  assert.equal(VOX.vadClass(2.4, 4), 'noise');
+  assert.equal(VOX.vadClass(0.5, 4), 'silence');
+});
+
+test('vox: restart backoff doubles then caps at 15s', () => {
+  assert.equal(VOX.retryDelay(0), 1200);
+  assert.equal(VOX.retryDelay(1), 2400);
+  assert.equal(VOX.retryDelay(2), 4800);
+  assert.equal(VOX.retryDelay(10), 15000);
+});
+
+test('vox: danger detection catches destructive commands only', () => {
+  assert.ok(VOX.needsConfirm('delete all reminders'));
+  assert.ok(VOX.needsConfirm('wipe your memory'));
+  assert.ok(VOX.needsConfirm('saare alarms hata do'));
+  assert.ok(!VOX.needsConfirm('delete my 7am reminder'));   // surgical delete → clarify flow handles
+  assert.ok(!VOX.needsConfirm('add a reminder'));
+  assert.ok(!VOX.needsConfirm('clear chat'));               // clear_chat has no 'all' and is safe-scoped
+});
+
+test('vox: question names the target honestly', () => {
+  assert.ok(VOX.confirmQuestion('delete all reminders').includes('reminders'));
+  assert.ok(VOX.confirmQuestion('wipe your memory').includes('memory') || VOX.confirmQuestion('wipe your memory').includes('yaad'));
+  assert.ok(VOX.confirmYes('haan')); assert.ok(VOX.confirmYes('yes')); assert.ok(VOX.confirmYes('haan kar do'));
+  assert.ok(VOX.confirmNo('nahi')); assert.ok(VOX.confirmNo('rehne do')); assert.ok(VOX.confirmNo('cancel'));
+  assert.ok(!VOX.confirmYes('maybe')); assert.ok(!VOX.confirmNo('haan'));
+});
+
+test('vox: streaming chunker splits sentences, keeps tail', () => {
+  const a = VOX.sentences('Battery is 81%. Charging fast. Baaki');
+  assert.deepEqual(a.say, ['Battery is 81%.', 'Charging fast.']);
+  assert.equal(a.rest, 'Baaki');
+  const b = VOX.sentences('Done.', true);
+  assert.deepEqual(b.say, ['Done.']); assert.equal(b.rest, '');
+});
+
+test('vox: orb + label + mic indicator map every state', () => {
+  for (const s of VOX.STATES) {
+    assert.ok(HUD2.ORB_STATES.includes(VOX.orbOf(s)), s);
+    assert.ok(VOX.labelOf(s).length > 2, s);
+  }
+  assert.ok(VOX.micVisible('LISTENING', false));
+  assert.ok(VOX.micVisible('READY', true));        // wake-word ears = mic open
+  assert.ok(!VOX.micVisible('READY', false));      // nothing listening, dot off
+});
