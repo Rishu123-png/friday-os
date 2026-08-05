@@ -41,6 +41,11 @@ const YT_SOURCES = ['youtube', 'yt'];
 const MUSIC_SRC_PREF = 'music_source';
 
 function ruleList() {
+  /* NOTE (v10.2.1): brain.js ke REAL intent names + action fields.
+     Pehle rules galat naam/field the (contact_call/remind/alarm_set exist
+     hi nahi karte; open_app ka field 'name' nahi 'app' hai) — isliye har
+     "open whatsapp" pe bhi slot "missing" dikhta tha → infinite
+     "Kaunsa app kholun?" loop. Ab exact map: */
   return [
     {
       intent: 'yt_play',
@@ -50,36 +55,38 @@ function ruleList() {
       merge: (orig, ans) => `play ${ans} on youtube`
     },
     {
-      intent: 'contact_call',
-      missing: a => !(a && a.name),
+      intent: 'call',
+      /* sirf tab poocho jab parse hi nahi hua (naam nahi mila) — contact na
+         milna (open_panel fallback) MISSING name nahi hota! */
+      missing: a => !!(a && a.type === 'contact_lookup' && !(a.name || '').trim()),
       slot: 'name',
       question: () => 'Kise call karoon?',
       merge: (_orig, ans) => `call ${ans}`
     },
     {
-      intent: 'contact_sms',
-      missing: a => !(a && a.name),
+      intent: 'message',
+      missing: a => !!(a && a.type === 'contact_lookup' && !(a.name || '').trim()),
       slot: 'name',
       question: () => 'Kise message bhejoon?',
       merge: (_orig, ans) => `send message to ${ans}`
     },
     {
-      intent: 'remind',
-      missing: a => !(a && a.text),
+      intent: 'reminder_add',
+      missing: a => !(a && (a.text || a.task || (a.reminder && (a.reminder.text || a.reminder.task)))),
       slot: 'text',
       question: () => 'Kis baare me remind karoon?',
       merge: (orig, ans) => orig.replace(/\bremind me\b/i, 'remind me about ' + ans)
     },
     {
-      intent: 'alarm_set',
-      missing: a => !(a && a.time),
+      intent: 'alarm_add',
+      missing: a => !(a && (a.time || a.alarm)),
       slot: 'time',
       question: () => 'Kitne baje ka alarm lagaaun?',
       merge: (orig, ans) => orig + ' at ' + ans
     },
     {
       intent: 'open_app',
-      missing: a => !(a && a.name),
+      missing: a => !(a && (a.app || a.name)),
       slot: 'name',
       question: () => 'Kaunsa app kholun?',
       merge: (_orig, ans) => `open ${ans}`
@@ -189,7 +196,27 @@ export function suggestFor(text, k = 3) {
   return scored.slice(0, k);
 }
 
-/** Merge a short follow-up answer into the pending original command. */
+/* ---------- v10.2.1: is the new text an ANSWER, or a FRESH command? ----------
+   Screenshot bug: parked "Kaunsa app kholun?" + user type kiya "explain about
+   nda" → wo answer GULP kar liya gaya → "open explain about nda" ban gaya.
+   Ab pehle yahi check hota hai: chhota naam-jaisa jawaab HI absorb hoga. */
+export function absorbable(text, pending) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  /* translate slot: user ko bola tha "agli line bol do" — poori line hi
+     text hai, yahan filter nahi lagega. */
+  if (pending && pending.intent === 'translate' && pending.slot === 'text') return true;
+  /* greetings/acks kabhi slot-answer nahi hote */
+  if (/^(hi+|hello|hey|yo|namaste|ok+|okay|hmm+|thanks|thank you|shukriya|dha?nyava?d|theek hai|acha)\b/i.test(t)) return false;
+  /* question/command words = fresh command, answer nahi */
+  if (/\b(what|why|when|who|how|explain|tell|show|list|search|open|play|call|message|text|remind|alarm|translate|weather|news|kya|kyun|kyu|kaise|kab|kaun|kahan|batao|samjhao|samjha|dikhao|dikha|chalao|chala|sunao|suna|bolo|karo|kar|kholo|khol|lagao|laga|banao|bana)\b/i.test(t)) return false;
+  /* slot answers chhote hote hain (naam/app/gaana/time) — lambi line = naya command */
+  if (t.length > 60 || t.split(/\s+/).length > 8) return false;
+  return true;
+}
+
+/** Merge a short follow-up answer into the pending original command.
+    NOTE: caller should gate with absorbable() first (v10.2.1). */
 export function absorb(pending, answer) {
   if (!pending || !answer) return '';
   const a = String(answer).trim();
