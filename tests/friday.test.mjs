@@ -1234,3 +1234,259 @@ test('autox: disabled rules never fire + priority sort stable', () => {
   assert.equal(sorted[0].priority, 10);
   assert.equal(sorted[0].created, 1);
 });
+
+/* ================= v12.0 PHASE 8: PLANX (AI Planner) ================= */
+const PLANX = await import('../www/js/planx.js');
+
+test('planx: planner claims multi-step goals only', () => {
+  assert.ok(PLANX.shouldPlan('help me prepare for tomorrow\'s physics exam'));
+  assert.ok(PLANX.shouldPlan('plan my day'));
+  assert.ok(PLANX.shouldPlan('make a study plan for next week'));
+  assert.ok(PLANX.shouldPlan('help me get ready for the interview'));
+  assert.equal(PLANX.shouldPlan('what time is it'), false);
+  assert.equal(PLANX.shouldPlan('set an alarm for 5 pm'), false);
+  assert.equal(PLANX.shouldPlan('tell me a joke'), false);
+  assert.equal(PLANX.shouldPlan(''), false);
+});
+
+test('planx: goal analyzer extracts kind and topic', () => {
+  const a = PLANX.analyzeGoal('help me prepare for tomorrow\'s physics exam');
+  assert.equal(a.kind, 'exam');
+  assert.ok(/physics/.test(a.topic));
+  const t = PLANX.analyzeGoal('plan a trip to goa');
+  assert.equal(t.kind, 'trip');
+});
+
+test('planx: daysUntil parses tomorrow / day-after / weekday', () => {
+  assert.equal(PLANX.daysUntil('tomorrow'), 1);
+  assert.equal(PLANX.daysUntil('day after tomorrow'), 2);
+  assert.equal(PLANX.daysUntil('next week'), 7);
+  const now = new Date();
+  assert.ok(PLANX.daysUntil('this friday') >= 0 && PLANX.daysUntil('this friday') <= 7);
+});
+
+test('planx: exam goal decomposes into the 7-step pipeline', () => {
+  const steps = PLANX.decompose({ kind: 'exam', topic: 'physics', goal: 'prepare for physics exam' });
+  assert.equal(steps.length, 7);
+  assert.deepEqual(steps.map(s => s.tool),
+    ['schedule', 'notes', 'summarize', 'plan', 'reminder', 'save', 'notify']);
+  assert.ok(steps[1].parallel, 'notes search runs parallel to schedule check');
+});
+
+test('planx: dependency resolver keeps order and validates ids', () => {
+  const steps = PLANX.decompose({ kind: 'exam', topic: 'maths', goal: 'x' });
+  const plan = PLANX.resolveDeps(steps);
+  const idx = Object.fromEntries(plan.map((s, i) => [s.id, i]));
+  assert.ok(idx.p1 < idx.p3 && idx.p2 < idx.p3, 'summarize runs after notes');
+  assert.ok(idx.p3 < idx.p4, 'plan after summarize');
+});
+
+test('planx: safety validator flags destructive / command steps', () => {
+  const dangerous = [{ id: 'x1', text: 'delete all old notes', tool: 'save' },
+                     { id: 'x2', text: 'pay the electricity bill', tool: 'command' }];
+  const { plan, risky } = PLANX.validatePlan(dangerous);
+  assert.ok(risky.includes('x1'));
+  assert.ok(plan.find(s => s.id === 'x2').confirm === true);
+  const safe = PLANX.validatePlan([{ id: 's1', text: 'check weather', tool: 'weather' }]);
+  assert.equal(safe.risky.length, 0);
+});
+
+test('planx: revisionPlan spreads days and ends with a mock test', () => {
+  const rows = PLANX.revisionPlan('physics', 3, 2);
+  assert.equal(rows.length, 3);
+  assert.ok(/Mock test/.test(rows[2].focus));
+  assert.equal(rows[0].hours, 2);
+});
+
+test('planx: runPlan executes steps in order with a fake executor', async () => {
+  const plan = PLANX.buildPlan('help me prepare for tomorrow\'s physics exam');
+  assert.equal(plan.steps.length, 7);
+  const ran = [];
+  const r = await PLANX.runPlan(plan, {
+    execStep: async (step) => { ran.push(step.id); return { ok: true, result: step.id }; },
+    ask: null, retries: 1
+  });
+  assert.ok(r.ok);
+  assert.equal(ran.length, 7);
+  assert.ok(ran.indexOf('p1') < ran.indexOf('p3'));
+});
+
+test('planx: runPlan retries a failing step then recovers', async () => {
+  const plan = PLANX.buildPlan('make a study plan for next week');
+  let tries = 0;
+  const r = await PLANX.runPlan(plan, {
+    execStep: async (step) => {
+      if (step.tool === 'notes' && tries++ === 0) return { ok: false, reason: 'boom' };
+      return { ok: true, result: 'ok' };
+    },
+    retries: 2, backoffMs: 1
+  });
+  assert.ok(r.ok);
+  assert.equal(tries, 2, 'one retry happened');
+});
+
+test('planx: confirm-gated step asks before executing', async () => {
+  const steps = [{ id: 'c1', text: 'delete old backups', tool: 'command', confirm: true }];
+  const plan = { id: 'plan-test', goal: 'cleanup', kind: 'generic', steps, status: 'ready' };
+  let asked = 0;
+  const r = await PLANX.runPlan(plan, {
+    execStep: async () => { throw new Error('should not run'); },
+    ask: async (q) => { asked++; return 'skip'; },
+    retries: 0
+  });
+  assert.equal(asked, 1, 'confirm question asked');
+  assert.equal(plan.steps[0].status, 'skip', 'declined step is skipped, nothing executed');
+});
+
+test('planx: planLog + planStats record the audit trail', async () => {
+  const before = PLANX.planStats().total;
+  const plan = PLANX.buildPlan('plan my day');
+  await PLANX.runPlan(plan, { execStep: async () => ({ ok: true, result: 'ok' }), retries: 0 });
+  assert.equal(PLANX.planStats().total, before + 1);
+  const log = PLANX.planLog();
+  assert.equal(log[0].goal, 'plan my day');
+  assert.ok(typeof log[0].ms === 'number');
+});
+
+/* ================= v12.1 PHASE 9: INTELX (Intelligence & Context) ================= */
+const INTELX = await import('../www/js/intelx.js');
+
+test('intelx: routine learning derives values from data only', () => {
+  const obs = [
+    { kind: 'first_use', at: new Date(2026, 0, 1, 6, 30).getTime() },
+    { kind: 'first_use', at: new Date(2026, 0, 2, 6, 45).getTime() },
+    { kind: 'study_session', at: new Date(2026, 0, 1, 19, 0).getTime() },
+    { kind: 'charge_level', at: 0, level: 20, charging: true },
+    { kind: 'app_open', at: 0, app: 'whatsapp' },
+    { kind: 'app_open', at: 0, app: 'whatsapp' },
+    { kind: 'app_open', at: 0, app: 'youtube' }
+  ];
+  const r = INTELX.learnRoutines(obs);
+  assert.equal(r.wakeHour, 6);
+  assert.equal(r.studyWindows, 19);
+  assert.equal(r.chargingLevel, 20);
+  assert.deepEqual(r.frequentApps.slice(0, 1), ['whatsapp']);
+  assert.equal(r.samples, obs.length);
+});
+
+test('intelx: prediction engine ranks by confidence', () => {
+  const routines = { wakeHour: 7, studyWindows: 19, frequentCommands: ['weather'], samples: 20 };
+  const preds = INTELX.predictNext(routines, { hour: 7, battery: 90, charging: false });
+  assert.ok(preds.length >= 1);
+  assert.equal(preds[0].kind, 'morning_routine');
+  const sorted = [...preds].sort((a, b) => b.confidence - a.confidence);
+  assert.deepEqual(preds, sorted);
+});
+
+test('intelx: recommendations respect dismissals, cooldown and confidence', () => {
+  const now = Date.now();
+  const routines = { studyWindows: 19, samples: 10 };
+  // high-confidence battery suggestion should appear
+  const one = INTELX.recommend(routines, { battery: 20, charging: false, hour: 19, memSize: 5 }, [], [], now);
+  assert.ok(one.some(s => s.id === 'bat_low'));
+  // dismissed → gone
+  const two = INTELX.recommend(routines, { battery: 20, charging: false, hour: 19, memSize: 5 }, ['bat_low'], [], now);
+  assert.ok(!two.some(s => s.id === 'bat_low'));
+  // cooldown → gone
+  const three = INTELX.recommend(routines, { battery: 20, charging: false, hour: 19, memSize: 5 }, [], [{ id: 'bat_low', at: now }], now);
+  assert.ok(!three.some(s => s.id === 'bat_low'));
+  // low-confidence → filtered by the decision gate
+  const four = INTELX.recommend(routines, { battery: 90, charging: true, hour: 12, memSize: 0 }, [], [], now);
+  assert.ok(four.length === 0);
+});
+
+test('intelx: notification intelligence prioritizes messages over noise', () => {
+  const wa = INTELX.notifPriority({ pkg: 'com.whatsapp', title: 'Ramesh', text: 'kal milte hain', when: Date.now() });
+  assert.equal(wa.tier, 'urgent');
+  const ig = INTELX.notifPriority({ pkg: 'com.instagram.android', title: 'x', text: '', when: Date.now() - 3600e3 });
+  assert.equal(ig.tier, 'low');
+  const digest = INTELX.notifDigest([{ pkg: 'com.instagram.android', title: 'story' }]);
+  assert.ok(/instagram/.test(digest));
+});
+
+test('intelx: decision engine gates proactive actions', () => {
+  assert.equal(INTELX.decide({ confidence: 0.9 }, {}).act, true);
+  assert.equal(INTELX.decide({ confidence: 0.4 }, {}).act, false);
+  assert.equal(INTELX.decide({ confidence: 0.9 }, { safety: false }).act, false);
+  assert.equal(INTELX.decide({ confidence: 0.9 }, { batteryImpact: 'high' }).act, false);
+  assert.equal(INTELX.decide({ confidence: 0.9 }, { context: false, history: false }).act, false);
+});
+
+test('intelx: study stats compute today, week average and streak', () => {
+  const today = Date.now();
+  const sessions = [
+    { min: 25, at: today },
+    { min: 30, at: today - 86400e3 },
+    { min: 40, at: today - 2 * 86400e3 }
+  ];
+  const s = INTELX.studyStats(sessions);
+  assert.equal(s.todayMin, 25);
+  assert.equal(s.streak, 3);
+  assert.ok(s.weekAvg > 0);
+});
+
+/* ================= v12.2 PHASE 10: DEVX (Device Engine) ================= */
+const DEVX = await import('../www/js/devx.js');
+
+test('devx: battery status tiers and alerts', () => {
+  assert.equal(DEVX.batteryStatus({ level: 80, charging: true }).tier, 'good');
+  assert.equal(DEVX.batteryStatus({ level: 25, charging: false }).tier, 'low');
+  assert.equal(DEVX.batteryStatus({ level: 10, charging: false }).alert, 'battery_critical');
+  assert.equal(DEVX.batteryStatus({ level: 99, charging: true }).alert, 'battery_full');
+  assert.equal(DEVX.batteryStatus({}).pct, null);
+});
+
+test('devx: storage status warns when space runs out', () => {
+  const ok = DEVX.storageStatus({ totalGB: 128, usedGB: 60 });
+  assert.equal(ok.tier, 'good');
+  const low = DEVX.storageStatus({ totalGB: 64, usedGB: 60 });
+  assert.equal(low.tier, 'warn');
+  assert.equal(low.alert, 'storage_low');
+  const crit = DEVX.storageStatus({ totalGB: 16, usedGB: 15.2 });
+  assert.equal(crit.alert, 'storage_critical');
+});
+
+test('devx: thermal status flags overheating', () => {
+  assert.equal(DEVX.thermalStatus({ celsius: 35 }).tier, 'cool');
+  assert.equal(DEVX.thermalStatus({ celsius: 40 }).tier, 'warm');
+  assert.equal(DEVX.thermalStatus({ celsius: 52 }).alert, 'thermal_hot');
+  assert.equal(DEVX.thermalStatus({}).tier, 'unknown');
+});
+
+test('devx: ram pressure levels', () => {
+  assert.equal(DEVX.ramStatus({ totalMB: 8000, usedMB: 4000 }).pressure, 'ok');
+  assert.equal(DEVX.ramStatus({ totalMB: 8000, usedMB: 6000 }).pressure, 'moderate');
+  assert.equal(DEVX.ramStatus({ totalMB: 8000, usedMB: 7500 }).pressure, 'high');
+});
+
+test('devx: network status online/wifi/cellular', () => {
+  const w = DEVX.netStatus({ online: true, wifi: true });
+  assert.ok(w.online && w.wifi && w.signal === 'strong');
+  const off = DEVX.netStatus({ online: false, wifi: false });
+  assert.equal(off.online, false);
+});
+
+test('devx: alert manager is informative and sorted by severity', () => {
+  const alerts = DEVX.alertLevel({
+    battery: { level: 10, charging: false },
+    storage: { totalGB: 16, usedGB: 15.2 },
+    thermal: { celsius: 52 },
+    network: { online: true, wifi: false }
+  });
+  const crit = alerts.filter(a => a.sev === 'crit');
+  assert.ok(crit.length >= 3);
+  assert.ok(alerts.some(a => a.id === 'battery_critical'));
+  assert.ok(alerts.some(a => a.id === 'thermal_hot'));
+  assert.ok(alerts.some(a => a.id === 'storage_critical'));
+});
+
+test('devx: diagnostics dashboard rows cover services + metrics', () => {
+  const rows = DEVX.dashRows({
+    services: { voice: { ok: true }, devx: { ok: true } },
+    metrics: { battery: { level: 50, charging: true }, storage: { totalGB: 64, usedGB: 30 }, thermal: { celsius: 36 } },
+    extras: { automations: '3 rules', planner: '5 plans', aiLatencyMs: 300, uptimeSec: 600 }
+  });
+  assert.ok(rows.some(r => /Running services/.test(r.k) && r.v === '2/2'));
+  assert.ok(rows.some(r => /Battery/.test(r.k)));
+  assert.ok(rows.some(r => /AI latency/.test(r.k) && r.v === '300 ms'));
+});
