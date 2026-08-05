@@ -61,6 +61,8 @@ export const DEFAULTS = {
   serverToken: '',
   serverMode: true,
   serverMemSyncedAt: 0,
+  // v10.2 JARVIS zero-setup: suit keeps its own systems updated (WiFi, silent)
+  autoSetup: true,
   // telephony
   waCountryCode: '91'
 };
