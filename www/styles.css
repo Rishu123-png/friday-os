@@ -1104,3 +1104,11 @@ html.rm .core-visual, html.rm .radar-sweep, html.rm .scanlines { animation: none
 
 /* --- no-fx master switch --- */
 html.no-fx .radar-sweep, html.no-fx .scanlines, html.no-fx .core-visual { animation: none !important; }
+
+/* v14.1: systems-line severity states (aggregated health) */
+.systems-line.crit{color:#ff4d6d;text-shadow:0 0 12px rgba(255,77,109,.45);animation:critBlink 1.6s ease-in-out infinite}
+@keyframes critBlink{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* v14.1: photo action chips under a shared image */
+.img-actions{margin:4px 0 10px 44px}
+.img-actions .clarify-chip{font-size:.72rem;padding:6px 10px}
