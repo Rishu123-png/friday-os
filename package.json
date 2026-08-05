@@ -1,6 +1,6 @@
 {
   "name": "friday-os",
-  "version": "12.0.0",
+  "version": "14.0.0",
   "description": "FRIDAY OS \u2014 personal AI assistant. Offline-first, optional Groq key, offline LLM via llama.cpp.",
   "private": true,
   "scripts": {
