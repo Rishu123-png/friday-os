@@ -26,6 +26,9 @@ class Settings:
     # Default LLM model served at /v1/chat
     GROQ_MODEL: str = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    # Vision (multimodal) model used by /v1/vision for image descriptions
+    GROQ_VISION_MODEL: str = _env("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+
     # CORS: in production set this to your app's origin, or "*" for the APK
     # (Capacitor WebView has no Origin header, so "*" is the practical choice).
     CORS_ORIGINS: str = _env("CORS_ORIGINS", "*")
