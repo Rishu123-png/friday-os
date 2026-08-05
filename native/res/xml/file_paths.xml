@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FRIDAY OS — FileProvider paths (v14.1): lets us share photos we wrote to
+     the cache dir as content:// URIs (ACTION_SEND to WhatsApp / gallery). -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="share" path="share/"/>
+</paths>
