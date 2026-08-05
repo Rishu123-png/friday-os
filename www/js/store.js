@@ -56,6 +56,11 @@ export const DEFAULTS = {
   announceNotifications: true,
   announceApps: null,
   bubbleEnabled: false,
+  // v10.1 FRIDAY Cloud (backend server mode — no model downloads)
+  serverUrl: '',
+  serverToken: '',
+  serverMode: true,
+  serverMemSyncedAt: 0,
   // telephony
   waCountryCode: '91'
 };
