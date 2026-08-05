@@ -663,12 +663,12 @@ test('v10 C1: answering "youtube" merges, learns, and never asks again', () => {
   assert.ok(!CL.needsMusicSource('play arijit singh'));   // learned -> no more questions
 });
 test('v10 C1: slot rules + merge for reminder topic', () => {
-  const hit = { intent: 'remind', action: { type: 'remind' } };
+  const hit = { intent: 'reminder_add', action: { type: 'reminder_add' } };   // v10.2.1: real brain names
   const q = CL.checkSlots(hit, 'remind me');
   assert.ok(q && q.slot === 'text');
   const merged = CL.absorb(q.pending, 'paani peena');
   assert.ok(/paani peena/.test(merged));
-  assert.equal(CL.checkSlots({ intent: 'remind', action: { type: 'remind', text: 'x' } }, 'remind me about x'), null);
+  assert.equal(CL.checkSlots({ intent: 'reminder_add', action: { type: 'reminder_add', text: 'x' } }, 'remind me about x'), null);
 });
 test('v10 C1: no-match suggestions are close and useful', () => {
   const s = CL.suggestFor('moring brief');
@@ -755,4 +755,56 @@ test('suit: suitLine shows progress string', () => {
   assert.equal(SUIT.suitLine(2, 4, 'Neural voice', 40), 'Suit systems 2/4: Neural voice… 40%');
   assert.equal(SUIT.suitLine(1, 1, 'Memory brain'), 'Suit systems 1/1: Memory brain…');
   assert.ok(SUIT.suitDoneLine().includes('up-to-date'));
+});
+
+/* ---------------- v10.2.1 HOTFIX: "Kaunsa app kholun?" infinite loop ----------------
+   Screenshot bug (2026-08-05): "open whatsapp" pe clarify poocha, phir HAR
+   message ("Hi" bhi) ko answer samajh ke loop. Do root causes:
+   (1) rule galat field check karta tha: action ka field 'app' hai, 'name' nahi
+   (2) dead intent names (contact_call/remind/alarm_set) — ab real names. */
+test('hotfix: open_app with app name does NOT ask (field is app, not name)', () => {
+  const r = CL.checkSlots({ intent: 'open_app', action: { type: 'open_app', app: 'whatsapp' } }, 'open whatsapp');
+  assert.equal(r, null);
+});
+
+test('hotfix: real "open whatsapp" through the brain passes slots cleanly', () => {
+  const hit = resolve('open whatsapp');
+  assert.ok(hit && hit.action);
+  const q = CL.checkSlots(hit, 'open whatsapp');
+  assert.equal(q, null);   // whatsapp IS the name — koi sawaal nahi
+});
+
+test('hotfix: bare "open" DOES ask once, answer merges to a full command', () => {
+  const hit = resolve('open');
+  if (hit && hit.action) {
+    const q = CL.checkSlots(hit, 'open');
+    if (q) {
+      assert.equal(q.slot, 'name');
+      const merged = CL.absorb(q.pending, 'whatsapp');
+      assert.equal(merged, 'open whatsapp');
+    }
+  }
+});
+
+test('hotfix: reminder/alarm/call/message rules use REAL brain intent names', () => {
+  const hint = resolve('translate good morning to es');
+  (hint && hint.action) && assert.equal(CL.checkSlots(hint, 'translate good morning to es'), null);
+  // call intent ke paas name ho to koi sawaal nahi:
+  const chit = resolve('call mom');
+  if (chit && chit.action) assert.equal(CL.checkSlots(chit, 'call mom'), null);
+});
+
+test('hotfix: absorbable separates answers from fresh commands (screenshot cases)', () => {
+  const parkedApp = { intent: 'open_app', slot: 'name', origText: 'open' };
+  assert.ok(!CL.absorbable('explain about nda', parkedApp));   // THE screenshot bug
+  assert.ok(!CL.absorbable('Hi', parkedApp));                  // greeting != answer
+  assert.ok(!CL.absorbable('what is the weather today', parkedApp));
+  assert.ok(!CL.absorbable('open chrome bhai', parkedApp));    // fresh full command
+  assert.ok(CL.absorbable('whatsapp', parkedApp));             // real answer
+  assert.ok(CL.absorbable('gaana app', parkedApp));
+  const parkedTr = { intent: 'translate', slot: 'text', origText: 'translate' };
+  assert.ok(CL.absorbable('good morning sab kaisa chal raha hai aaj to din mast hai', parkedTr));  // long translate line OK
+  const parkedMusic = { slot: 'music_source', origText: 'play kesariya' };
+  assert.ok(CL.absorbable('youtube', parkedMusic));
+  assert.ok(!CL.absorbable('play kesariya on youtube', parkedMusic));  // full command -> fresh (runs itself)
 });
