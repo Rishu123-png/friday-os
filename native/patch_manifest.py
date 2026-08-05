@@ -43,6 +43,7 @@ PERMS = [
     "android.permission.QUERY_ALL_PACKAGES",
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
     "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.WRITE_EXTERNAL_STORAGE",   # legacy save-to-gallery (< API 29)
 ]
 
 QUERIES = """    <queries>
@@ -170,6 +171,23 @@ def main():
     if 'FridayService' not in s:
         i = s.rindex('</application>')
         s = s[:i] + SERVICES + '\n    ' + s[i:]
+
+    # v14.1: FileProvider for sharing images (ACTION_SEND with content:// URIs)
+    if '.fileprovider' not in s:
+        i = s.rindex('</application>')
+        provider = (
+            '\n        <provider\n'
+            '            android:name="androidx.core.content.FileProvider"\n'
+            '            android:authorities="com.rishu.fridayos.fileprovider"\n'
+            '            android:exported="false"\n'
+            '            android:grantUriPermissions="true">\n'
+            '            <meta-data\n'
+            '                android:name="android.support.FILE_PROVIDER_PATHS"\n'
+            '                android:resource="@xml/file_paths"/>\n'
+            '        </provider>\n'
+        )
+        s = s[:i] + provider + '    ' + s[i:]
+        print('FileProvider added to manifest')
 
     # v9.0 APEX (A2): turn MainActivity into a share target - any app can
     # share text or images straight to FRIDAY ("Summarize this" flow).
