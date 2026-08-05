@@ -1,10 +1,9 @@
-
 /* FRIDAY OS — Service Worker v7.1
    Resilient precache: one missing file never kills the whole cache.
    CDN libraries (vision OCR/objects, future transformers.js) are cached
    so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v101';
+const CACHE = 'friday-os-v102';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
@@ -16,7 +15,7 @@ const ASSETS = [
      with no network fails to boot (app.js imports all of them) */
   './js/ambient.js', './js/clarify.js', './js/embeddings.js', './js/hacker.js',
   './js/health.js', './js/i18n.js', './js/localbrain.js', './js/semantic.js',
-  './js/vault.js', './js/server.js',
+  './js/vault.js', './js/server.js', './js/suit.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
