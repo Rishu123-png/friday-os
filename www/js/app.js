@@ -26,6 +26,7 @@ import * as AMB from './ambient.js';
 import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
 import * as SUIT from './suit.js';
+import * as HERALD from './herald.js';
 import * as SERVER from './server.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
@@ -75,6 +76,7 @@ async function init() {
 
   await V.initSynthesis();
   setTimeout(() => { V.armSherpaVoice(); V.armSherpaEars(); }, 3000);   // v10.0: pick up downloaded packs at boot
+  setTimeout(syncCallGuardNative, 4000);   // v10.3: keep call-guard prefs alive (receiver reads even when app closed)
   setTimeout(autoSetupSuit, 9000);   // v10.2: suit systems update THEMSELVES (WiFi, silent)
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); $('#micContainer')?.classList.add('listening'); $('#inputWave')?.classList.add('on'); D.tap(); },
@@ -751,6 +753,67 @@ async function runAction(a, hit) {
       return true;
     }
     case 'camera': U.openPanel('camera'); openCamera(a.mode); return true;
+
+    /* ================= v10.3 HERALD: INBOX + CALL GUARD ================= */
+    case 'inbox_check': {      /* "whatsapp pe kya aaya?" */
+      const log = await NAT.getNotifLog(a.app || 'whatsapp', 40);
+      const items = HERALD.pickLatestInbox((log && log.items) || [], a.app || 'whatsapp');
+      if (!items.length) {
+        reply(NAT.isNative() ? `Abhi koi naya ${a.app || 'whatsapp'} message nahi dikha, Boss. (Notification access ON hai na?)`
+                             : 'Inbox sirf installed app me kaam karta hai.');
+        return true;
+      }
+      reply(HERALD.inboxSummary(items) + ' — "uska jawab do" bolo to draft bana doon.');
+      return true;
+    }
+    case 'inbox_reply': {      /* "uska jawab do" — draft + approve chips */
+      const log = await NAT.getNotifLog(a.app || 'whatsapp', 40);
+      const items = HERALD.pickLatestInbox((log && log.items) || [], a.app || 'whatsapp');
+      if (!items.length) { reply('Koi recent message nahi mila jiska jawab doon, Boss.'); return true; }
+      const target = items[0];
+      const p = HERALD.draftPromptFor(target.who, target.text, MEM.buildContext ? MEM.buildContext() : '');
+      let draft = '';
+      /* server first, then Groq — callGroq handles both (v10.1 wiring) */
+      if (SERVER.isConfigured() || AI.hasGroq()) {
+        try { draft = await AI.callGroq([{ role: 'system', content: p.sys }, { role: 'user', content: p.usr }], { maxTokens: 120 }); } catch (_) {}
+      }
+      if (!draft || !String(draft).trim()) draft = `Haan ${target.who}, Boss abhi busy hain — thodi der me reply karte hain. 👍`;
+      state.pendingInboxSend = { app: a.app || 'whatsapp', text: draft.trim() };
+      reply(`Draft ready — ${target.who} ko: "${state.pendingInboxSend.text}"\n"Bhejo" bolo to chala jayega.`);
+      addClarifyChips([
+        { label: '✅ Bhejo', say: 'bhejo' },
+        { label: '✏️ Naya draft', say: 'naya draft' },
+        { label: '❌ Chhodo', say: 'chhodo' }
+      ]);
+      return true;
+    }
+    case 'inbox_send': {       /* chip "bhejo" */
+      const pending = state.pendingInboxSend;
+      state.pendingInboxSend = null;
+      if (!pending) { reply('Koi draft pending nahi hai, Boss.'); return true; }
+      const r = await NAT.replyNotification(pending.app, pending.text);
+      if (r && r.ok) reply(`Bhej diya ✅ — ${pending.app} pe.`);
+      else if (r && r.reason === 'no_listener') reply('Notification access OFF hai — Settings > notifications se ON karke phir bolo.');
+      else if (r && r.reason === 'not_found') reply('Wo notification ab nahi hai (sender ne hata diya?). Draft mehra copy kar sakte ho: "' + pending.text + '"');
+      else reply('Reply nahi ja paya (' + ((r && r.reason) || 'unknown') + ') — WhatsApp khud kholke bhej do.');
+      return true;
+    }
+    case 'inbox_reshoot': {    /* chip "naya draft" */
+      if (!state.pendingInboxSend) { reply('Koi draft pending nahi hai — "uska jawab do" bolo pehle.'); return true; }
+      const kept = state.pendingInboxSend;
+      state.pendingInboxSend = null;
+      return handleInput(`uska jawab do`, { noChain: true });
+    }
+    case 'call_guard': {       /* "call guard on karo" */
+      S.setSetting('callGuard', !!a.on);
+      const chk = $('#callGuard'); if (chk) chk.checked = !!a.on;
+      await syncCallGuardNative();
+      reply(a.on
+        ? 'Call Guard ON 🦾 — ab call aane pe "FRIDAY sambhale" card aayega. Phone/calls/overlay permissions maange to allow karna.'
+        : 'Call Guard band. Calls ab poori tarah tumhare haath me.');
+      return true;
+    }
+
     case 'torch': {
       if (NAT.isNative()) {
         const r = await NAT.setTorch(a.on);
@@ -4084,6 +4147,25 @@ function bindEvents() {
   const asRun = $('#autoSetupNow');
   if (asRun) asRun.addEventListener('click', () => { U.toast('Suit systems check…', '🦾'); autoSetupSuit(); });
 
+  /* v10.3 HERALD: call guard + inbox */
+  bind('#callGuardTemplate', 'callGuardTemplate', 'input');
+  bind('#callGuardMode', 'callGuardMode', 'change');
+  $('#callGuard')?.addEventListener('change', async e => {
+    S.setSetting('callGuard', e.target.checked);
+    await syncCallGuardNative();
+    U.toast(e.target.checked ? 'Call Guard ON — "FRIDAY sambhale" card active (permissions allow karna)' : 'Call Guard off', '📞');
+  });
+  $('#inboxTestBtn')?.addEventListener('click', () => { U.showView('chat'); handleInput('uska jawab do', { fromVoice: false }); });
+  /* FRIDAY handled a call while app was open -> announce */
+  if (NAT.onCallHandled) NAT.onCallHandled(ev => {
+    const num = (ev && ev.number) || 'caller';
+    const act = (ev && ev.action) || '';
+    reply(act === 'sms_sent' ? `📞 ${num} ko maine sambhaal liya, Boss — polite decline + tumhara SMS bhej diya.`
+        : act === 'whatsapp_draft' ? `📞 ${num} ko decline kiya — WhatsApp draft khul gaya hai, tap to send.`
+        : act === 'sms_failed' ? `📞 ${num} decline hua, par SMS nahi gaya (SIM/SMS permission check karo).`
+        : `📞 ${num} ke liye guard hua (${act}).`);
+  });
+
   $('#systemsLine')?.addEventListener('click', () => {
     const rows = state.systemsRows || [];
     if (!rows.length) { computeSystemsLine(); return; }
@@ -4296,6 +4378,16 @@ function netFacts() {
   return { online: navigator.onLine !== false, saveData: !!c.saveData, type: c.type || c.effectiveType || '' };
 }
 
+/* v10.3: mirror the call-guard settings into the native receiver prefs. */
+async function syncCallGuardNative() {
+  if (!NAT.isNative() || !NAT.setCallGuard) return;
+  await NAT.setCallGuard({
+    enabled: !!S.getSetting('callGuard'),
+    template: S.getSetting('callGuardTemplate') || '',
+    mode: S.getSetting('callGuardMode') || 'sms'
+  });
+}
+
 async function autoSetupSuit() {
   if (!NAT.isNative()) return;
   if (S.getSetting('autoSetup') === false) return;              // user opted out in Settings
@@ -4369,12 +4461,17 @@ async function refreshSherpaChips() {
     return;
   }
   const st = await NAT.sherpaStatus();
+  /* v10.2.2: honest broken reason from the last arm attempt (kabhi fake OK nahi) */
+  let brk = null;
+  try { brk = JSON.parse(S.getSetting('sherpaBroken') || 'null'); } catch (_) {}
+  const brkVoice = brk && brk.what === 'voice' ? ' (' + brk.reason + ')' : '';
+  const brkEars = brk && brk.what === 'ears' ? ' (' + brk.reason + ')' : '';
   if (vc) vc.textContent = V.isSherpaVoiceArmed()
     ? `Neural voice: ● LIVE${st && st.ttsLabel ? ' — ' + st.ttsLabel.split(':').pop() : ''}`
-    : ((S.getSetting('neuralVoiceCfg') || '') ? 'Neural voice: ○ pack ready — toggle on.' : 'Neural voice: using Android TTS (robotic).');
+    : ((S.getSetting('neuralVoiceCfg') || '') ? 'Neural voice: ○ pack ready — toggle on.' + brkVoice : 'Neural voice: using Android TTS (robotic).');
   if (sc) sc.textContent = V.isSherpaSttArmed()
     ? 'Offline ears: ● LIVE — moonshine tiny'
-    : ((S.getSetting('sherpaSttDir') || '') ? 'Offline ears: ○ pack ready — toggle on.' : 'Offline ears: using Google STT (needs internet).');
+    : ((S.getSetting('sherpaSttDir') || '') ? 'Offline ears: ○ pack ready — toggle on.' + brkEars : 'Offline ears: using Google STT (needs internet).');
 }
 
 async function refreshEmbedChip() {
@@ -4506,6 +4603,9 @@ function syncSettingsUI() {
   set('#serverToken', S.getSetting('serverToken') || '');
   set('#serverMode', S.getSetting('serverMode') !== false, 'checked');
   set('#autoSetup', S.getSetting('autoSetup') !== false, 'checked');
+  set('#callGuard', !!S.getSetting('callGuard'), 'checked');
+  set('#callGuardTemplate', S.getSetting('callGuardTemplate') || '');
+  set('#callGuardMode', S.getSetting('callGuardMode') || 'sms');
   refreshSherpaChips();
   refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';

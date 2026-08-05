@@ -492,6 +492,41 @@ I('reply_notif', t => /\b(reply|respond)\b/.test(t) && !/^(reply to me|reply to 
 I('setup', t => /\b(setup|set up|permissions|grant access|enable everything|configure)\b/.test(t) ? 1 : 0,
   () => ({ say: null, action: { type: 'setup' } }), 5);
 
+/* ---------- v10.3 HERALD: INBOX (WhatsApp quick-reply brain) + CALL GUARD ---------- */
+/* "whatsapp pe kya aaya hai" / "inbox check karo" — read recent messages */
+I('inbox_check', t => {
+  if (/\binbox\b/.test(t)) return 1;
+  /* "padho"=read_notifications, "schedule"=whatsapp_schedule, send/likho=message
+     — in sab pehle se the, unhe hijack nahi karna. */
+  if (/\bwhatsapp\b/.test(t) && /(kya aaya|kya hai|aaya hai|check|batao kya|dikhao)\b/.test(t)
+      && !/\b(send|bhejo|likh|type|bhej|schedule|padh|padho)\b/.test(t)) return 1;
+  return 0;
+}, t => {
+  const m = t.match(/\b(whatsapp|telegram|messages?|sms)\b/);
+  const app = m ? (m[1].startsWith('messag') || m[1] === 'sms' ? 'messages' : m[1]) : 'whatsapp';
+  return { say: null, action: { type: 'inbox_check', app } };
+}, 9);
+
+/* "uska jawab do" / "whatsapp ka jawab likho" — FRIDAY drafts, you approve.
+   ('jawab' is Hinglish so it can't collide with the English reply_notif.) */
+I('inbox_reply', t => /\bjawab\b/.test(t) || /\bwhatsapp (ka|ke) reply\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'inbox_reply', app: /\btelegram\b/.test(t) ? 'telegram' : 'whatsapp' } }), 9);
+
+/* chips flow: "bhejo" sends the draft FRIDAY just read aloud */
+I('inbox_send', t => /^(haan )?(bhejo|bhej do|send it|send)( na)?$/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'inbox_send' } }), 10);
+I('inbox_reshoot', t => /^(naya draft|dubara likho|phir se likho|badlo)$/.test(t) ? 1 : 0,
+  () => ({ say: null, action: { type: 'inbox_reshoot' } }), 10);
+
+/* "call guard on karo" — incoming-call popup: FRIDAY politely declines and
+   explains via SMS/WhatsApp (Android can't let apps TALK into calls). */
+I('call_guard', t => /\bcall guard\b|\bcalls? sambhal\w*\b|\bincoming call sambhal\w*\b/.test(t) ? 1 : 0,
+  t => {
+    const off = /\b(off|band|stop|disable)\b/.test(t);
+    return { say: null, action: { type: 'call_guard', on: !off } };
+  }, 9);
+
+
 /* ---------- PHASE C: system toggles end ---------- */
 
 /* ---------- Memory ---------- */

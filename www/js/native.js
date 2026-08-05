@@ -340,6 +340,17 @@ export async function replyNotification(app, text) {
   return call('replyNotification', { app: app || '', text });
 }
 
+/* ---------- v10.3 HERALD: call guard ---------- */
+export async function setCallGuard(cfg) { return call('setCallGuard', cfg); }
+export async function getCallGuard() { return call('getCallGuard', {}); }
+export async function getCallGuardLog() { return call('getCallGuardLog', {}); }
+export function onCallHandled(cb) {
+  const p = plugin();
+  if (!p || !p.addListener) return () => {};
+  const sub = p.addListener('callHandled', ev => cb(ev));
+  return () => { try { sub.remove && sub.remove(); } catch (_) {} };
+}
+
 /* ================= ACCESSIBILITY v2 ================= */
 export async function tapText(text) { return call('tapText', { text }); }
 export async function scrollScreen(dir = 'down') { return call('scrollScreen', { dir }); }
