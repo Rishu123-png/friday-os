@@ -37,7 +37,7 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v10.2</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v10.3</span></div>
       <div id="suitChip" class="suit-chip" hidden>Suit:</div>
       <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
     </div>
@@ -324,6 +324,33 @@
           </div>
         </div>
         <div class="settings-group">
+          <h3>📞 Call Guard (v10.3 — "FRIDAY sambhale")</h3>
+          <p class="hint">Call aaye aur tum baat nahi karna chahte → chhota card aayega <b>"🦾 FRIDAY sambhale"</b> — tap karte hi call politely decline + caller ko tumhara message chala jaata hai. <i>Honest note: Android kisi bhi app ko call me bolne nahi deta (Google Call Screen special hai) — isliye decline+explain jaisa system. Ek caller se 10 min me sirf ek message — spam never.</i></p>
+          <div class="setting-item">
+            <label>Call Guard</label>
+            <div class="toggle-switch"><input type="checkbox" id="callGuard"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Explainer message ({name}/{number} auto-fill)</label>
+            <input type="text" id="callGuardTemplate" autocomplete="off">
+          </div>
+          <div class="setting-item">
+            <label>Kaise bheje</label>
+            <select id="callGuardMode">
+              <option value="sms">SMS (fully automatic)</option>
+              <option value="whatsapp">WhatsApp (draft open hota hai, tum send dabate ho)</option>
+            </select>
+          </div>
+          <p class="hint">Permissions puchhega: Phone + Calls (decline ke liye) + Overlay + SMS/WhatsApp.</p>
+        </div>
+        <div class="settings-group">
+          <h3>📬 FRIDAY Inbox (v10.3 — WhatsApp ka jawab)</h3>
+          <p class="hint">Bolo: <b>"whatsapp pe kya aaya?"</b> ya <b>"uska jawab do"</b> — FRIDAY message padhega, tumhari memory se jawab <b>draft</b> karega, aur <b>sirf tumhare "bhejo" bolne pe</b> quick-reply se bhejega. Tum bolo tabhi, warna kuch nahi bhejta. Notification access ON hona chahiye.</p>
+          <div class="setting-item">
+            <button type="button" class="btn-secondary" id="inboxTestBtn">Try: draft a reply to latest WhatsApp</button>
+          </div>
+        </div>
+        <div class="settings-group">
           <h3>🧠 AI Core (On-Device Brain)</h3>
           <div class="setting-item">
             <label>On-device brain (offline AI)</label>
@@ -527,8 +554,8 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">10.2.1</span></div>
-          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V10-2-1-HOTFIX</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">10.3.0</span></div>
+          <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V10-3-HERALD</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
       </div>
@@ -752,5 +779,5 @@
   </script>
   <script type="module" src="js/app.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a263889a6a86470a',t:'MTc4NTkwOTEyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a263fff23d2affc8',t:'MTc4NTkxNDAxMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
