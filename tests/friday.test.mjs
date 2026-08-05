@@ -1082,3 +1082,155 @@ test('vox: orb + label + mic indicator map every state', () => {
   assert.ok(VOX.micVisible('READY', true));        // wake-word ears = mic open
   assert.ok(!VOX.micVisible('READY', false));      // nothing listening, dot off
 });
+
+/* ================= v11.3 PHASE 5: MEMEX Cognitive Memory ================= */
+const MEMEX = await import('../www/js/memex.js');
+
+test('memex: importance ranks pinned > preference > episode', () => {
+  assert.equal(MEMEX.importance({ category: 'pinned' }), 100);
+  assert.ok(MEMEX.importance({ category: 'preference' }) > MEMEX.importance({ category: 'episode' }));
+  assert.ok(MEMEX.importance({ category: 'fact', freq: 10 }) > MEMEX.importance({ category: 'fact', freq: 0 }));
+  assert.ok(MEMEX.importance({ category: 'fact' }) <= 100 && MEMEX.importance({ category: 'temp' }) >= 0);
+});
+
+test('memex: expiry protects important, kills stale temp', () => {
+  const now = Date.now();
+  assert.equal(MEMEX.shouldExpire({ category: 'pinned', ts: now - 999 * 864e5 }, now), false);
+  assert.equal(MEMEX.shouldExpire({ category: 'temp', ts: now - 5 * 864e5 }, now), true);        // 5-day temp dead
+  assert.equal(MEMEX.shouldExpire({ category: 'fact', ts: now - 5 * 864e5 }, now), false);       // fact fresh enough
+  assert.equal(MEMEX.shouldExpire({ category: 'fact', ts: now - 200 * 864e5 }, now), false);     // fact importance ≥70 → immortal
+});
+
+test('memex: categorize sorts facts/preferences/tasks/knowledge', () => {
+  assert.equal(MEMEX.categorize('my bike number is DL 1234'), 'fact');
+  assert.equal(MEMEX.categorize('i really like lofi music'), 'preference');
+  assert.equal(MEMEX.categorize('every morning I go for a walk'), 'routine');
+  assert.equal(MEMEX.categorize('remind me to call mom'), 'task');
+  assert.equal(MEMEX.categorize('what is the capital of Japan'), 'knowledge');
+});
+
+test('memex: dedupe key kills fluff duplicates', () => {
+  assert.equal(MEMEX.dedupeKey('hey friday please open whatsapp na'), MEMEX.dedupeKey('ok friday open whatsapp'));
+  assert.ok(MEMEX.dedupeKey('battery kitni hai').length > 0);
+});
+
+test('memex: summarizer builds honest digests from real logs', () => {
+  const msgs = [
+    { role: 'user', text: 'remind me to pay electricity bill', intent: 'reminder_add' },
+    { role: 'user', text: 'what is the weather today?', intent: 'weather' },
+    { role: 'assistant', text: 'Done.' },
+    { role: 'user', text: 'open whatsapp', intent: 'open_app' },
+    { role: 'user', text: 'open camera', intent: 'camera' }
+  ];
+  const s = MEMEX.summarize(msgs, { dateLabel: 'kal' });
+  assert.ok(s.summary.includes('4 interactions'));
+  assert.equal(s.tasks.length, 1);
+  assert.ok(s.tasks[0].includes('electricity'));
+  assert.ok(s.followups.length >= 1);
+});
+
+test('memex: topicsOf skips stopwords, ranks frequency', () => {
+  const t = MEMEX.topicsOf(['physics physics physics chemistry math math', 'i am the boss of the exam physics'], 2);
+  assert.equal(t[0], 'physics');
+  assert.ok(t.length <= 2);
+});
+
+test('memex: relevance scores keyword overlap', () => {
+  assert.ok(MEMEX.relevance('battery status', 'battery is 81 percent') > 0);
+  assert.equal(MEMEX.relevance('zebra giraffe', 'battery is 81'), 0);
+});
+
+test('memex: dashboards report storage + retrieval speed', () => {
+  const d = MEMEX.dashboard();
+  assert.ok(typeof d.storageBytes === 'number' && d.storageBytes >= 0);
+  assert.ok(d.retrievalMs >= 0);
+  assert.ok(typeof d.facts === 'number');
+});
+
+/* ================= v11.3 PHASE 6: VISIONX ================= */
+const VISIONX = await import('../www/js/visionx.js');
+
+test('visionx: cleanOcr strips junk but keeps meaning', () => {
+  const cleaned = VISIONX.cleanOcr('H 3 l l 0\n\n\n\n| am a te|xt  `~^\nTotal: ₹250');
+  assert.ok(cleaned.includes('Total: ₹250'));
+  assert.ok(!/\|/.test(cleaned));
+});
+
+test('visionx: classifyDoc reads receipts, IDs, math, exams', () => {
+  assert.equal(VISIONX.classifyDoc('TAX INVOICE bill no 42 GST total amount ₹500 amount due ₹300'), 'receipt');
+  assert.equal(VISIONX.classifyDoc('AADHAAR card no 1234 5678 9012 date of birth'), 'id');
+  assert.equal(VISIONX.classifyDoc('solve the equation x^2 + 5x + 6 = 0 find the value of x'), 'math');
+  assert.equal(VISIONX.classifyDoc('QUESTION PAPER marks: 100 time: 3 hours answer all questions'), 'exam');
+  assert.equal(VISIONX.classifyDoc('dear diary today was nice'), 'note');
+});
+
+test('visionx: mathLines finds equations, not prose', () => {
+  const eqs = VISIONX.mathLines('The answer is near\n2x + 5 = 15\nx = 5\nand then he left the room quietly');
+  assert.ok(eqs.length >= 2);
+  assert.ok(eqs.some(e => e.includes('=')));
+});
+
+test('visionx: homework prompt adapts by doc type', () => {
+  const mp = VISIONX.homeworkPrompt('solve x^2 + 5x + 6 = 0');
+  assert.ok(mp.includes('Step-by-step'));
+  const ep = VISIONX.homeworkPrompt('QUESTION PAPER marks: 100');
+  assert.ok(ep.includes('marking') || ep.includes('model answer'));
+});
+
+test('visionx: qrType reads every common payload', () => {
+  assert.equal(VISIONX.qrType('https://example.com'), 'link');
+  assert.equal(VISIONX.qrType('WIFI:T:WPA;S:Home;P:pass;;'), 'wifi');
+  assert.equal(VISIONX.qrType('upi://pay?pa=test@upi'), 'upi');
+  assert.equal(VISIONX.qrType('tel:+919999999999'), 'phone');
+  assert.equal(VISIONX.qrType('geo:28.6,77.2'), 'location');
+  assert.equal(VISIONX.qrType('kuch bhi text'), 'text');
+});
+
+test('visionx: buildPdf writes a valid PDF skeleton', () => {
+  const data = new Uint8Array([72, 101, 108, 108, 111]);
+  const pdf = VISIONX.buildPdf({ data, width: 2, height: 2 }, 'test');
+  const head = String.fromCharCode(...pdf.slice(0, 8));
+  assert.ok(head.startsWith('%PDF-'));
+  assert.ok(pdf.length > 200);
+  const tail = String.fromCharCode(...pdf.slice(-6));
+  assert.ok(tail.includes('%%EOF'));
+});
+
+test('visionx: normalizeGray stretches contrast honestly', () => {
+  const gray = new Uint8Array(1000).fill(100);
+  for (let i = 0; i < 50; i++) gray[i] = 20;
+  for (let i = 50; i < 100; i++) gray[i] = 200;
+  const out = VISIONX.normalizeGray(gray);
+  assert.ok(Math.max(...out) === 255, 'whites go to 255');
+  assert.ok(Math.min(...out) <= 20, 'dark stays dark');
+});
+
+/* ================= v11.3 PHASE 7: AUTOX ================= */
+const AUTOX = await import('../www/js/autox.js');
+
+test('autox: safety validator blocks risky unconfirmed rules', () => {
+  assert.equal(AUTOX.validateRule({ when: 'battery_low', then: 'suggest saver' }).ok, true);
+  assert.equal(AUTOX.validateRule({ when: 'battery_low', then: 'delete all reminders' }).ok, false);   // VOX danger
+  assert.equal(AUTOX.validateRule({ when: 'offline', then: 'call +911122334455' }).ok, false);        // risky without confirm
+  assert.equal(AUTOX.validateRule({ when: 'offline', then: 'call mom', confirm: false }).ok, false);
+  assert.equal(AUTOX.validateRule({ when: 'wifi_on', then: 'open whatsapp' }).ok, true);
+  assert.equal(AUTOX.validateRule({ when: 'not_a_trigger', then: 'x' }).ok, false);
+});
+
+test('autox: rule matches trigger semantics', () => {
+  assert.ok(AUTOX.ruleMatches({ when: 'battery_low', level: 20, enabled: true }, 'battery_low', { level: 15, charging: false }));
+  assert.ok(!AUTOX.ruleMatches({ when: 'battery_low', level: 20, enabled: true }, 'battery_low', { level: 60 }));
+  assert.ok(!AUTOX.ruleMatches({ when: 'battery_low', level: 20, enabled: true }, 'battery_low', { level: 15, charging: true }));  // charging → no suggest
+  assert.ok(AUTOX.ruleMatches({ when: 'time', at: '07:00', enabled: true }, 'time', { hhmm: '07:00' }));
+  assert.ok(!AUTOX.ruleMatches({ when: 'time', at: '07:00', enabled: true }, 'time', { hhmm: '07:01' }));
+  assert.ok(AUTOX.ruleMatches({ when: 'command', match: 'good morning', enabled: true }, 'command', { text: 'hey good morning boss' }));
+});
+
+test('autox: disabled rules never fire + priority sort stable', () => {
+  assert.equal(AUTOX.ruleMatches({ when: 'online', enabled: false }, 'online', {}), false);
+  const sorted = [
+    { priority: 50, created: 2 }, { priority: 10, created: 5 }, { priority: 10, created: 1 }
+  ].sort(AUTOX.byPriority);
+  assert.equal(sorted[0].priority, 10);
+  assert.equal(sorted[0].created, 1);
+});
