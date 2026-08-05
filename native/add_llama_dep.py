@@ -42,6 +42,10 @@ PORCUPINE_VERSION = '4.0.2'
 VOSK_ENABLED = True           # v9.1 WAKE FREE: keyless wake word (FridayVosk.java, reflection-based)
 VOSK_VERSION = '0.3.47'
 
+TRANSLATE_ENABLED = True      # v10.0 JARVIS: offline 50+ language translator (FridayTranslate.java, reflection-based)
+TRANSLATE_VERSION = '17.0.9'
+LANGUAGE_ID_VERSION = '17.0.6'
+
 DEPS = [
     ('de.kherud:llama',
      'implementation "de.kherud:llama:%s"' % LLAMA_VERSION),
@@ -56,6 +60,12 @@ if PORCUPINE_ENABLED:
 if VOSK_ENABLED:
     DEPS.append(('com.alphacephei:vosk-android',
                  'implementation "com.alphacephei:vosk-android:%s"' % VOSK_VERSION))
+
+if TRANSLATE_ENABLED:
+    DEPS.append(('com.google.mlkit:translate',
+                 'implementation "com.google.mlkit:translate:%s"' % TRANSLATE_VERSION))
+    DEPS.append(('com.google.mlkit:language-id',
+                 'implementation "com.google.mlkit:language-id:%s"' % LANGUAGE_ID_VERSION))
 
 DEPS.append(('androidx.health.connect:connect-client',
              'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
