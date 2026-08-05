@@ -67,6 +67,16 @@ export const DEFAULTS = {
   callGuard: false,
   callGuardTemplate: 'Boss is busy right now — bataiye kya kaam hai, main unhe bata dunga. — FRIDAY',
   callGuardMode: 'sms',
+  // v11.1 IGNITION: cinematic boot + HUD
+  bootSeen: false,
+  bootMode: 'auto',        // auto | full | short | off
+  bootSound: false,
+  // v11.2 VOX: Voice Engine 2.0
+  wakeWords: 'hey friday, hello friday, friday, computer',
+  wakeSensitivity: 60,     // 0-100 → barge-in RMS gate
+  dangerConfirm: true,     // destructive commands ask "pakka?" first
+  duckAudio: true,         // duck music while FRIDAY speaks (audio focus)
+  voxFeedback: true,       // orb + feed + status line follow the formal voice states
   // telephony
   waCountryCode: '91'
 };
