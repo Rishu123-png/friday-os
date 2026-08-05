@@ -295,6 +295,23 @@
           <p class="hint"><b>No key? No problem.</b> Tap "Get wake brain" once — FRIDAY then wakes on YOUR word ("jarvis", "friday", anything), 100% offline, no account, no email. The Porcupine key (if you have one) uses even less battery and wins when both are set.</p>
         </div>
         <div class="settings-group">
+          <h3>☁️ FRIDAY Cloud (backend — recommended)</h3>
+          <p class="hint"><b>One URL and everything works — no model downloads, no API key in the app.</b> The server does conversation, speech, memory &amp; code. Host it yourself (see FRIDAY-BACKEND.md) or use a free host like Railway.</p>
+          <div class="setting-item">
+            <label>Server URL</label>
+            <input type="url" id="serverUrl" placeholder="https://your-server.com" autocomplete="off">
+          </div>
+          <div class="setting-item">
+            <label>Server token (optional, if you set one)</label>
+            <input type="password" id="serverToken" placeholder="Bearer token from server .env" autocomplete="off">
+          </div>
+          <div class="setting-item">
+            <label>Use server mode</label>
+            <div class="toggle-switch"><input type="checkbox" id="serverMode" checked><span class="toggle-slider"></span></div>
+          </div>
+          <p class="hint" id="serverStatusChip">FRIDAY Cloud: check your URL…</p>
+        </div>
+        <div class="settings-group">
           <h3>🧠 AI Core (On-Device Brain)</h3>
           <div class="setting-item">
             <label>On-device brain (offline AI)</label>
