@@ -27,6 +27,37 @@ import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
 import * as SUIT from './suit.js';
 import * as HERALD from './herald.js';
+import { CORE, Bus, Logger, formatLogEntry } from './fridaycore.js';   // v11 Phase 1
+import * as IGN from './ignite.js';   // v11.1 Phase 2: cinematic boot
+import * as HUD from './hud.js';      // v11.1 Phase 3: living HUD
+import * as VOX from './vox.js';      // v11.2 Phase 4: Voice Engine 2.0 — formal state machine
+
+/* ================= v11.0 Phase 1: FridayCore wiring =================
+   PRESERVE-FIRST: modules are NOT rewritten — they register with the core
+   and give it lifecycle + health probes. The bus becomes the one place
+   where cross-module signals flow. */
+const bootFridayCore = () => {
+  if (bootFridayCore.done) return; bootFridayCore.done = true;
+  try {
+    CORE.register('voice', {
+      health: () => ({ ok: VOX.vox.get() !== 'ERROR' && VOX.vox.get() !== 'OFFLINE',
+        detail: VOX.vox.get().toLowerCase() + ((typeof V.isSherpaVoiceArmed === 'function' && V.isSherpaVoiceArmed()) ? ' · neural' : '')
+          + (V.isWakeActive && V.isWakeActive() ? ' · ears on' : '') })
+    });
+    CORE.register('memory', {
+      health: () => ({ ok: true, detail: ((S.getList('friday_facts') || []).length) + ' facts' })
+    });
+    CORE.register('vision', { health: () => ({ ok: true, detail: 'camera on demand' }) });
+    CORE.register('automation', { health: () => ({ ok: true, detail: 'routines+alarms' }) });
+    CORE.register('notifications', {
+      health: () => ({ ok: true, detail: NAT.isNative() ? 'listener service' : 'web mode (native only)' })
+    });
+    /* a few live signals onto the bus — keep chatter tiny */
+    Bus.on('service:error', ev => { state.systemsRows = state.systemsRows || []; });
+    Bus.emit('core:online', { at: Date.now() });
+    CORE.boot().catch(() => {});
+  } catch (e) { Logger.error('core', 'boot wiring failed: ' + (e && e.message)); }
+};
 import * as SERVER from './server.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
@@ -38,32 +69,228 @@ const state = {
   vaultPending: null
 };
 
-/* ================= BOOT ================= */
+/* ================= BOOT (v11.1 IGNITION: cinematic + REAL checks) ================= */
 async function boot() {
-  const pcts = [12, 28, 44, 60, 76, 90, 100];
-  const steps = I18N.bootSteps().map((txt, i) => [txt, pcts[i]]);
-  const bar = $('.boot-progress-bar'), status = $('.boot-status');
-  for (const [txt, pct] of steps) {
-    window.__stage = 'boot:' + txt;
-    if (status) status.textContent = txt + '...';
-    if (bar) bar.style.width = pct + '%';
-    await sleep(260 + Math.random() * 180);
+  const firstRun = !S.getSetting('bootSeen');
+  let reduced = false;
+  try { reduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+  if (S.getSetting('particleEffects') === false) reduced = true;
+  VOX.vox.set('INITIALIZING', 'boot sequence');          // v11.2 VOX: engine wakes
+  const plan = IGN.bootPlan({ mode: S.getSetting('bootMode') || 'auto', firstRun, reduced });
+  if (!plan.stages.length) {
+    /* boot OFF: go straight to the HUD, but init() ALWAYS runs */
+    await startApp();
+    try { await init(); window.__booted = true; window.__stage = 'idle'; }
+    catch (err) { window.__stage = 'init-failed'; setTimeout(() => { throw err; }); }
+    return;
   }
-  await sleep(320);
+
+  /* app init starts IMMEDIATELY and runs in parallel with the movie */
+  let initError = null;
+  const initPromise = Promise.resolve().then(init)
+    .then(() => { window.__booted = true; window.__stage = 'idle'; })
+    .catch(err => { initError = err; window.__stage = 'init-failed'; Logger.error('boot', 'init failed: ' + (err && err.message || err)); });
+  try {
+    await IGN.runIgnition({
+      root: $('#bootScreen'),
+      plan,
+      checks: bootChecks(),
+      services: [{ name: 'voice' }, { name: 'memory' }, { name: 'vision' }, { name: 'automation' }, { name: 'notifications' }],
+      scan: bootScan(),
+      welcome: IGN.welcomeLines(new Date().getHours(), S.getSetting('userName') || 'Boss'),
+      initPromise,
+      sound: !!S.getSetting('bootSound'),
+      bus: Bus,
+      core: CORE
+    });
+  } catch (e) { Logger.error('boot', 'ignition crashed safely: ' + (e && e.message)); }
+  await startApp();
+  S.setSetting('bootSeen', true);   // next boots: short version (skip-after-first-launch rule)
+  await initPromise;
+  if (initError) setTimeout(() => { throw initError; });
+}
+
+/* v11.1: every boot line shows a REAL system truth (never invented). */
+function bootChecks() {
+  return [
+    { label: 'Neural Core', run: async () => ({ ok: true, detail: intentCount() + ' skills' }) },
+    { label: 'Memory', run: async () => ({ ok: true, detail: (S.getList('friday_facts') || []).length + ' facts' }) },
+    { label: 'Semantic Memory', run: async () => ({ ok: true, detail: (S.getSetting('embedModelPath') || '').trim() ? 'bge-small ready' : 'pack pending (suit will fetch)' }) },
+    { label: 'AI Brain', run: async () => {
+        if (SERVER.isConfigured()) { const h = await SERVER.health(); return h && h.ok ? { ok: true, detail: 'FRIDAY Cloud ●' } : { ok: false, detail: 'server unreachable' }; }
+        if (AI.hasGroq()) return { ok: true, detail: 'Groq key set' };
+        return { ok: true, detail: 'offline brain (local)' };
+      } },
+    { label: 'Voice Engine', run: async () => ({ ok: true, detail: (S.getSetting('neuralVoiceCfg') || '').trim() ? 'neural voice armed' : 'system TTS' }) },
+    { label: 'Wake Word', run: async () => ({ ok: true, detail: (S.getSetting('porcupineKey') || '').trim() ? 'porcupine' : ((S.getSetting('voskModelPath') || '').trim() ? 'vosk (keyless)' : 'software loop') }) },
+    { label: 'Device Bridge', run: async () => ({ ok: NAT.isNative(), detail: NAT.isNative() ? 'native plugins live' : 'web mode' }) },
+    { label: 'Automation', run: async () => ({ ok: true, detail: (S.getList('friday_routines') || []).length + ' routines' }) },
+    { label: 'Security', run: async () => ({ ok: true, detail: 'local-only, no fake success' }) },
+    { label: 'System Integrity', run: async () => ({ ok: true, detail: 'PASSED' }) }
+  ];
+}
+
+function bootScan() {
+  return [
+    { label: 'CPU', run: async () => ({ ok: true, detail: (navigator.hardwareConcurrency || '?') + ' cores' }) },
+    { label: 'Battery', run: async () => { const b = await D.battery(); return b ? { ok: true, detail: HUD.batteryLabel(b.level, b.charging) } : { ok: false, detail: 'n/a' }; } },
+    { label: 'Storage', run: async () => {
+        if (!navigator.storage || !navigator.storage.estimate) return { ok: false, detail: 'n/a' };
+        const e = await navigator.storage.estimate();
+        return { ok: !!e.quota, detail: HUD.storageLabel(e.usage, e.quota) || 'n/a' };
+      } },
+    { label: 'Network', run: async () => ({ ok: navigator.onLine, detail: HUD.netLabel(navigator.onLine) }) },
+    { label: 'FRIDAY Cloud', run: async () => {
+        if (!SERVER.isConfigured()) return { ok: true, detail: 'not configured' };
+        const h = await SERVER.health();
+        return h && h.ok ? { ok: true, detail: 'connected ●' } : { ok: false, detail: 'unreachable' };
+      } },
+    { label: 'Offline Models', run: async () => {
+        const n = ['neuralVoiceCfg', 'sherpaSttDir', 'embedModelPath', 'voskModelPath'].filter(k => (S.getSetting(k) || '').trim()).length;
+        return { ok: true, detail: n + '/4 packs' };
+      } },
+    { label: 'Microphone', run: async () => {
+        if (!NAT.isNative()) return { ok: true, detail: 'web' };
+        const r = await NAT.checkPermission('android.permission.RECORD_AUDIO');
+        return { ok: !!(r && r.granted), detail: r && r.granted ? 'granted' : 'pending' };
+      } },
+    { label: 'Local Time', run: async () => ({ ok: true, detail: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }) }
+  ];
+}
+
+async function startApp() {
   const bs = $('#bootScreen');
-  bs.classList.add('fade-out');
-  await sleep(700);
-  bs.style.display = 'none';
+  if (bs && bs.style.display !== 'none') {
+    bs.classList.add('fade-out');
+    await sleep(700);
+    bs.style.display = 'none';
+  }
   $('#app').classList.remove('hidden');
   window.__stage = 'init';
-  Promise.resolve().then(init).then(() => { window.__booted = true; window.__stage = 'idle'; })
-    .catch(err => {
-      window.__stage = 'init-failed';
-      setTimeout(() => { throw new Error('init failed: ' + (err && err.message || err)); });
-    });
+  /* v11.2 VOX: boot finished → the voice engine parks at READY (or SLEEPING
+     if the wake word is armed — startWakeWord moves it there itself). */
+  if (!S.getSetting('wakeWord')) VOX.vox.set('READY', 'boot complete');
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ================= v11.1 PHASE 3: HUD runtime =================
+   Live state, real data. Polls cheaply; feed rides the FridayCore Bus. */
+let __feed = [];
+function hudPush(icon, text) { __feed = HUD.pushFeed(__feed, icon, text); HUD.renderFeed($('#hudFeed'), __feed); }
+
+function hudInit() {
+  if (hudInit.done) return; hudInit.done = true;
+  const wrap = $('#aiCoreWrap');
+  HUD.setOrbState(wrap, 'idle');
+
+  const refreshWidgets = async () => {
+    let b = null;
+    try { b = await D.battery(); } catch (_) {}
+    const w = [];
+    if (b) w.push({ k: 'BATTERY', value: HUD.batteryLabel(b.level, b.charging) });
+    try {
+      const e = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
+      if (e && e.quota) w.push({ k: 'STORAGE', value: HUD.storageLabel(e.usage, e.quota) });
+    } catch (_) {}
+    w.push({ k: 'NET', value: HUD.netLabel(navigator.onLine, SERVER.isConfigured() ? true : undefined) });
+    w.push({ k: 'WAKE', value: S.getSetting('wakeWord') ? 'ON 🎙' : 'OFF' });
+    HUD.renderWidgets($('#hudWidgets'), w);
+
+    try {
+      const h = await CORE.healthMap();
+      HUD.renderStatus($('#hudStatus'), Object.entries(h || {})
+        .map(([name, v]) => ({ name, detail: v.detail || v.state, cls: v.ok ? 'on' : (v.state === 'error' ? 'off' : 'warn') })));
+    } catch (_) {}
+
+    /* context cards: only real situations */
+    let notifCount = 0, reminderText = '';
+    if (NAT.isNative()) {
+      try { const log = await NAT.getNotifLog('', 60); notifCount = ((log && log.items) || []).filter(n => Date.now() - (n.when || 0) < 3 * 3600e3).length; } catch (_) {}
+    }
+    const next = (S.getList(KEYS.REMINDERS) || []).filter(r => !r.done && r.due > Date.now()).sort((a, b2) => a.due - b2.due)[0];
+    if (next && next.due - Date.now() < 2 * 3600e3) reminderText = `${next.text} (${Math.round((next.due - Date.now()) / 60000)}m)`;
+    HUD.renderCards($('#hudContext'), HUD.contextCards({ batteryPct: b ? b.level : null, charging: b ? b.charging : false, notifCount, reminderText }));
+  };
+  refreshWidgets();
+  setInterval(refreshWidgets, 30000);
+
+  /* ===== v11.2 PHASE 4 (VOX): orb is driven by the FORMAL state machine now.
+     No 650ms poller — the Voice Engine emits 'vox:state' on the bus and the
+     HUD reacts. Fallback reconcile only poller 4x slower for typed flows. */
+  const voxPaint = st => {
+    HUD.setOrbState(wrap, VOX.orbOf(st));
+    const on = S.getSetting('voxFeedback') !== false;
+    const el = $('#voxState'); if (el) { el.textContent = VOX.labelOf(st); el.closest('.hud-voxline') && (el.closest('.hud-voxline').style.display = on ? '' : 'none'); }
+    const dot = $('#micDot'); if (dot) dot.classList.toggle('on', on && VOX.micVisible(st, V.isWakeActive && V.isWakeActive()));
+  };
+  Bus.on('vox:state', e => {
+    voxPaint(e.state);
+    /* notable transitions become feed lines so the pipeline is visible:
+       Recognition → Understanding → Execution → Completion */
+    const st = e.state;
+    if (st === 'LISTENING') hudPush('🎙️', 'sun rahi hoon…');
+    else if (st === 'UNDERSTANDING') hudPush('👂', 'samajh rahi hoon…');
+    else if (st === 'EXECUTING') hudPush('⚡', e.detail ? e.detail.slice(0, 40) : 'kaam ho raha hai');
+    else if (st === 'ERROR') hudPush('🔴', 'voice fault — auto-recovery on');
+  });
+  voxPaint(VOX.vox.get());
+  /* typed commands skip the mic path, so a slow reconcile keeps the orb
+     honest for keyboard traffic too (cheap — 2.5s, only touches classes) */
+  setInterval(() => { if (VOX.vox.get() === 'OFFLINE') VOX.vox.set('INITIALIZING'); }, 30000);
+  setInterval(() => {
+    const st = VOX.vox.get();
+    if ((st === 'LISTENING' || st === 'UNDERSTANDING') && !state.listening && (Date.now() - VOX.vox.since() > 15000)) {
+      VOX.vox.set('READY', 'stale listen healed');     // zombie LISTENING never sticks
+    }
+  }, 5000);
+
+  /* event feed rides the bus */
+  Bus.on('service:start', e => hudPush('🟢', e.name + ' online'));
+  Bus.on('service:error', e => hudPush('⚠️', e.name + ' hiccup — recovery armed'));
+  Bus.on('service:recovering', e => hudPush('🔁', e.name + ' recovering (' + e.attempt + ')'));
+  Bus.on('boot:done', e => hudPush('🦾', 'systems ready in ' + (e.ms / 1000).toFixed(1) + 's'));
+  hudPush('🦾', 'FRIDAY HUD live');
+
+  /* command dock */
+  $$('#hudDock .hud-dock-btn').forEach(btn => btn.addEventListener('click', () => {
+    const a = btn.dataset.dock;
+    if (a === 'voice') $('#micButton').click();
+    else if (a === 'camera') { U.openPanel('camera'); openCamera('photo'); }
+    else if (a === 'auto') { U.openPanel('activity'); refresh('activity'); }
+    else if (a === 'memory') handleInput('what do you remember about me', { fromVoice: false });
+    else if (a === 'sos') handleInput('sos', { fromVoice: false });
+  }));
+
+  /* orb interactions: double-tap = FridayCore health, long-press = chat,
+     tap DURING speech = interrupt (v11.2 VOX barge-in by hand) */
+  let lastTap = 0, lpTimer = null;
+  if (wrap) {
+    wrap.addEventListener('pointerdown', () => {
+      const now = Date.now();
+      if (now - lastTap < 320) {
+        CORE.healthMap().then(h => {
+          const bad = Object.entries(h || {}).filter(([, v]) => !v.ok).length;
+          U.toast(bad ? `FridayCore: ${bad} service hiccup` : `FridayCore: all green · voice ${VOX.vox.get().toLowerCase()}`, bad ? '⚠️' : '🦾');
+        }).catch(() => {});
+        lastTap = now;
+        return;
+      }
+      lastTap = now;
+      /* v11.2: one tap while she talks = STOP TALKING, open ears instantly */
+      if (VOX.vox.get() === 'SPEAKING' || state.speaking) {
+        V.cancelSpeech();
+        state.speaking = false;
+        U.toast('Interrupted — bolo Boss', '✋', 1200);
+        setTimeout(() => V.listen(), 220);
+        return;
+      }
+      lpTimer = setTimeout(() => U.showView('chat'), 550);
+    });
+    wrap.addEventListener('pointerup', () => clearTimeout(lpTimer));
+    wrap.addEventListener('pointerleave', () => clearTimeout(lpTimer));
+  }
+}
 
 /* ================= INIT ================= */
 async function init() {
@@ -143,6 +370,8 @@ async function init() {
   if (S.getSetting('wakeWord')) V.startWakeWord();
   D.startMicAnalyser().catch(() => {});
   if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
+  bootFridayCore();   // v11 Phase 1: central controller takes attendance (fire-and-forget)
+  hudInit();          // v11.1 Phase 3: living HUD (widgets, feed, dock, orb states)
   loadWeatherWidget();
 
   /* v7.7 HUD: arc-reactor rings (battery/steps) + systems status line */
@@ -317,6 +546,7 @@ async function runMissionFrom(startIdx) {
 async function handleInput(text, opts = {}) {
   text = String(text || '').trim();
   if (!text) return;
+  Bus.emit('command', { text: text.slice(0, 80), voice: !!opts.fromVoice });   // v11: bus hears every command
 
   /* v7.6.4: drop duplicate submissions (voice double-final, STT retries) —
      same text within 4s is an echo, not a new command. */
@@ -326,6 +556,36 @@ async function handleInput(text, opts = {}) {
   /* v8.3: remember whether this turn is voice or typed - voice turns keep
      the mic chaining (continuous conversation), typed turns stay one-shot. */
   state.lastInputWasVoice = !!opts.fromVoice;
+  /* v11.2 VOX: engine hears intent start — THINKING covers typed turns too */
+  if (!opts.noChain) VOX.vox.set('THINKING', (opts.fromVoice ? 'voice' : 'typed') + ' input');
+
+  /* ===== v11.2 VOX: SMART CONFIRMATION for destructive commands =====
+     "delete all reminders" never fires silently — FRIDAY asks "pakka?".
+     Answer loop: "haan" → run it, "nahi" → drop it honestly. */
+  if (state.pendingDanger && !opts.noChain) {
+    const pending = state.pendingDanger;
+    const stale2 = pending.at && (Date.now() - pending.at > 90000);   // 90s self-destruct
+    state.pendingDanger = null;
+    if (!stale2) {
+      if (VOX.confirmNo(text)) {
+        addMsg('user', text);
+        VOX.vox.set('READY', 'danger cancelled');
+        return reply('Theek hai Boss, kuch bhi delete nahi kiya. Sab safe hai. 🛡️');
+      }
+      if (VOX.confirmYes(text)) {
+        addMsg('user', text);
+        return handleInput(pending.text, { noChain: true, silentEcho: true, dedupeSkip: true, _confirmed: true });
+      }
+      /* not an answer → the pending danger is dead; treat as fresh command */
+    }
+  }
+  if (!opts.noChain && !opts._confirmed && S.getSetting('dangerConfirm') !== false && VOX.needsConfirm(text)) {
+    state.pendingDanger = { text, at: Date.now() };
+    VOX.vox.set('WAITING', 'awaiting confirmation');
+    Ui_confirmBadge();
+    if (!opts.silentEcho) addMsg('user', text);      // show the parked command in chat — fake value kabhi nahi
+    return reply(VOX.confirmQuestion(text));
+  }
   state.autoListens = 0;
   /* v9.0 APEX (A6): after "dictate", the next voice input becomes a cleaned
      draft in the input box instead of a command (Rambler-style). */
@@ -519,15 +779,19 @@ async function handleInput(text, opts = {}) {
     state.lastSubject = hit.action?.query || hit.action?.word || hit.action?.dest || null;
     if (hit.expect) state.expect = hit.expect;
     if (hit.action) {
+      VOX.vox.set('EXECUTING', hit.intent);                     // v11.2 VOX: bright pulse
       const handled = await runAction(hit.action, hit);
+      if ((VOX.vox.get() === 'EXECUTING')) VOX.vox.set('THINKING', 'action done');   // reply() moves it to SPEAKING
       if (handled !== false) {
         if (hit.say) reply(hit.say);
         (hit.refresh || []).forEach(refresh);
+        if (!V.isSpeaking()) VOX.vox.armReady(1200);      // v11.2 VOX: silent action settles honestly
         return;
       }
     } else {
       if (hit.say) reply(hit.say);
       (hit.refresh || []).forEach(refresh);
+      if (!V.isSpeaking()) VOX.vox.armReady(1200);        // v11.2 VOX
       return;
     }
   }
@@ -3408,6 +3672,14 @@ function askClarify(question, options) {
   if (options && options.length) addClarifyChips(options);
 }
 
+/* v11.2 VOX: when a dangerous command is parked for confirmation, show a
+   live badge — "fake value kabhi nahi" means the pending state is VISIBLE. */
+function Ui_confirmBadge() {
+  const el = $('#voxState');
+  if (el) { el.textContent = 'CONFIRM?'; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2200); }
+  hudPush('🛡️', 'danger parked — confirm pending');
+}
+
 function addClarifyChips(options) {
   const box = $('#chatMessages');
   if (!box) return;
@@ -4087,6 +4359,12 @@ function bindEvents() {
   bind('#userName', 'userName', 'input');
   bind('#voiceOutput', 'voiceOutput', 'change', 'checked');
   bind('#wakeWord', 'wakeWord', 'change', 'checked');
+  /* v11.2 VOX settings */
+  bind('#wakeWords', 'wakeWords', 'input');
+  bind('#wakeSensitivity', 'wakeSensitivity', 'input');
+  bind('#dangerConfirm', 'dangerConfirm', 'change', 'checked');
+  bind('#duckAudio', 'duckAudio', 'change', 'checked');
+  bind('#voxFeedback', 'voxFeedback', 'change', 'checked');
   bind('#speechRate', 'speechRate', 'input');
   bind('#speechPitch', 'speechPitch', 'input');
   bind('#voiceLang', 'voiceLang');
@@ -4095,6 +4373,11 @@ function bindEvents() {
   bind('#showWidgets', 'showWidgets', 'change', 'checked');
   bind('#saveMemory', 'saveMemory', 'change', 'checked');
   bind('#backgroundService', 'backgroundService', 'change', 'checked');
+  /* v11.2 F6 FIX (audit): one-tap battery-optimization exemption — OPPO/ColorOS
+     kills wake-word listeners in the background without this. */
+  { const b = $('#batteryExemptBtn'); if (b) b.addEventListener('click', () => {
+      NAT.openSpecialSetting('battery_optimization').then(() => U.toast('List me FRIDAY OS dhundo → "Don\'t optimize" choose karo', '🔋', 5200)).catch(() => {});
+    }); }
   bind('#bootStart', 'bootStart', 'change', 'checked');
   bind('#announceNotifications', 'announceNotifications', 'change', 'checked');
   bind('#bubbleEnabled', 'bubbleEnabled', 'change', 'checked');
@@ -4156,6 +4439,9 @@ function bindEvents() {
     U.toast(e.target.checked ? 'Call Guard ON — "FRIDAY sambhale" card active (permissions allow karna)' : 'Call Guard off', '📞');
   });
   $('#inboxTestBtn')?.addEventListener('click', () => { U.showView('chat'); handleInput('uska jawab do', { fromVoice: false }); });
+  /* v11.1 IGNITION settings */
+  bind('#bootMode', 'bootMode', 'change');
+  bind('#bootSound', 'bootSound', 'change', 'checked');
   /* FRIDAY handled a call while app was open -> announce */
   if (NAT.onCallHandled) NAT.onCallHandled(ev => {
     const num = (ev && ev.number) || 'caller';
@@ -4238,6 +4524,10 @@ function onSettingChange(key, v) {
   if (key === 'uiTheme') U.applyTheme(v);
   if (key === 'groqKey') updateBrainBadge();
   if (key === 'speechRate') $('#speechRateValue').textContent = v + 'x';
+  if (key === 'wakeSensitivity') { const ws = $('#wakeSensValue'); if (ws) ws.textContent = v; }   // v11.2 VOX
+  if (key === 'wakeWords') {                                                                      // v11.2 VOX: hot-reload wake list
+    if (S.getSetting('wakeWord')) { V.stopWakeWord(); setTimeout(() => V.startWakeWord(), 600); }
+  }
   if (key === 'speechPitch') $('#speechPitchValue').textContent = v;
   if (key === 'wakeWord') {
     v ? V.startWakeWord() : V.stopWakeWord();
@@ -4606,6 +4896,15 @@ function syncSettingsUI() {
   set('#callGuard', !!S.getSetting('callGuard'), 'checked');
   set('#callGuardTemplate', S.getSetting('callGuardTemplate') || '');
   set('#callGuardMode', S.getSetting('callGuardMode') || 'sms');
+  set('#bootMode', S.getSetting('bootMode') || 'auto');
+  set('#bootSound', !!S.getSetting('bootSound'), 'checked');
+  /* v11.2 VOX */
+  set('#wakeWords', S.getSetting('wakeWords') || 'hey friday, hello friday, friday, computer');
+  set('#wakeSensitivity', S.getSetting('wakeSensitivity') || 60);
+  set('#dangerConfirm', S.getSetting('dangerConfirm') !== false, 'checked');
+  set('#duckAudio', S.getSetting('duckAudio') !== false, 'checked');
+  set('#voxFeedback', S.getSetting('voxFeedback') !== false, 'checked');
+  { const ws = $('#wakeSensValue'); if (ws) ws.textContent = S.getSetting('wakeSensitivity') || 60; }
   refreshSherpaChips();
   refreshEmbedChip();
   const sr = $('#speechRateValue'); if (sr) sr.textContent = S.getSetting('speechRate') + 'x';

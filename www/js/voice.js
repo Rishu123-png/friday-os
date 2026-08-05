@@ -16,6 +16,8 @@ import { checkPermission, requestAll, sherpaSpeak, sherpaStopSpeaking, sherpaTts
   sherpaStatus, sherpaAddListener, sherpaSttInit, sherpaListen } from './native.js';
 import { parseWakeKeywords } from './nlp.js';
 import * as SERVER from './server.js';
+/* v11.2 VOX: formal voice state machine + multi wake-word match + sensitivity + VAD */
+import { vox, wakeList, wakeMatch, stripWake, wakeCooldownOk, bargeRms, retryDelay, vadClass } from './vox.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
 const WP = () => {
@@ -105,18 +107,20 @@ export async function initSynthesis() {
       const r = await NP().initTTS();
       nativeReady = !!r.ok;
       // native TTS events
-      NP().addListener('ttsStart', () => { speaking = true; });
+      NP().addListener('ttsStart', () => { speaking = true; vox.set('SPEAKING', 'native tts'); });   // v11.2 VOX
       NP().addListener('ttsDone', () => {
         clearTimeout(speakWatch);               // v8.3: real done beats the watchdog
         speaking = false;
+        vox.set('WAITING', 'native tts done');  // v11.2 VOX: WAITING → chain decides
         if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
       });
       /* v10.0 sherpa mirrors the SAME contract so the pipeline never notices */
       try {
-        sherpaAddListener('ttsStart', () => { speaking = true; });
+        sherpaAddListener('ttsStart', () => { speaking = true; vox.set('SPEAKING', 'neural tts'); });
         sherpaAddListener('ttsDone', () => {
           clearTimeout(speakWatch);
           speaking = false;
+          vox.set('WAITING', 'neural tts done');
           if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
         });
         sherpaAddListener('sttEnd', () => { listening = false; });
@@ -163,11 +167,16 @@ export function initRecognition(cbs = {}) {
     }
     p.addListener('sttStart', () => {
       listening = true;
+      vox.set('LISTENING', 'native mic open');                    // v11.2 VOX
       handlers.onStart && handlers.onStart();
     });
     p.addListener('sttLevel', ev => {
-      // barge-in: strong user voice while FRIDAY speaks
-      if (bargeWatch && speaking && ev && typeof ev.rms === 'number' && ev.rms > 4.5) {
+      // barge-in: strong user voice while FRIDAY speaks.
+      // v11.2: threshold comes from the wake-sensitivity slider, not hardcode,
+      // and the VAD classifies it — fan noise/traffic hum ≠ speech.
+      const thr = bargeRms(getSetting('wakeSensitivity') || 60);
+      if (bargeWatch && speaking && ev && typeof ev.rms === 'number'
+          && vadClass(ev.rms, thr) === 'speech') {
         cancelSpeech();
       }
     });
@@ -175,7 +184,10 @@ export function initRecognition(cbs = {}) {
       if (bargeWatch && speaking && ev && ev.text && ev.text.trim().length > 1) {
         cancelSpeech();   // user is clearly talking — stop and listen
       }
-      if (ev && ev.text) handlers.onInterim && handlers.onInterim(ev.text);
+      if (ev && ev.text) {
+        vox.set('UNDERSTANDING', 'partial');                      // v11.2 VOX
+        handlers.onInterim && handlers.onInterim(ev.text);
+      }
     });
     p.addListener('sttResult', ev => {
       listening = false;
@@ -184,10 +196,12 @@ export function initRecognition(cbs = {}) {
       const txt = (ev && ev.text || '').trim();
       handlers.onEnd && handlers.onEnd();
       if (txt) {
+        vox.set('THINKING', 'final transcript');                  // v11.2 VOX
         if (wakeArmed) { handleWakePhrase(txt); }
         else handlers.onFinal && handlers.onFinal(txt);
-      } else if (!wasBarge) {
-        scheduleWakeRestart();
+      } else {
+        if (!wasBarge) vox.set('READY', 'no speech heard');       // v11.2 VOX
+        if (!wasBarge) scheduleWakeRestart();
       }
     });
     p.addListener('sttError', ev => {
@@ -197,9 +211,11 @@ export function initRecognition(cbs = {}) {
       handlers.onEnd && handlers.onEnd();
       // no-speech during wake listening is normal, just restart quietly
       if (wakeArmed && (err === 'no-speech' || err === 'busy' || err === 'client')) {
+        vox.set('READY', 'wake window clear');                    // v11.2 VOX
         scheduleWakeRestart();
         return;
       }
+      vox.set('ERROR', 'stt: ' + err);                            // v11.2 VOX: visible fault
       handlers.onError && handlers.onError(err);
       scheduleWakeRestart();
     });
@@ -215,7 +231,7 @@ export function initRecognition(cbs = {}) {
   rec.maxAlternatives = 1;
   rec.lang = getSetting('voiceLang');
 
-  rec.onstart = () => { listening = true; handlers.onStart && handlers.onStart(); };
+  rec.onstart = () => { listening = true; vox.set('LISTENING', 'web mic open'); handlers.onStart && handlers.onStart(); };   // v11.2 VOX
 
   rec.onresult = e => {
     let final = '', interim = '';
@@ -223,14 +239,15 @@ export function initRecognition(cbs = {}) {
       const txt = e.results[i][0].transcript;
       if (e.results[i].isFinal) final += txt; else interim += txt;
     }
-    if (interim) handlers.onInterim && handlers.onInterim(interim);
-    if (final.trim()) handlers.onFinal && handlers.onFinal(final.trim());
+    if (interim) { vox.set('UNDERSTANDING', 'web partial'); handlers.onInterim && handlers.onInterim(interim); }   // v11.2 VOX
+    if (final.trim()) { vox.set('THINKING', 'web final'); handlers.onFinal && handlers.onFinal(final.trim()); }     // v11.2 VOX
   };
 
-  rec.onerror = e => { listening = false; handlers.onError && handlers.onError(e.error); };
+  rec.onerror = e => { listening = false; vox.set('ERROR', 'web stt: ' + e.error); handlers.onError && handlers.onError(e.error); };  // v11.2 VOX
 
   rec.onend = () => {
     listening = false;
+    if (vox.get() === 'LISTENING' || vox.get() === 'UNDERSTANDING') vox.set('READY', 'web mic closed');   // v11.2 VOX
     handlers.onEnd && handlers.onEnd();
     if (getSetting('wakeWord') && !wakeActive) setTimeout(startWakeWord, 600);
   };
@@ -300,20 +317,31 @@ export function stopListening() {
   if (useNative()) {
     NP().stopListening().catch(() => {});
     listening = false;
+    if (vox.get() === 'LISTENING' || vox.get() === 'UNDERSTANDING') vox.set('READY', 'mic closed');   // v11.2 VOX
     return;
   }
   try { rec && rec.stop(); } catch (_) {}
   listening = false;
+  if (vox.get() === 'LISTENING' || vox.get() === 'UNDERSTANDING') vox.set('READY', 'mic closed');   // v11.2 VOX
 }
 
 /* ================= WAKE WORD ================= */
 
-const WAKE_PATTERNS = [
-  /\bhey friday\b/i, /\bhi friday\b/i, /\bok friday\b/i, /\bokay friday\b/i,
-  /\bfriday\b/i, /\bhey jarvis\b/i, /\bjarvis\b/i
-];
+/* v11.2 VOX: wake list is SETTING-DRIVEN now (Settings → Voice Engine).
+   Default covers: Hey Friday / Hello Friday / Friday / Computer. "--- Jarvis"
+   is optional and can be added in Settings (till Stark fans ask). */
+const DEFAULT_WAKE_WORDS = 'hey friday, hello friday, hi friday, ok friday, friday, computer';
+
+function activeWakeList() {
+  const raw = (getSetting('wakeWords') || '').trim() || DEFAULT_WAKE_WORDS;
+  const list = wakeList(raw);
+  return list.length ? list : wakeList(DEFAULT_WAKE_WORDS);
+}
+
+const wakeHit = txt => wakeMatch(txt, activeWakeList());
 
 let wakeArmed = false;   // native: currently listening FOR the wake phrase
+let lastWakeFireAt = 0;  // v11.2: false-trigger protection (music echo loop guard)
 
 /* Software fallback: SpeechRecognizer restart loop (no Porcupine key). */
 function startNativeWakeLoop() {
@@ -324,14 +352,17 @@ function startNativeWakeLoop() {
 }
 
 function handleWakePhrase(txt) {
-  const hit = WAKE_PATTERNS.some(p => p.test(txt));
-  if (!hit) { scheduleWakeRestart(); return; }
+  if (!wakeHit(txt)) { scheduleWakeRestart(); return; }
+  /* v11.2 false-trigger guard: the same fire within the cooldown window is
+     the TV/music echoing our wake word, not a user — restart quietly. */
+  if (!wakeCooldownOk(lastWakeFireAt)) { scheduleWakeRestart(); return; }
+  lastWakeFireAt = Date.now();
 
   wakeArmed = false;
   handlers.onWake && handlers.onWake();
 
   // if a command followed the wake word, use it directly
-  const after = txt.replace(/.*\b(hey |ok |okay |hi )?(friday|jarvis)\b[,\s]*/i, '').trim();
+  const after = stripWake(txt, activeWakeList());
   if (after.length > 2) {
     handlers.onFinal && handlers.onFinal(after);
   } else {
@@ -339,16 +370,28 @@ function handleWakePhrase(txt) {
   }
 }
 
+/* v11.2 VOX: restart counter drives an HONEST backoff — a hot loop that restarts
+   every 1.2s forever would drain the OPPO K13x battery for nothing. */
+let wakeFails = 0, lastWakeRestartAt = 0;
+export function wakeFailCount() { return wakeFails; }
 function scheduleWakeRestart() {
   if (!useNative()) return;
   if (!getSetting('wakeWord')) return;
   clearTimeout(wakeTimer);
-  wakeTimer = setTimeout(() => { if (!listening && !speaking) startWakeWord(); }, 1200);
+  /* the wake LOOP also uses this for normal no-speech cycles — only a rapid
+     succession of restarts (< 30s apart) counts as a crashy engine. */
+  if (Date.now() - lastWakeRestartAt > 30000) wakeFails = 0;
+  lastWakeRestartAt = Date.now();
+  const wait = retryDelay(wakeFails);
+  wakeFails++;
+  wakeTimer = setTimeout(() => { if (!listening && !speaking) startWakeWord(); }, wait);
 }
 
 export function startWakeWord() {
   if (!getSetting('wakeWord')) return false;
   if (listening || speaking) return false;
+  /* v11.2 VOX: wake mode = the formal SLEEPING state (ears on, brain parked) */
+  vox.set('SLEEPING', 'wake word armed');
 
   if (useNative()) {
     // dedicated always-on hotword engine (Picovoice Porcupine) when configured
@@ -357,7 +400,7 @@ export function startWakeWord() {
     if (wp && key) {
       wp.start({ accessKey: key, keyword: getSetting('wakeKeyword') || 'jarvis' })
         .then(r => {
-          if (r && r.ok) wakeActive = true;
+          if (r && r.ok) { wakeActive = true; vox.touch(); }   // v11.2 VOX: mic dot repaints once the engine really answers
           else startNativeWakeLoop();   // engine missing / bad key -> software loop
         })
         .catch(() => startNativeWakeLoop());
@@ -370,9 +413,12 @@ export function startWakeWord() {
     const voskPath = (getSetting('voskModelPath') || '').trim();
     if (vs && voskPath) {
       const kws = parseWakeKeywords(getSetting('wakeKeyword'));
-      vs.start({ modelPath: voskPath, keyword: kws.length ? kws.join(' ') : 'friday' })
+      /* v11.2 VOX: user wake list feeds the keyless engine too (single words work best) */
+      const multi = activeWakeList().filter(w => !w.includes(' '));
+      const merged = kws.length ? kws : (multi.length ? multi : ['friday']);
+      vs.start({ modelPath: voskPath, keyword: merged.join(' ') })
         .then(r => {
-          if (r && r.ok) wakeActive = true;
+          if (r && r.ok) { wakeActive = true; vox.touch(); }
           else startNativeWakeLoop();   // engine/model missing -> software loop
         })
         .catch(() => startNativeWakeLoop());
@@ -393,10 +439,12 @@ export function startWakeWord() {
     wakeRec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const txt = e.results[i][0].transcript.toLowerCase();
-        if (WAKE_PATTERNS.some(p => p.test(txt))) {
+        /* v11.2: same setting-driven list + echo cooldown as the native path */
+        if (wakeHit(txt) && wakeCooldownOk(lastWakeFireAt)) {
+          lastWakeFireAt = Date.now();
           stopWakeWord();
           handlers.onWake && handlers.onWake();
-          const after = txt.replace(/.*\b(hey |ok |okay |hi )?(friday|jarvis)\b/i, '').trim();
+          const after = stripWake(txt, activeWakeList());
           setTimeout(() => {
             if (after.length > 2 && e.results[i].isFinal) handlers.onFinal && handlers.onFinal(after);
             else listen();
@@ -432,6 +480,8 @@ export function startWakeWord() {
 export function stopWakeWord() {
   clearTimeout(wakeTimer);
   wakeArmed = false;
+  /* v11.2 VOX: wake engine off → back to READY unless we're busy */
+  if (vox.get() === 'SLEEPING') vox.set('READY', 'wake off');
   if (useNative()) {
     wakeActive = false;
     try { const wp = WP(); if (wp) wp.stop().catch(() => {}); } catch (_) {}
@@ -455,6 +505,11 @@ function releaseStuckSpeech() {
   if (!speaking) return;
   speaking = false;
   try { NP() && NP().stopSpeaking && NP().stopSpeaking().catch(() => {}); } catch (_) {}
+  /* v11.2 F3 FIX (audit): the watchdog must also kill the SHERPA neural
+     player — before this, a stuck sherpa utterance kept the MediaPlayer
+     alive and the next sentence queued into a dead engine. */
+  try { if (isSherpaVoiceArmed()) sherpaStopSpeaking().catch(() => {}); } catch (_) {}
+  vox.set('WAITING', 'watchdog released stuck speech');         // v11.2 VOX
   if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
 }
 
@@ -503,23 +558,32 @@ function sherpaSay(clean, { onStart, onEnd }) {
 /* v10.0 T2: one offline ear-shot through sherpa when the Google ear is down */
 function sherpaEarsListen() {
   listening = true;
+  vox.set('LISTENING', 'sherpa ears');                            // v11.2 VOX
   handlers.onStart && handlers.onStart();
   sherpaListen().then(r => {
     listening = false;
     handlers.onEnd && handlers.onEnd();
     if (r && r.ok && (r.text || '').trim()) {
+      vox.set('THINKING', 'sherpa transcript');                   // v11.2 VOX
       handlers.onFinal && handlers.onFinal(r.text.trim());
     } else {
+      vox.set('READY', 'sherpa heard nothing');                   // v11.2 VOX
       handlers.onError && handlers.onError('no-speech');
     }
   }).catch(() => {
     listening = false;
+    vox.set('ERROR', 'sherpa ear crash');                         // v11.2 VOX
     handlers.onError && handlers.onError('unknown');
   });
 }
 
 export function speak(text, { onStart, onEnd, _noServer } = {}) {
-  if (!getSetting('voiceOutput') || !text) { onEnd && onEnd(); return false; }
+  if (!getSetting('voiceOutput') || !text) {
+    /* v11.2 VOX: voice off → the engine must settle, not hang in THINKING */
+    if (vox.get() === 'THINKING' || vox.get() === 'EXECUTING') vox.set('READY', 'voice output off');
+    onEnd && onEnd();
+    return false;
+  }
 
   const clean = cleanForSpeech(text);
   if (!clean) { onEnd && onEnd(); return false; }
@@ -532,6 +596,7 @@ export function speak(text, { onStart, onEnd, _noServer } = {}) {
     speaking = true;
     pendingEnd = () => { disarmBargeIn(); onEnd && onEnd(); };
     onStart && onStart();
+    vox.set('SPEAKING', 'cloud tts');                               // v11.2 VOX
     SERVER.ttsAndPlay(clean).then(audio => {
       clearTimeout(speakWatch);
       const est = 1600 + clean.split(/\s+/).length * 560;
@@ -539,11 +604,13 @@ export function speak(text, { onStart, onEnd, _noServer } = {}) {
       audio.onended = () => {
         clearTimeout(speakWatch);
         speaking = false;
+        vox.set('WAITING', 'cloud tts done');                       // v11.2 VOX
         if (pendingEnd) { const f = pendingEnd; pendingEnd = null; f(); }
       };
       armBargeIn();
     }).catch(() => {
       speaking = false; pendingEnd = null;
+      if (vox.get() === 'SPEAKING') vox.set('WAITING', 'cloud tts fallback');   // v11.2 VOX
       speak(clean, { onStart, onEnd, _noServer: true });
     });
     return true;
@@ -561,7 +628,8 @@ export function speak(text, { onStart, onEnd, _noServer } = {}) {
       text: clean,
       rate: parseFloat(getSetting('speechRate')) || 1,
       pitch: parseFloat(getSetting('speechPitch') ) || 1.1,
-      lang: getSetting('voiceLang') || 'en-US'
+      lang: getSetting('voiceLang') || 'en-US',
+      duck: getSetting('duckAudio') !== false                       // v11.2 VOX: music ducks under FRIDAY
     }).then(r => {
       if (r && r.ok !== false) {
         armBargeIn();                       // hot mic while talking
@@ -600,15 +668,16 @@ export function speak(text, { onStart, onEnd, _noServer } = {}) {
   const voice = pickVoice(lang);
   let idx = 0;
 
+  vox.set('SPEAKING', 'web tts');                                 // v11.2 VOX
   const next = () => {
-    if (idx >= groups.length) { speaking = false; onEnd && onEnd(); return; }
+    if (idx >= groups.length) { speaking = false; vox.set('WAITING', 'web tts done'); onEnd && onEnd(); return; }
     const u = new SpeechSynthesisUtterance(groups[idx++]);
     u.rate = parseFloat(getSetting('speechRate')) || 1;
     u.pitch = parseFloat(getSetting('speechPitch')) || 1.1;
     u.lang = lang;
     if (voice) u.voice = voice;
     u.onend = next;
-    u.onerror = () => { speaking = false; onEnd && onEnd(); };
+    u.onerror = () => { speaking = false; vox.set('WAITING', 'web tts err'); onEnd && onEnd(); };
     synth.speak(u);
   };
 
