@@ -1043,6 +1043,20 @@ I('quiz', t => /\b(quiz|test me|mcq|question answer|practice)\b/.test(t) ? 1 : 0
     return { say: null, action: { type: 'quiz', topic: q || 'general knowledge' } };
   }, 6);
 
+/* ================= v12.0 Phase 8: PLANNER =================
+   "plan my day", "help me prepare for tomorrow's physics exam", "make a
+   study plan for next week" → the PLANX engine decomposes + executes.
+   Single commands still go through the intent engine unchanged. */
+I('plan', t => /^(help me |please )?(plan|prepare|arrange|organise|organize|get ready|set up|make a (?:plan|study plan|revision plan))/i.test(t)
+   || (/\b(plan|prepare|revision|study (?:schedule|plan)|get ready)\b/i.test(t) && /\b(exam|test|trip|travel|event|party|meeting|interview|presentation|day|week|studies)\b/i.test(t)) ? 1 : 0,
+  t => ({ say: null, action: { type: 'plan', goal: t } }), 5);
+
+/* ================= v12.2 Phase 10: DEVICE DIAGNOSTICS =================
+   "diagnostics", "device health", "system health check" → hidden dev-mode
+   dashboard rendered by DEVX.dashRows + FridayCore healthMap. */
+I('device_status', t => /\b(diagnostics|device (status|health)|system health|health check|phone (status|health))\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'device_status' } }), 5);
+
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
   t => {
