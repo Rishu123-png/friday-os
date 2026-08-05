@@ -5,8 +5,9 @@ FROM python:3.12-slim
 
 WORKDIR /srv/friday
 
-# Light core first (caches well)
-COPY requirements.txt .
+# Light core first (caches well). Files live in backend/, so copy them
+# explicitly — the build context is the repo ROOT (see command above).
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Optional heavy engines — comment in what you want:
@@ -15,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RUN pip install --no-cache-dir sentence-transformers
 # RUN pip install --no-cache-dir paho-mqtt
 
-COPY . .
+COPY backend/ .
 
 ENV FRIDAY_TOKEN="" \
     GROQ_API_KEY="" \
