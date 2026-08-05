@@ -1,6 +1,9 @@
 package com.rishu.fridayos;
 
+import android.content.Context;
 import android.content.Intent;
+import android.media.AudioManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -36,6 +39,31 @@ public class FridaySpeech extends Plugin {
     private SpeechRecognizer recognizer;
     private boolean listening = false;
 
+    /* v11.2 VOX: audio focus — duck music under FRIDAY, restore after */
+    private boolean focusHeld = false;
+
+    @SuppressWarnings("deprecation")
+    private void takeAudioFocus(boolean duck) {
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am == null || focusHeld) return;
+            int mode = duck ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                            : AudioManager.AUDIOFOCUS_GAIN_TRANSIENT;
+            int res = am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, mode);
+            focusHeld = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+        } catch (Exception ignored) {}
+    }
+
+    @SuppressWarnings("deprecation")
+    private void dropAudioFocus() {
+        try {
+            if (!focusHeld) return;
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) am.abandonAudioFocus(null);
+            focusHeld = false;
+        } catch (Exception ignored) {}
+    }
+
     private JSObject ok() { JSObject o = new JSObject(); o.put("ok", true); return o; }
     private JSObject fail(String w) { JSObject o = new JSObject(); o.put("ok", false); o.put("reason", w); return o; }
 
@@ -56,9 +84,11 @@ public class FridaySpeech extends Plugin {
                                 notifyListeners("ttsStart", new JSObject());
                             }
                             @Override public void onDone(String id) {
+                                dropAudioFocus();   // v11.2 VOX: restore music level
                                 notifyListeners("ttsDone", new JSObject());
                             }
                             @Override public void onError(String id) {
+                                dropAudioFocus();
                                 notifyListeners("ttsDone", new JSObject());
                             }
                         });
@@ -107,6 +137,13 @@ public class FridaySpeech extends Plugin {
                 }
             } catch (Exception ignored) {}
 
+            /* v11.2 VOX: duck=true (default) lowers music under FRIDAY's voice;
+               duck=false takes FULL focus (music pauses). Either way focus is
+               released when the utterance ends (see listener in initTTS). */
+            boolean duck = true;
+            try { Boolean d = call.getBoolean("duck"); if (d != null) duck = d; } catch (Exception ignored) {}
+            takeAudioFocus(duck);
+
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "friday-" + System.currentTimeMillis());
             call.resolve(ok());
         } catch (Exception e) {
@@ -117,6 +154,7 @@ public class FridaySpeech extends Plugin {
     @PluginMethod
     public void stopSpeaking(PluginCall call) {
         try { if (tts != null) tts.stop(); } catch (Exception ignored) {}
+        dropAudioFocus();   // v11.2 VOX
         call.resolve(ok());
     }
 
@@ -271,6 +309,7 @@ public class FridaySpeech extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        dropAudioFocus();   // v11.2 VOX
         try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Exception ignored) {}
         try { if (recognizer != null) recognizer.destroy(); } catch (Exception ignored) {}
         super.handleOnDestroy();
