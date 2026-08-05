@@ -840,6 +840,102 @@ public class FridayNative extends Plugin {
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
 
+    /* ============ v14.1: share / save an image (shared photo, camera shot) ============ */
+
+    /** Share an image (base64) to a WhatsApp chat: ACTION_SEND + FileProvider URI.
+        The photo is really ATTACHED — WhatsApp opens with it ready for the chat. */
+    @PluginMethod
+    public void sendImage(PluginCall call) {
+        String b64 = call.getString("base64", "");
+        String number = call.getString("number", "").replaceAll("[^0-9]", "");
+        String cc = call.getString("cc", "91").replaceAll("[^0-9]", "");
+        String caption = call.getString("caption", "");
+        if (cc.isEmpty()) cc = "91";
+        try {
+            if (number.length() == 10) number = cc + number;
+            byte[] bytes = decodeB64(b64);
+            if (bytes == null || bytes.length == 0) { call.resolve(fail("bad_image")); return; }
+            String ext = guessExt(call.getString("mime", ""));
+            java.io.File dir = new java.io.File(getContext().getCacheDir(), "share");
+            if (!dir.exists()) dir.mkdirs();
+            java.io.File file = new java.io.File(dir, "friday_share_" + System.currentTimeMillis() + ext);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) { out.write(bytes); }
+            Uri contentUri = androidx.core.content.FileProvider.getUriForFile(
+                    getContext(), getContext().getPackageName() + ".fileprovider", file);
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType(mimeOf(ext));
+            i.putExtra(Intent.EXTRA_STREAM, contentUri);
+            if (!caption.isEmpty()) i.putExtra(Intent.EXTRA_TEXT, caption);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                Intent wa = new Intent(i);
+                wa.setPackage("com.whatsapp");
+                getContext().startActivity(wa);
+            } catch (Exception noWa) {
+                getContext().startActivity(Intent.createChooser(i, "Send photo via"));
+            }
+            JSObject r = ok();
+            r.put("path", file.getAbsolutePath());
+            call.resolve(r);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /** Save an image (base64) to the device gallery (Pictures/FRIDAY). */
+    @PluginMethod
+    public void saveImage(PluginCall call) {
+        String b64 = call.getString("base64", "");
+        try {
+            byte[] bytes = decodeB64(b64);
+            if (bytes == null || bytes.length == 0) { call.resolve(fail("bad_image")); return; }
+            String ext = guessExt(call.getString("mime", ""));
+            String name = "friday_" + System.currentTimeMillis() + ext;
+            String mime = mimeOf(ext);
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues v = new android.content.ContentValues();
+                v.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name);
+                v.put(android.provider.MediaStore.Images.Media.MIME_TYPE, mime);
+                v.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/FRIDAY");
+                Uri uri = getContext().getContentResolver().insert(
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+                if (uri == null) { call.resolve(fail("insert_failed")); return; }
+                try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
+                    if (out != null) out.write(bytes);
+                }
+            } else {
+                java.io.File dir = new java.io.File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "FRIDAY");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File f = new java.io.File(dir, name);
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { out.write(bytes); }
+            }
+            call.resolve(ok());
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    private static byte[] decodeB64(String b64) {
+        if (b64 == null || b64.isEmpty()) return null;
+        if (b64.startsWith("data:")) b64 = b64.substring(b64.indexOf(',') + 1);
+        try { return android.util.Base64.decode(b64, android.util.Base64.DEFAULT); }
+        catch (Throwable t) { return null; }
+    }
+    private static String guessExt(String mime) {
+        if (mime == null) return ".jpg";
+        String m = mime.toLowerCase();
+        if (m.contains("png")) return ".png";
+        if (m.contains("webp")) return ".webp";
+        if (m.contains("gif")) return ".gif";
+        return ".jpg";
+    }
+    private static String mimeOf(String ext) {
+        String e = (ext == null ? "" : ext.toLowerCase());
+        if (e.contains("png")) return "image/png";
+        if (e.contains("webp")) return "image/webp";
+        if (e.contains("gif")) return "image/gif";
+        return "image/jpeg";
+    }
+
     /* ============ v8.1 EYES: screenshot + coordinate tap ============ */
     @PluginMethod
     public void screenShot(PluginCall call) {
