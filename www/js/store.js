@@ -77,6 +77,9 @@ export const DEFAULTS = {
   dangerConfirm: true,     // destructive commands ask "pakka?" first
   duckAudio: true,         // duck music while FRIDAY speaks (audio focus)
   voxFeedback: true,       // orb + feed + status line follow the formal voice states
+  // v11.3 COGNITION: Memory/Vision/Automation engines
+  autoEngine: true,        // Phase 7 rule pipeline master switch
+  lastMemSummary: '',      // daily digest marker
   // telephony
   waCountryCode: '91'
 };
