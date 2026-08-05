@@ -90,6 +90,26 @@ export const DEFAULTS = {
   // v12.2 PHASE 10 DEVX: Device Engine
   devxAlerts: true,        // informative device alerts (low battery, heat, storage)
   devxDashboard: false,    // hidden diagnostics dashboard (Settings → long-press Systems)
+  // v13.0 PHASE 11 SECX: Security & Privacy Framework
+  appLock: false,          // app lock (PIN, SHA-256 hash stored — never plaintext)
+  appPinHash: '',          // SHA-256 of PIN (never stored in plaintext)
+  biometricLock: false,    // optional biometric unlock
+  cloudConsent: false,     // privacy-first: cloud AI only with explicit consent
+  cloudConsentSet: false,
+  auditEnabled: true,      // audit trail (permissions, automation, security events)
+  threatMon: true,         // threat detector counters
+  secureCleanup: true,     // auto-clear temp files
+  // v13.1 PHASE 12 PERFX: Performance & Optimization
+  perfMonitor: false,      // developer performance monitor (FPS/CPU/RAM/latency)
+  lazyLoad: true,          // heavy modules load on demand, not at boot
+  batteryGate: true,       // defer heavy AI when battery is critically low
+  aiCache: true,           // short-TTL AI response cache (30 min)
+  // v13.2 PHASE 13 CINEX: Cinematic UX
+  cinematic: true,         // cinematic mode master switch
+  glassFX: true,           // glassmorphism + subtle blur
+  glowFX: true,            // neon glow effects
+  highContrast: false,     // high-contrast mode
+  textScale: '1',          // text scale (1 | 1.1 | 1.25 | 1.5)
   // telephony
   waCountryCode: '91'
 };
