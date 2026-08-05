@@ -3,7 +3,7 @@
    CDN libraries (vision OCR/objects, future transformers.js) are cached
    so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v103';
+const CACHE = 'friday-os-v112';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
@@ -15,7 +15,7 @@ const ASSETS = [
      with no network fails to boot (app.js imports all of them) */
   './js/ambient.js', './js/clarify.js', './js/embeddings.js', './js/hacker.js',
   './js/health.js', './js/i18n.js', './js/localbrain.js', './js/semantic.js',
-  './js/vault.js', './js/server.js', './js/suit.js', './js/herald.js',
+  './js/vault.js', './js/server.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
