@@ -887,3 +887,14 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
   font-family: inherit; font-size: 13px; cursor: pointer; transition: all 0.15s ease;
 }
 .clarify-chip:hover, .clarify-chip:active { background: rgba(0, 212, 255, 0.25); transform: translateY(-1px); }
+
+/* v10.2: Suit Auto-Setup chip — tiny status pill near the header while the
+   suit updates its own systems (one line, never a modal). */
+.suit-chip {
+  position: fixed; top: 42px; left: 50%; transform: translateX(-50%);
+  z-index: 60; max-width: 88vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: rgba(6, 18, 32, 0.92); border: 1px solid rgba(0, 212, 255, 0.5);
+  color: #bfeaff; border-radius: 999px; padding: 5px 14px; font-size: 12px;
+  letter-spacing: 0.02em; box-shadow: 0 4px 18px rgba(0, 150, 255, 0.25);
+}
+.suit-chip[hidden] { display: none; }
