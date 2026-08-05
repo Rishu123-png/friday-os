@@ -1238,6 +1238,51 @@ public class FridayNative extends Plugin {
         }
     }
 
+    /* ============ v10.3 HERALD: CALL GUARD ============ */
+    /** Settings -> Call Guard group writes this plugin-side; the
+        FridayCallGuard receiver reads it even when the app is dead. */
+    @PluginMethod
+    public void setCallGuard(PluginCall call) {
+        final Boolean en = call.getBoolean("enabled");
+        final boolean enabled = en != null && en;
+        final String template = call.getString("template", "");
+        final String mode = call.getString("mode", "sms");
+        FridayCallGuard.configure(getContext(), enabled, template, mode);
+        JSObject r = ok();
+        r.put("enabled", enabled);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void getCallGuard(PluginCall call) {
+        android.content.SharedPreferences sp = getContext().getSharedPreferences(FridayCallGuard.PREFS, Context.MODE_PRIVATE);
+        JSObject r = ok();
+        r.put("enabled", sp.getBoolean("enabled", false));
+        r.put("template", sp.getString("template", ""));
+        r.put("mode", sp.getString("mode", "sms"));
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void getCallGuardLog(PluginCall call) {
+        JSObject r = ok();
+        try { r.put("items", FridayCallGuard.readLog(getContext())); } catch (Exception ignored) {}
+        call.resolve(r);
+    }
+
+    /** Called by FridayCallGuard after it answers/declines — the app (if
+        alive) announces it: "Ramesh ko FRIDAY ne sambhala, SMS bhej diya". */
+    public static void emitCallHandled(String number, String action) {
+        FridayNative p = activePlugin;
+        if (p == null) return;
+        try {
+            JSObject o = new JSObject();
+            o.put("number", number);
+            o.put("action", action);
+            p.notifyListeners(FridayCallGuard.EVT, o);
+        } catch (Exception ignored) {}
+    }
+
     /* ============ ACCESSIBILITY v2 (tap / scroll / type) ============ */
     @PluginMethod
     public void tapText(PluginCall call) {
