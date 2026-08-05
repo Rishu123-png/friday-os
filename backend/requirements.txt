@@ -3,6 +3,7 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 httpx>=0.27
 python-dotenv>=1.0
+python-multipart>=0.0.9   # REQUIRED — /v1/stt uses UploadFile; without it the app won't boot
 
 # ---- Optional heavy engines (uncomment what you want; see Dockerfile) ----
 # edge-tts>=7.0                 # neural TTS voices (free, needs internet)
