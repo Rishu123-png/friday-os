@@ -150,6 +150,24 @@ async def dashboard():
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
 
+# ---------------- /v1/vision (describe a shared/captured image) ----------------
+@app.post("/v1/vision")
+async def vision(request: Request):
+    body = await request.json()
+    image = str(body.get("image_b64") or body.get("image") or "").strip()
+    question = str(body.get("question") or "").strip()
+    if not image:
+        raise HTTPException(status_code=400, detail="image_b64 required")
+    if len(image) > 26_000_000:   # ~19MB of image bytes
+        raise HTTPException(status_code=413, detail="image too large")
+    try:
+        from vision import describe_image
+        text = await describe_image(image, question)
+        return {"ok": True, "text": text}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 # ---------------- /v1/embed ----------------
 @app.post("/v1/embed")
 async def embed(request: Request):
