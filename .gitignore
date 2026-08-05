@@ -7,3 +7,7 @@ screenshot-*.png
 shot-*.png
 __pycache__/
 *.pyc
+
+# v10.1 FRIDAY Cloud — never commit secrets or the memory DB
+backend/.env
+backend/friday.db
