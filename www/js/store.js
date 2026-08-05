@@ -80,6 +80,16 @@ export const DEFAULTS = {
   // v11.3 COGNITION: Memory/Vision/Automation engines
   autoEngine: true,        // Phase 7 rule pipeline master switch
   lastMemSummary: '',      // daily digest marker
+  // v12.0 PHASE 8 PLANX: AI Planner & Reasoning Engine
+  plannerEnabled: true,    // master switch (planner only claims multi-step goals)
+  // v12.1 PHASE 9 INTELX: Intelligence & Context Engine
+  intelEnabled: true,      // proactive awareness master switch
+  intelStudyMode: true,    // study-session suggestions
+  intelPrivacy: true,      // learning stays LOCAL; nothing leaves device w/o consent
+  lastBackupAt: 0,         // weekly backup suggestion marker
+  // v12.2 PHASE 10 DEVX: Device Engine
+  devxAlerts: true,        // informative device alerts (low battery, heat, storage)
+  devxDashboard: false,    // hidden diagnostics dashboard (Settings → long-press Systems)
   // telephony
   waCountryCode: '91'
 };
