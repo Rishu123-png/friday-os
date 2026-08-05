@@ -1037,3 +1037,70 @@ code.inline{font-family:var(--font-mono);font-size:.84em;padding:2px 6px;border-
 .suggest-go { background: var(--accent, #00d4ff); color: #04121f; border: none; font-weight: 600; }
 .suggest-x { background: transparent; border: 1px solid rgba(0,212,255,.35); color: var(--dim, #7d90b8); }
 @keyframes suggestIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ==========================================================================
+   v13 PHASE 13 — CINEMATIC UX (SECX/PERFX-aware)
+   Glassmorphism, AI-state glow, radar/scan FX, listening rings,
+   accessibility (reduced-motion, high-contrast, text-scale), battery-aware
+   animation policy. All driven by data attributes CINEX sets on <html>.
+   ========================================================================== */
+
+/* --- glassmorphism surfaces --- */
+.panel, .settings-group, .message-bubble, .hud-card { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); background: rgba(17,17,40,.72); }
+html[data-fx*='"blur":false'] .panel, html[data-fx*='"blur":false'] .settings-group,
+html[data-fx*='"blur":false'] .message-bubble, html[data-fx*='"blur":false'] .hud-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+/* --- AI-state orb tones (CINEX sets html[data-orb]) --- */
+html[data-orb*="orb-dim"]    { --orb-c: #444; }
+html[data-orb*="orb-cyan"]   { --orb-c: #00d4ff; }
+html[data-orb*="orb-green"]  { --orb-c: #00ff88; }
+html[data-orb*="orb-amber"]  { --orb-c: #ffaa00; }
+html[data-orb*="orb-violet"] { --orb-c: #8b5cf6; }
+html[data-orb*="orb-red"]    { --orb-c: #ff4d6d; }
+#coreCanvas, .core-visual { filter: drop-shadow(0 0 12px var(--orb-c, #00d4ff)); transition: filter .4s; }
+
+/* --- radar sweep + scanlines (subtle, cheap) --- */
+.radar-sweep { position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity:.05;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(0,212,255,.9) 40deg, transparent 80deg);
+  animation: radarSpin 8s linear infinite; }
+html[data-fx*='"radar":false'] .radar-sweep { display: none; }
+@keyframes radarSpin { to { transform: rotate(360deg); } }
+.scanlines { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity:.03;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,212,255,.7) 3px 4px); }
+html[data-fx*='"scan":false'] .scanlines { display: none; }
+
+/* --- listening rings (expand when listening) --- */
+.core-visual .listening-ring { position:absolute; inset:0; border:1px solid rgba(0,212,255,.5); border-radius:50%; opacity:0; }
+html[data-orb*="ring-expand"] .core-visual .listening-ring { animation: ringExpand 1.6s ease-out infinite; }
+@keyframes ringExpand { 0% { transform: scale(.85); opacity:.7; } 100% { transform: scale(1.6); opacity:0; } }
+
+/* --- speaking waveform glow --- */
+html[data-orb*="ring-wave"] .voice-waveform .wave-bar { animation: waveGlow .5s ease-in-out infinite alternate; }
+@keyframes waveGlow { from { filter: brightness(1);} to { filter: brightness(1.6);} }
+
+/* --- micro-interaction: tap pulse --- */
+.tap-pulse { animation: tapPulse .3s ease-out; }
+@keyframes tapPulse { 0% { transform: scale(1);} 40% { transform: scale(.96);} 100% { transform: scale(1);} }
+
+/* --- event feed auto-fade (CINEX timing) --- */
+.hud-feed-item { animation: feedIn .3s ease-out; }
+@keyframes feedIn { from { opacity:0; transform: translateX(-6px);} to { opacity:1; transform:none;} }
+
+/* --- pause animations when hidden or battery-crit (PERFX) --- */
+html[data-hidden="1"] *, html[data-hidden="1"] *::before, html[data-hidden="1"] *::after { animation-play-state: paused !important; transition: none !important; }
+
+/* --- accessibility: high contrast --- */
+html.hc { --text:#ffffff; --text-dim:#c0c0e0; --border:#4a4a8a; --bg-card:#0a0a18; }
+html.hc .message-bubble, html.hc .panel { border-color:#5a5a9a; }
+
+/* --- accessibility: text scale --- */
+html.text-1-1 { font-size: 108%; }
+html.text-1-25 { font-size: 118%; }
+html.text-1-5 { font-size: 135%; }
+
+/* --- reduced motion: kill animations (system + rm class) --- */
+@media (prefers-reduced-motion: reduce) { * , *::before, *::after { animation-duration: .001s !important; transition-duration: .001s !important; } }
+html.rm .core-visual, html.rm .radar-sweep, html.rm .scanlines { animation: none !important; display: none; }
+
+/* --- no-fx master switch --- */
+html.no-fx .radar-sweep, html.no-fx .scanlines, html.no-fx .core-visual { animation: none !important; }
