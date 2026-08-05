@@ -110,3 +110,94 @@ workflows:
         notify:
           success: true
           failure: true
+
+  # ===== v14 PHASE 14: RELEASE build (signed, R8-shrunk) =====
+  friday-release:
+    name: FRIDAY OS - Release APK (signed)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      node: 20
+      java: 17
+      vars:
+        PACKAGE_NAME: "com.rishu.fridayos"
+        CM_KEYSTORE_PATH: "/tmp/friday.keystore"
+        CM_KEYSTORE_PASSWORD: "$ANDROID_KEYSTORE_PASSWORD"
+        CM_KEY_ALIAS_PASSWORD: "$ANDROID_KEY_ALIAS_PASSWORD"
+        CM_KEY_ALIAS_USER_NAME: "$ANDROID_KEY_ALIAS"
+
+    triggering:
+      events:
+        - tag
+      branch_patterns:
+        - pattern: "release/*"
+          include: true
+
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $CM_BUILD_DIR/node_modules
+
+    scripts:
+      - name: Install + test
+        script: |
+          npm install
+          npm test
+
+      - name: Android platform + web sync
+        script: |
+          if [ ! -d "android" ]; then npx cap add android; fi
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          [ -z "$SDK" ] && SDK="$HOME/programs/android-sdk-macosx"
+          echo "sdk.dir=$SDK" > android/local.properties
+          npx cap sync android
+
+      - name: Install native sources + resources
+        script: |
+          PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
+          mkdir -p "$PKG_DIR"
+          cp native/*.java "$PKG_DIR/"
+          mkdir -p android/app/src/main/java/com
+          cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable
+          cp native/friday_accessibility.xml android/app/src/main/res/xml/
+          cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
+          cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
+          cp native/res/drawable/*.xml android/app/src/main/res/drawable/
+          cp native/proguard-rules.pro android/app/proguard-rules.pro
+
+      - name: Register plugins + patch manifest + deps
+        script: |
+          python3 native/register_plugin.py
+          python3 native/patch_manifest.py
+          python3 native/add_llama_dep.py && python3 native/add_sherpa_dep.py
+
+      - name: Enable R8 + signing in app/build.gradle
+        script: |
+          cd android/app
+          sed -i '' 's/buildTypes {/buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n            signingConfig signingConfigs.release\n        }/' build.gradle
+          sed -i '' 's/android {/android {\n    signingConfigs {\n        release {\n            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "")\n            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""\n            keyAlias System.getenv("CM_KEY_ALIAS_USER_NAME") ?: ""\n            keyPassword System.getenv("CM_KEY_ALIAS_PASSWORD") ?: ""\n        }\n    }/' build.gradle
+
+      - name: Build signed release APK
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon > /tmp/gradle_release.log 2>&1 || {
+            echo "================ GRADLE RELEASE ERROR ================"
+            grep -n -B2 -A25 "What went wrong" /tmp/gradle_release.log | head -80 || true
+            grep -nE "error:" /tmp/gradle_release.log | grep -v "error-prone" | head -30 || true
+            exit 1
+          }
+          tail -5 /tmp/gradle_release.log
+
+    artifacts:
+      - android/app/build/outputs/apk/release/**/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - adminschool8@gmail.com
+        notify:
+          success: true
+          failure: true
