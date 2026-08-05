@@ -286,6 +286,18 @@ export async function whatsappSend(number, message, autoSend = true) {
   return call('whatsappSend', { number, message, autoSend, cc });
 }
 
+/* ================= v14.1: PHOTO share / save ================= */
+/** Attach a real image (base64) to a WhatsApp chat and open it. */
+export async function sendImage(number, base64, { caption = '', mime = '', cc = null } = {}) {
+  let c = '91';
+  try { c = cc || getSetting('waCountryCode') || '91'; } catch (_) {}
+  return call('sendImage', { number: String(number || '').replace(/\s/g, ''), base64, caption, mime, cc: c });
+}
+/** Save an image (base64) to the device gallery (Pictures/FRIDAY). */
+export async function saveImage(base64, { mime = '' } = {}) {
+  return call('saveImage', { base64, mime });
+}
+
 /* ================= OVERLAY BUBBLE (Phase C) ================= */
 export async function showBubble(on = true) { return call('showBubble', { enabled: on }); }
 export async function updateBubble(state) { return call('updateBubble', { state }); }

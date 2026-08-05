@@ -18,6 +18,7 @@ import { parseWakeKeywords } from './nlp.js';
 import * as SERVER from './server.js';
 /* v11.2 VOX: formal voice state machine + multi wake-word match + sensitivity + VAD */
 import { vox, wakeList, wakeMatch, stripWake, wakeCooldownOk, bargeRms, retryDelay, vadClass } from './vox.js';
+import { Bus, Logger } from './fridaycore.js';
 
 /* Native wake-word engine plugin (FridayWakeWord / Porcupine), optional */
 const WP = () => {
@@ -217,6 +218,12 @@ export function initRecognition(cbs = {}) {
       }
       vox.set('ERROR', 'stt: ' + err);                            // v11.2 VOX: visible fault
       handlers.onError && handlers.onError(err);
+      /* v14.1: real STT errors during wake listening count toward the give-up
+         cap — a broken engine must not auto-restart forever. */
+      if (wakeArmed) {
+        realWakeFails++;
+        if (realWakeFails >= 3) { giveUpWake(normListenErr(ev), ev && (ev.message || ev.error)); return; }
+      }
       scheduleWakeRestart();
     });
     return true;
@@ -284,6 +291,7 @@ function normListenErr(e) {
 export function listen() {
   if (listening) return false;
   cancelSpeech();
+  realWakeFails = 0;   // v14.1: a user tap is the explicit "retry" — reset the give-up cap
 
   if (useNative()) {
     wakeArmed = false;
@@ -342,13 +350,35 @@ const wakeHit = txt => wakeMatch(txt, activeWakeList());
 
 let wakeArmed = false;   // native: currently listening FOR the wake phrase
 let lastWakeFireAt = 0;  // v11.2: false-trigger protection (music echo loop guard)
+let realWakeFails = 0;   // v14.1: CONSECUTIVE REAL wake-engine failures (not no-speech)
+
+/* v14.1: after 3 real failures the wake engine is genuinely broken (mic denied,
+   engine missing, plugin crash) — STOP retrying, log the real reason, surface it.
+   Infinite auto-recovery was draining battery and hiding the cause. */
+function giveUpWake(reason, err) {
+  realWakeFails = 0;
+  wakeActive = false; wakeArmed = false;
+  clearTimeout(wakeTimer);
+  const msg = (err && (err.message || err.code || err)) || reason || 'voice fault';
+  Logger.error('voice', 'wake engine gave up after 3 real failures: ' + String(msg));
+  vox.set('ERROR', reason || 'voice fault');
+  Bus.emit('voice:dead', { reason: reason || 'unknown', error: String(msg).slice(0, 220), at: Date.now() });
+}
 
 /* Software fallback: SpeechRecognizer restart loop (no Porcupine key). */
 function startNativeWakeLoop() {
   wakeArmed = true;
   wakeActive = true;
   NP().startListening({ lang: getSetting('voiceLang'), partial: false })
-    .catch(() => { wakeActive = false; });
+    .then(() => { wakeActive = true; realWakeFails = 0; vox.touch(); })
+    .catch(e => {
+      wakeActive = false; wakeArmed = false;
+      const reason = normListenErr(e);
+      realWakeFails++;
+      Logger.error('voice', 'wake start failed (' + reason + '): ' + (e && (e.message || e.code || e)));
+      if (realWakeFails >= 3) return giveUpWake(reason, e);
+      scheduleWakeRestart();
+    });
 }
 
 function handleWakePhrase(txt) {
@@ -400,10 +430,10 @@ export function startWakeWord() {
     if (wp && key) {
       wp.start({ accessKey: key, keyword: getSetting('wakeKeyword') || 'jarvis' })
         .then(r => {
-          if (r && r.ok) { wakeActive = true; vox.touch(); }   // v11.2 VOX: mic dot repaints once the engine really answers
+          if (r && r.ok) { wakeActive = true; realWakeFails = 0; vox.touch(); }   // v11.2 VOX: mic dot repaints once the engine really answers
           else startNativeWakeLoop();   // engine missing / bad key -> software loop
         })
-        .catch(() => startNativeWakeLoop());
+        .catch(e => { realWakeFails++; if (realWakeFails >= 3) giveUpWake('wake_engine', e); else startNativeWakeLoop(); });
       return true;
     }
 
@@ -418,10 +448,10 @@ export function startWakeWord() {
       const merged = kws.length ? kws : (multi.length ? multi : ['friday']);
       vs.start({ modelPath: voskPath, keyword: merged.join(' ') })
         .then(r => {
-          if (r && r.ok) { wakeActive = true; vox.touch(); }
+          if (r && r.ok) { wakeActive = true; realWakeFails = 0; vox.touch(); }
           else startNativeWakeLoop();   // engine/model missing -> software loop
         })
-        .catch(() => startNativeWakeLoop());
+        .catch(e => { realWakeFails++; if (realWakeFails >= 3) giveUpWake('wake_engine', e); else startNativeWakeLoop(); });
       return true;
     }
 

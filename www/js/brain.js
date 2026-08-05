@@ -4,7 +4,7 @@
 
    Each intent: { id, score(text) -> 0..1, run(text, ctx) -> {say, action?} } */
 
-import { getSetting, KEYS, addItem, getList, removeItem, updateItem, remember } from './store.js';
+import { getSetting, KEYS, addItem, getList, remember } from './store.js';
 import { parseTime, humanTime, safeMath, cleanSubject, fuzzyHas, keywordScore, pick, wordToNum } from './nlp.js';
 import { persona } from './ai.js';
 import { convertUnit, generatePassword } from './templates.js';
@@ -1072,6 +1072,20 @@ I('cinematic', t => /\b(cinematic (mode|on|off)|effects (on|off)|glow (on|off)|n
     const off = /\boff\b|\bband\b|\bhatana\b|\bkam\b/.test(t);
     return { say: null, action: { type: 'cinematic', on: !off } };
   }, 5);
+
+/* v14.1 photo actions: "send this photo to papa", "save this photo", "what is this photo" */
+I('photo_send', t => /\b(send\w*|share\w*|bhej\w*|forward\w*|aage)\b[\s\S]{0,24}\b(photo|image|picture|pic)\b/.test(t)
+  || /\b(photo|image|picture|pic)\b[\s\S]{0,24}\b(send\w*|share\w*|bhej\w*|forward\w*|aage)\b/.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/\b(?:to|ko|for|se)\s+([a-z][a-z\s]{1,24}?)(?:\s+(?:on|ko)\s+whatsapp|$)/i)
+      || t.match(/\bwhatsapp\s+(?:pe\s+)?([a-z][a-z\s]{1,24}?)$/i);
+    return { say: null, action: { type: 'send_image', contact: m ? m[1].trim() : '' } };
+  }, 7);
+I('photo_save', t => /\b(save\w*|download\w*|store\w*|keep|saved? karo|download karo|rakh lo)\b[\s\S]{0,18}\b(photo|image|picture|pic)\b/.test(t)
+  || /\b(photo|image|picture|pic)\b[\s\S]{0,18}\b(save\w*|download\w*|store\w*|keep|saved? karo|download karo|rakh lo)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'save_image' } }), 7);
+I('photo_describe', t => /\b(what is this photo|describe this photo|photo (mein|me) kya hai|yeh photo kya hai|photo kya hai)\b/.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'photo_describe', question: t } }), 7);
 
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,

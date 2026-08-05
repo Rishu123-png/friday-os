@@ -197,7 +197,8 @@ export function fmtBytes(b) {
 export function dashboard() {
   const keys = ['friday_facts', 'friday_episodes', 'friday_patterns', SKEYS.SUMMARIES, SKEYS.VISION, SKEYS.QR, SKEYS.PREFS];
   const t0 = Date.now();
-  const probe = retrieve('battery friday', { k: 3 });
+  let probe = [];
+  try { probe = retrieve('battery friday', { k: 3 }); } catch (_) {}   // v14.1: probe must never crash the dashboard
   const ms = Date.now() - t0;
   return {
     facts: allFacts().length,
