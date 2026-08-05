@@ -333,11 +333,20 @@ async function handleInput(text, opts = {}) {
     return;
   }
   /* v10.0 C1 CLARIFY: if FRIDAY asked a question last turn, this turn is the
-     ANSWER - merge it into the parked command instead of re-parsing alone. */
+     ANSWER - merge it into the parked command instead of re-parsing alone.
+     v10.2.1 FIX: agar naya text KHUD ek fresh command hai (apna action
+     resolve hota hai), to parked sawaal CANCEL — warna "Hi"/"explain nda"
+     bhi answer ban jaata tha aur loop kabhi khatam nahi hota tha. */
   if (state.pendingClarify && !opts.noChain) {
     const pending = state.pendingClarify;
+    const stale = pending.at && (Date.now() - pending.at > 120000);   // 2 min se purana sawaal bhool jao
     state.pendingClarify = null;
-    const merged = CLARIFY.absorb(pending, text);
+    let merged = '';
+    if (!stale && CLARIFY.absorbable(text, pending)) {
+      const own = resolve(text, { lastTopic: state.lastTopic });
+      const fresh = !!(own && own.action && own.intent !== pending.intent);
+      if (!fresh) merged = CLARIFY.absorb(pending, text);
+    }
     if (merged) {
       addMsg('user', text);
       return handleInput(merged, { ...opts, noChain: true, silentEcho: true });
@@ -380,7 +389,7 @@ async function handleInput(text, opts = {}) {
   if (!opts.noChain && CLARIFY.needsMusicSource(text)) {
     const q = CLARIFY.musicSourceQuestion();
     askClarify(q.question, q.options);
-    state.pendingClarify = { slot: 'music_source', origText: text };
+    state.pendingClarify = { slot: 'music_source', origText: text, at: Date.now() };
     return;
   }
   /* learned taste applies silently to future music commands */
@@ -501,7 +510,7 @@ async function handleInput(text, opts = {}) {
     const slotQ = CLARIFY.checkSlots(hit, text);
     if (slotQ) {
       askClarify(slotQ.question, slotQ.options);
-      state.pendingClarify = slotQ.pending;
+      state.pendingClarify = { ...slotQ.pending, at: Date.now() };   // v10.2.1: 2-min self-destruct
       return;
     }
     state.lastTopic = hit.intent;
