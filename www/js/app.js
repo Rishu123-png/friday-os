@@ -34,6 +34,9 @@ import * as VOX from './vox.js';      // v11.2 Phase 4: Voice Engine 2.0 — for
 import * as MEMEX from './memex.js';  // v11.3 Phase 5: Cognitive Memory Engine
 import * as VISIONX from './visionx.js'; // v11.3 Phase 6: AI Vision System
 import * as AUTOX from './autox.js';  // v11.3 Phase 7: Intelligent Automation Engine
+import * as PLANX from './planx.js';  // v12.0 Phase 8: AI Planner & Reasoning Engine
+import * as INTELX from './intelx.js';// v12.1 Phase 9: Intelligence & Context Engine
+import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -59,6 +62,16 @@ const bootFridayCore = () => {
     });
     CORE.register('autox', {
       health: () => { const d = AUTOX.dashRows(); return { ok: true, detail: d.enabled + '/' + d.rules + ' rules' + (d.last ? ' · ok ' + (d.okRate ?? '—') + '%' : '') }; }
+    });
+    /* v12.0-12.2: Phases 8-10 engines report as services too */
+    CORE.register('planx', {
+      health: () => { const s = PLANX.planStats(); return { ok: true, detail: s.total + ' plans · ' + s.failRate + '% fail · ' + s.retries + ' retries' }; }
+    });
+    CORE.register('intelx', {
+      health: () => { const d = INTELX.dashboard(); return { ok: true, detail: d.samples + ' obs · wake ' + (d.wakeHour != null ? d.wakeHour + ':00' : '?') + ' · apps ' + d.frequentApps.length }; }
+    });
+    CORE.register('devx', {
+      health: () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥 HOT' : '') }; }
     });
     CORE.register('vision', { health: () => ({ ok: true, detail: 'camera on demand' }) });
     CORE.register('automation', { health: () => ({ ok: true, detail: 'routines+alarms' }) });
@@ -394,6 +407,7 @@ async function init() {
     }
     return handleInput(action, { silentEcho: true, dedupeSkip: true, _confirmed: true });
   }); } catch (e) {}
+  bootPhase8to10();   // v12.0-12.2: Planner + Intelligence + Device engines (fire-and-forget)
   /* v11.3 Phase 5: daily digest + cleanup of expired vision memories */
   setTimeout(() => { try {
     const s = MEMEX.dailyDigest(new Date().toDateString(), 'ke sessions me');
@@ -718,6 +732,11 @@ async function handleInput(text, opts = {}) {
   if (state.expect) {
     const kind = state.expect;
     state.expect = null;
+    /* v12.0 Phase 8: PLANX interactive steps (confirm / rescue / ask) */
+    if (kind === 'plan_answer' && state.planAsk) {
+      const done = state.planAsk; state.planAsk = null;
+      done(text.trim()); return;
+    }
     if (kind === 'note_text') { S.addItem(KEYS.NOTES, { text }); refresh('notes'); return reply(`Saved: "${text}"`); }
     if (kind === 'reminder_text') return handleInput('remind me to ' + text);
     if (kind === 'task_text') { S.addItem(KEYS.TASKS, { text, done: false }); refresh('tasks'); return reply(`Task added: "${text}"`); }
@@ -790,6 +809,7 @@ async function handleInput(text, opts = {}) {
     if (fixed !== text) hit = resolve(fixed, { lastTopic: state.lastTopic });
   }
   MEM.logEpisode({ text, intent: hit ? hit.intent : null, role: 'user' });
+  try { INTELX.tick('command', { intent: hit ? hit.intent : null }); } catch (_) {}   // v12.1: preference learner
   if (hit && hit.intent) { try { MEMEX.trackUse(hit.intent); } catch (_) {} }   // v11.3: preference learner
   /* v10.0 M1: facts about the user's life get embedded for meaning-recall
      (silent no-op when the memory brain is not downloaded). */
@@ -824,6 +844,22 @@ async function handleInput(text, opts = {}) {
       if (!V.isSpeaking()) VOX.vox.armReady(1200);        // v11.2 VOX
       return;
     }
+  }
+
+  /* v12.1 Phase 9: study-done phrase ends a tracked study session
+     (user echo already added upstream — no duplicate bubble) */
+  if (/^(study done|study over|study finished|padhai (khatam|ho gayi|done))\b/i.test(text)) {
+    const r = INTELX.studyStop();
+    const st = INTELX.studyStats(INTELX.studySessions());
+    reply(`Nice, Boss — ${r.min} min logged. Today: ${st.todayMin} min · streak: ${st.streak} day${st.streak === 1 ? '' : 's'}.`);
+    try { INTELX.tick('study_done', { topic: r.topic, min: r.min }); } catch (_) {}
+    return;
+  }
+
+  /* v12.0 Phase 8: the PLANNER claims multi-step / reasoning goals when the
+     intent engine found no single command. Single commands are untouched. */
+  if (!hit && S.getSetting('plannerEnabled') !== false && PLANX.shouldPlan(text)) {
+    return runPlannerFlow(text, opts);
   }
 
   // 2) CLOUD (server mode or Groq key present)
@@ -1917,6 +1953,12 @@ async function runAction(a, hit) {
 
     case 'setup': { await runSetup(); return true; }
 
+    /* ================= v12.0 Phase 8: PLANNER ================= */
+    case 'plan': return runPlannerFlow(a.goal, {});
+
+    /* ================= v12.2 Phase 10: DEVICE DIAGNOSTICS ================= */
+    case 'device_status': return runDiagnostics();
+
 
     case 'alarm_add': {
       const rec = AUTO.addAlarm(a.alarm);
@@ -2097,6 +2139,269 @@ async function runAction(a, hit) {
     }
     default: return false;
   }
+}
+
+/* ================= v12.0-12.2: PHASES 8-10 ENGINES ================= */
+
+/* Interactive prompt for PLANX: pauses the plan, waits for the next input. */
+function promptUser(question, step) {
+  return new Promise(res => {
+    state.planAsk = res;
+    state.expect = 'plan_answer';
+    reply(question);
+    addClarifyChips([{ label: '✅ Go', say: 'go' }, { label: '⏭️ Skip', say: 'skip' }, { label: '🛑 Stop', say: 'stop' }]);
+  });
+}
+
+/* Re-render the live plan checklist bubble. */
+function planStepUI(plan) {
+  if (!state.planEl) return;
+  state.planEl.querySelector('.message-bubble').innerHTML = U.renderRich(
+    PLANX.renderPlanText(plan) + (plan.status === 'running' ? '\n\n_working on it…_' : ''));
+  scrollBottom();
+}
+
+/* Tool executor — maps PLANX tools onto existing FRIDAY skills. */
+async function planExecStep(plan, step, results) {
+  const tool = PLANX.selectTool(step);
+  switch (tool) {
+    case 'schedule': {
+      const end = new Date(); end.setDate(end.getDate() + (plan.days || 1)); end.setHours(23, 59, 59, 999);
+      const rs = S.getList(KEYS.REMINDERS).filter(r => !r.done && r.due >= Date.now() && r.due <= end.getTime()).slice(0, 4);
+      const al = AUTO.alarms().filter(x => x.enabled).slice(0, 4);
+      const bits = [];
+      if (rs.length) bits.push('Reminders: ' + rs.map(r => r.text + ' (' + humanTime(new Date(r.due)) + ')').join('; '));
+      if (al.length) bits.push('Alarms: ' + al.map(AUTO.describeAlarm).join('; '));
+      return { ok: true, result: bits.length ? bits.join('. ') : 'Schedule clear — no reminders or alarms.' };
+    }
+    case 'notes': {
+      const q = String(step.data.topic || '').toLowerCase();
+      const notes = S.getList(KEYS.NOTES).filter(n => !q || String(n.text).toLowerCase().includes(q)).slice(0, 3);
+      const text = notes.length ? notes.map(n => '• ' + n.text.slice(0, 140)).join('\n')
+        : (q ? `No notes matching "${q}" — plan from scratch.` : 'No notes yet — plan from scratch.');
+      return { ok: true, result: { text, notes } };
+    }
+    case 'summarize': {
+      const prev = Object.values(results || {}).find(r => r && r.notes);
+      if (!prev || !prev.notes.length) return { ok: true, result: 'Nothing to summarize — no notes found.' };
+      const raw = prev.notes.map(n => n.text).join(' ').slice(0, 1200);
+      if (AI.hasGroq()) {
+        try {
+          const g = await AI.callGroq([
+            { role: 'system', content: 'Summarize these notes into 4-6 key points, plain words, Hinglish ok, no headers.' },
+            { role: 'user', content: raw }], { maxTokens: 220 });
+          if (g) return { ok: true, result: g };
+        } catch (_) {}
+      }
+      return { ok: true, result: raw.split(/(?<=[.!?])\s+/).slice(0, 4).join(' ').slice(0, 500) };
+    }
+    case 'plan': {
+      const days = plan.days || 1;
+      const rows = PLANX.revisionPlan(step.data.topic || plan.topic || 'study', days, 2);
+      const text = `**Revision plan (${days} day${days > 1 ? 's' : ''})**\n` +
+        rows.map(r => `- Day ${r.day} (${r.hours}h): ${r.focus}`).join('\n');
+      step._planText = text;
+      return { ok: true, result: text };
+    }
+    case 'reminder': {
+      const d = new Date(); d.setDate(d.getDate() + (plan.days || 1)); d.setHours(8, 0, 0, 0);
+      const label = `📚 Revision — ${step.data.topic || plan.topic || 'study'}`;
+      const rec = S.addItem(KEYS.REMINDERS, { text: label, due: d.getTime(), done: false });
+      scheduleReminder(rec); refresh('reminders');
+      return { ok: true, result: 'Reminder set ' + humanTime(d) + ': ' + label };
+    }
+    case 'save': {
+      const body = step._planText || (step.result ? String(step.result).slice(0, 400) : step.text);
+      S.addItem(KEYS.NOTES, { text: '🗺 ' + (plan.topic || 'plan') + ': ' + body });
+      refresh('notes');
+      return { ok: true, result: 'Saved to notes.' };
+    }
+    case 'notify': {
+      D.notify('FRIDAY — Plan ready', plan.goal.slice(0, 80), 'plan-' + plan.id);
+      U.toast('Plan ready ✅', '🧭');
+      return { ok: true, result: 'notified' };
+    }
+    case 'search': {
+      const r = await API.wikiSearch(step.data.query || step.data.topic || '', 3).catch(() => []);
+      return { ok: true, result: r.length ? r.map(x => '• ' + x.title).join('\n') : 'No search results.' };
+    }
+    case 'weather': {
+      const loc = await API.resolveLocation();
+      const wx = await API.getWeather(loc.lat, loc.lon);
+      const [desc] = API.describeWMO(wx.current.weather_code);
+      return { ok: true, result: `${Math.round(wx.current.temperature_2m)}°C ${desc} @ ${step.data.place || 'your area'}` };
+    }
+    case 'translate': {
+      const r = await API.quickTranslate(step.data.topic || step.text, 'english').catch(() => null);
+      return { ok: true, result: r && r.ok ? r.text : 'Translation unavailable.' };
+    }
+    case 'ask': {
+      const a = await promptUser(step.data.question || step.text, step);
+      return { ok: true, result: a };
+    }
+    case 'command':
+    default: {
+      await handleInput(step.text.replace(/^\w+\.\s*/i, ''), { silentEcho: true, noChain: true, dedupeSkip: true });
+      return { ok: true, result: 'done' };
+    }
+  }
+}
+
+/* v12.0 Phase 8: the planner flow — build, show checklist, execute, report. */
+async function runPlannerFlow(text, opts = {}) {
+  if (S.getSetting('plannerEnabled') === false) return false;
+  VOX.vox.set('EXECUTING', 'planner');
+  const plan = PLANX.buildPlan(text);
+  if (!plan.steps.length) {
+    reply('Could not break that into steps, Boss. Try "plan my day" or "prepare for my physics exam".');
+    return true;
+  }
+  const el = addMsg('ai', '', { returnEl: true, proactive: true });
+  state.planEl = el;
+  planStepUI(plan);
+
+  const summary = await PLANX.runPlan(plan, {
+    execStep: (step, results) => planExecStep(plan, step, results),
+    ask: (q, s) => promptUser(q, s),
+    onStep: () => planStepUI(plan),
+    retries: 2, backoffMs: 900
+  });
+  planStepUI(plan);          // final render while the element ref is still set
+  state.planEl = null;
+
+  const failed = plan.steps.filter(s => s.status === 'fail' || s.status === 'skip').length;
+  if (summary.ok) {
+    reply(`Plan complete, Boss. ${plan.steps.length} steps done.`);
+    V.speak(`Plan complete. ${plan.steps.length} steps done. ${plan.goal}`);
+  } else if (plan.status === 'aborted') {
+    reply('Plan stopped. Kuch aur?');
+  } else if (plan.status === 'scheduled') {
+    reply('Plan paused — I will continue at the scheduled time. Keep me alive in the background.');
+  } else {
+    reply(`Plan wrapped up — ${failed} step${failed > 1 ? 's' : ''} skipped or failed, rest done.`);
+  }
+  if (VOX.vox.armReady) VOX.vox.armReady(900);
+  return true;
+}
+
+/* v12.1 + v12.2: boot wiring — intelligence context, device readers, suggestions. */
+function bootPhase8to10() {
+  if (bootPhase8to10.done) return; bootPhase8to10.done = true;
+  try {
+    /* ---- v12.1 INTELX: Intelligence & Context ---- */
+    INTELX.injectContext({ memSize: S.getList(KEYS.MEMORY).length + S.getList(KEYS.NOTES).length });
+    try { INTELX.bootstrap(MEM.episodes()); } catch (_) {}
+    Bus.on('autox:battery', p => { try { INTELX.tick('battery', p); } catch (_) {} });
+    Bus.on('intel:suggest', list => { try { (list || []).slice(0, 2).forEach(surfaceIntelSuggestion); } catch (_) {} });
+    if (!S.getSetting('intelSeeded')) { S.setSetting('intelSeeded', true); try { INTELX.tick('first_use'); } catch (_) {} }
+
+    /* ---- v12.2 DEVX: Device Engine (event-driven, zero new polling) ---- */
+    try {
+      DEVX.start({
+        battery: () => D.battery(),
+        storage: async () => {
+          if (!NAT.isNative()) return null;
+          const r = await NAT.getStorageInfo().catch(() => null);
+          if (!r || !r.ok) return null;
+          return { totalGB: r.totalGB, usedGB: Math.max(0, r.totalGB - r.freeGB), largeFiles: 0, cacheMB: 0 };
+        },
+        network: () => {
+          const n = D.network() || {};
+          return { online: navigator.onLine !== false, wifi: n.type === 'wifi',
+                   cellular: /(cellular|4g|3g|2g|slow)/.test(String(n.type || '')) };
+        },
+        ram: () => {
+          const m = typeof performance !== 'undefined' && performance.memory ? performance.memory : null;
+          return m ? { totalMB: m.jsHeapSizeLimit / 1048576, usedMB: m.usedJSHeapSize / 1048576, cachedMB: 0 } : null;
+        },
+        thermal: () => null,
+        sensors: () => null
+      });
+      Bus.on('autox:battery', () => { DEVX.refresh().catch(() => {}); });
+      setInterval(() => Bus.emit('devx:refresh'), 120000);
+      Bus.on('devx:alert', alerts => {
+        if (S.getSetting('devxAlerts') === false) return;
+        const top = (alerts || [])[0];
+        if (!top) return;
+        U.toast(top.text, top.sev === 'crit' ? '🚨' : '⚠️', 5000);
+        addMsg('ai', `${top.sev === 'crit' ? '🚨' : '⚠️'} **${top.text}**`, { proactive: true });
+        if (top.sev === 'crit' && !state.speaking) V.speak(top.text);
+      });
+    } catch (_) {}
+
+    /* resume a scheduled plan parked from a previous session */
+    try {
+      const ap = PLANX.activePlan();
+      if (ap && ap.status === 'scheduled' && ap.resumeAt && ap.resumeAt <= Date.now()) {
+        PLANX.resumePlan(ap.id, {
+          execStep: (s, r) => planExecStep(ap, s, r), ask: promptUser,
+          onStep: () => planStepUI(ap)
+        }).catch(() => {});
+      }
+    } catch (_) {}
+    Logger.info('core', 'phases 8-10 online (planx · intelx · devx)');
+  } catch (e) { Logger.error('core', 'phase8-10 wiring failed: ' + (e && e.message)); }
+}
+
+/* v12.2 Phase 10: hidden diagnostics dashboard ("diagnostics" / "device health"). */
+async function runDiagnostics() {
+  thinking(true);
+  try {
+    await DEVX.refresh().catch(() => {});
+    const svc = await CORE.healthMap().catch(() => ({}));
+    const metrics = DEVX.snapshot();
+    const logs = Logger.all();
+    const pstats = PLANX.planStats();
+    const extras = {
+      automations: (AUTOX.dashRows() ? AUTOX.dashRows().enabled : 0) + ' rules',
+      voice: VOX.vox.get().toLowerCase(),
+      vision: ((MEMEX.dashboard && MEMEX.dashboard()) || {}).vision + ' scans',
+      planner: pstats.total + ' plans · ' + pstats.failRate + '% fail',
+      eventQueue: logs.length + ' log entries',
+      uptimeSec: CORE.startedAt ? Math.round((Date.now() - CORE.startedAt) / 1000) : 0,
+      crashes: logs.filter(l => l.level === 'error').length
+    };
+    const rows = DEVX.dashRows({ services: svc, metrics, extras });
+    const warn = rows.filter(r => r.sev === 'warn' || r.sev === 'crit');
+    const text = '**🔬 Device diagnostics**\n' + rows.map(r =>
+      (r.sev === 'ok' ? '✅' : r.sev === 'warn' ? '⚠️' : '🔴') + ' ' + r.k + ': ' + r.v).join('\n');
+    addMsg('ai', text, { proactive: true });
+    V.speak(`Diagnostics done. ${rows.length} checks, ${warn.length} need attention.`);
+  } catch (e) { reply('Diagnostics hiccup: ' + (e && e.message)); }
+  thinking(false);
+  return true;
+}
+
+/* Dismissible proactive suggestion card (Phase 9 — spec: relevant AND dismissible). */
+function surfaceIntelSuggestion(s) {
+  const box = $('#chatMessages');
+  if (!box) return;
+  const row = document.createElement('div');
+  row.className = 'suggest-card';
+  row.innerHTML = `<div class="suggest-body">${s.icon || '💡'} ${U.escapeHtml(s.text)}</div>
+    <div class="suggest-actions">
+      <button class="clarify-chip suggest-go" type="button">Do it</button>
+      <button class="clarify-chip suggest-x" type="button">✕</button>
+    </div>`;
+  row.querySelector('.suggest-go').addEventListener('click', () => {
+    row.remove();
+    INTELX.suggestionVerdict(s.id, true);
+    const act = {
+      study: () => { INTELX.studyStart(); reply('Focus on, Boss — 25 min padhai. Jab khatam ho, bolo "study done".'); },
+      auto_setup: () => handleInput('check updates', { silentEcho: true, noChain: true }),
+      backup: () => handleInput('backup my data', { silentEcho: true, noChain: true }),
+      reminder: () => reply('Noted, Boss.'),
+      battery_saver: () => reply('Battery saver: Settings → Battery → Battery saver → on. Ya baad mein kar lo.')
+    }[s.action && s.action.type];
+    if (act) act(); else if (s.action) runAction(s.action, {}).catch(() => {});
+  });
+  row.querySelector('.suggest-x').addEventListener('click', () => {
+    row.remove();
+    INTELX.suggestionVerdict(s.id, false);
+    U.toast('Noted — I won\'t suggest that again', '🙈');
+  });
+  box.appendChild(row);
+  scrollBottom();
 }
 
 /* ================= ASYNC SKILLS ================= */
