@@ -1057,6 +1057,22 @@ I('plan', t => /^(help me |please )?(plan|prepare|arrange|organise|organize|get 
 I('device_status', t => /\b(diagnostics|device (status|health)|system health|health check|phone (status|health))\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'device_status' } }), 5);
 
+/* ================= v13 Phase 11-13: SECURITY / PERF / CINEMATIC ================= */
+I('audit_log', t => /\b(audit (log|trail)|security log|recent security)\b/i.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/\b(?:for|about|filter|search)\s+([a-z ]{2,20})$/i);
+    return { say: null, action: { type: 'audit_log', query: m ? m[1].trim() : '' } };
+  }, 5);
+I('privacy_check', t => /\b(privacy (check|report|mode|status)|data privacy|kya data send hota hai)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'privacy_report' } }), 5);
+I('perf_stats', t => /\b(performance (stats|check|report)|perf stats|fps|ram (usage|check)|battery drain|speed test)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'perf_stats' } }), 5);
+I('cinematic', t => /\b(cinematic (mode|on|off)|effects (on|off)|glow (on|off)|neon (on|off))\b/i.test(t) ? 1 : 0,
+  t => {
+    const off = /\boff\b|\bband\b|\bhatana\b|\bkam\b/.test(t);
+    return { say: null, action: { type: 'cinematic', on: !off } };
+  }, 5);
+
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
   t => {

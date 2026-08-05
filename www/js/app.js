@@ -37,6 +37,9 @@ import * as AUTOX from './autox.js';  // v11.3 Phase 7: Intelligent Automation E
 import * as PLANX from './planx.js';  // v12.0 Phase 8: AI Planner & Reasoning Engine
 import * as INTELX from './intelx.js';// v12.1 Phase 9: Intelligence & Context Engine
 import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
+import * as SECX from './secx.js';    // v13.0 Phase 11: Security & Privacy Framework
+import * as PERFX from './perfx.js';  // v13.1 Phase 12: Performance & Optimization
+import * as CINEX from './cinex.js';  // v13.2 Phase 13: Cinematic UX
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -72,6 +75,16 @@ const bootFridayCore = () => {
     });
     CORE.register('devx', {
       health: () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥 HOT' : '') }; }
+    });
+    /* v13.0-13.2: Phases 11-13 engines report as services too */
+    CORE.register('secx', {
+      health: () => { const d = SECX.dashboard(); return { ok: true, detail: (d.appLock ? '🔒 locked · ' : '') + d.audits + ' audits · ' + d.alerts.length + ' alerts' }; }
+    });
+    CORE.register('perfx', {
+      health: () => { const d = PERFX.dashboard(); return { ok: true, detail: (d.fps || '—') + ' fps · ' + (d.ram && d.ram.usedPct != null ? d.ram.usedPct + '% ram' : 'ram —') + ' · ' + (d.aiLatencyMs != null ? d.aiLatencyMs + 'ms ai' : 'ai —') }; }
+    });
+    CORE.register('cinex', {
+      health: () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; }
     });
     CORE.register('vision', { health: () => ({ ok: true, detail: 'camera on demand' }) });
     CORE.register('automation', { health: () => ({ ok: true, detail: 'routines+alarms' }) });
@@ -408,6 +421,7 @@ async function init() {
     return handleInput(action, { silentEcho: true, dedupeSkip: true, _confirmed: true });
   }); } catch (e) {}
   bootPhase8to10();   // v12.0-12.2: Planner + Intelligence + Device engines (fire-and-forget)
+  bootPhase11to14();  // v13-14: Security + Performance + Cinematic + release wiring
   /* v11.3 Phase 5: daily digest + cleanup of expired vision memories */
   setTimeout(() => { try {
     const s = MEMEX.dailyDigest(new Date().toDateString(), 'ke sessions me');
@@ -1959,6 +1973,18 @@ async function runAction(a, hit) {
     /* ================= v12.2 Phase 10: DEVICE DIAGNOSTICS ================= */
     case 'device_status': return runDiagnostics();
 
+    /* ================= v13 Phase 11-13: SECURITY / PERF / CINEMATIC ================= */
+    case 'audit_log': return showAuditLog(a.query || '');
+    case 'privacy_report': return showPrivacyReport();
+    case 'perf_stats': return showPerfStats();
+    case 'cinematic': {
+      const on = a.on !== false;
+      S.setSetting('cinematic', on);
+      CINEX.init();
+      reply(on ? 'Cinematic mode on — full holographic glow.' : 'Cinematic mode off — clean, minimal, battery-first.');
+      return true;
+    }
+
 
     case 'alarm_add': {
       const rec = AUTO.addAlarm(a.alarm);
@@ -2139,6 +2165,106 @@ async function runAction(a, hit) {
     }
     default: return false;
   }
+}
+
+/* ================= v13.0-13.2: PHASES 11-13 ENGINES ================= */
+
+/* Boot wiring for Security / Performance / Cinematic engines. */
+function bootPhase11to14() {
+  if (bootPhase11to14.done) return; bootPhase11to14.done = true;
+  try {
+    /* ---- Phase 11 SECX: security + privacy ---- */
+    SECX.init(CORE);
+    SECX.audit('app', 'session started');
+    /* privacy consent defaults: local-first unless user opts in */
+    if (!S.getSetting('cloudConsentSet')) { S.setSetting('cloudConsentSet', true); }
+    /* non-blocking integrity check + auto recovery */
+    setTimeout(() => { SECX.integrityReport(CORE).then(r => {
+      if (!r.ok) {
+        Logger.warn('secx', 'integrity issues at boot: ' + r.issues.slice(0, 3).join(' | '));
+        SECX.autoRecover(CORE);
+      }
+    }).catch(() => {}); }, 4000);
+
+    /* ---- Phase 12 PERFX: performance + battery ---- */
+    PERFX.init({ getBattery: () => D.battery() });
+    Bus.on('perfx:metrics', m => {
+      try {
+        if (m && m.battery && m.battery.pct <= 15 && !m.battery.charging) {
+          const el = $('#hudStatus');   // subtle, not intrusive
+          if (el) el.setAttribute('data-lowbat', '1');
+        }
+      } catch (_) {}
+    });
+    /* AI latency tracking: wrap callGroq/server chat roughly */
+    const _origCall = AI.callGroq;
+    if (typeof _origCall === 'function' && !AI.callGroq._perfWrapped) {
+      AI.callGroq = async (...a) => {
+        const t0 = performance.now();
+        try { return await _origCall(...a); }
+        finally { PERFX.markAiLatency(Math.round(performance.now() - t0)); }
+      };
+      AI.callGroq._perfWrapped = true;
+    }
+    setInterval(() => { try { Bus.emit('perfx:refresh'); } catch (_) {} }, 60000);
+
+    /* ---- Phase 13 CINEX: cinematic + accessibility ---- */
+    CINEX.init();
+    Bus.on('vox:state', () => { /* orb classes applied via data-attr in CINEX */ });
+
+    Logger.info('core', 'phases 11-14 online (secx · perfx · cinex)');
+  } catch (e) { Logger.error('core', 'phase11-14 wiring failed: ' + (e && e.message)); }
+}
+
+/* ---- Phase 11: audit-log view ---- */
+async function showAuditLog(q = '') {
+  const log = SECX.auditSearch(q).slice(0, 14);
+  if (!log.length) { reply('Audit log is empty.'); return true; }
+  const lines = log.map(e => {
+    const t = new Date(e.ts);
+    const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0');
+    return `• ${hh} [${e.event}] ${e.detail}`;
+  });
+  addMsg('ai', '**🔐 Security audit log**' + (q ? ` — filter "${q}"` : '') + '\n' + lines.join('\n'), { proactive: true });
+  return true;
+}
+
+/* ---- Phase 11: privacy report ---- */
+function showPrivacyReport() {
+  const p = SECX.privacyReport();
+  const lines = [
+    '• Local-first processing: **' + (p.localFirst ? 'yes' : 'no') + '**',
+    '• Cloud AI consent: ' + (p.cloud ? '**granted**' : '**not granted** (cloud blocked until you allow)'),
+    p.cloud ? '• Cloud used for: ' + p.cloudUsedWhen.join(', ') : '• Nothing leaves the device for AI.',
+    '• Never silently uploads: ' + p.neverUploads.join(', '),
+    '• Encrypted: ' + p.encrypted.join(', '),
+    '• Audit trail: ' + p.audits + ' events'
+  ];
+  addMsg('ai', '**🛡 Privacy report**\n' + lines.join('\n'), { proactive: true });
+  V.speak(p.cloud ? 'Privacy report ready. Cloud consent is on.' : 'Privacy report ready. Everything is local-first, cloud is off.');
+  return true;
+}
+
+/* ---- Phase 12: performance stats ---- */
+async function showPerfStats() {
+  thinking(true);
+  try {
+    const b = await D.battery().catch(() => null);
+    const m = await PERFX.perfMetrics({ battery: b, network: D.network() });
+    const rows = [
+      `• FPS: **${m.fps}**${m.fps >= 55 ? '' : ' (low — effects reduced)'}`,
+      `• CPU: **${m.cpu}%** (event-driven estimate)`,
+      `• RAM: **${m.ram.usedPct != null ? m.ram.usedPct + '% (' + m.ram.usedMB + '/' + m.ram.totalMB + 'MB)' : '—'}**`,
+      `• Battery: **${m.battery ? m.battery.pct + '%' + (m.battery.charging ? ' ⚡' : '') : '—'}**`,
+      `• AI latency: **${m.aiLatencyMs != null ? m.aiLatencyMs + ' ms' : '—'}**`,
+      `• Queues: critical ${m.queues.critical} · medium ${m.queues.medium} · low ${m.queues.low}`,
+      `• Expired cache swept: ${m.cacheExpired}`
+    ];
+    addMsg('ai', '**⚡ Performance stats**\n' + rows.join('\n'), { proactive: true });
+    V.speak(`Performance check done. ${m.fps} frames per second, ${m.ram.usedPct != null ? m.ram.usedPct + ' percent ram' : 'ram unknown'}, ${m.battery ? m.battery.pct + ' percent battery' : ''}.`);
+  } catch (e) { reply('Performance stats hiccup: ' + (e && e.message)); }
+  thinking(false);
+  return true;
 }
 
 /* ================= v12.0-12.2: PHASES 8-10 ENGINES ================= */
@@ -4904,6 +5030,24 @@ function bindEvents() {
   bind('#serverUrl', 'serverUrl', 'input');
   bind('#serverToken', 'serverToken', 'input');
   bind('#serverMode', 'serverMode', 'change', 'checked');
+  /* v13 Phase 11-13: security / performance / cinematic toggles */
+  bind('#appLock', 'appLock', 'change', 'checked');
+  bind('#cloudConsent', 'cloudConsent', 'change', 'checked');
+  bind('#auditEnabled', 'auditEnabled', 'change', 'checked');
+  bind('#perfMonitor', 'perfMonitor', 'change', 'checked');
+  bind('#batteryGate', 'batteryGate', 'change', 'checked');
+  bind('#aiCache', 'aiCache', 'change', 'checked');
+  bind('#cinematic', 'cinematic', 'change', 'checked');
+  bind('#highContrast', 'highContrast', 'change', 'checked');
+  bind('#textScale', 'textScale', 'change');
+  const appPin = $('#appPin');
+  if (appPin) appPin.addEventListener('change', async () => {
+    const v = appPin.value.trim();
+    if (!v) return;
+    const r = await SECX.setAppPin(v);
+    U.toast(r.ok ? 'App PIN set 🔒' : 'PIN must be 4-8 digits', r.ok ? '🔒' : '⚠️');
+    appPin.value = '';
+  });
   /* v10.2: JARVIS zero-setup — suit keeps itself updated (WiFi, silent) */
   bind('#autoSetup', 'autoSetup', 'change', 'checked');
   const asRun = $('#autoSetupNow');
@@ -5062,6 +5206,18 @@ function onSettingChange(key, v) {
     updateBrainBadge();
     if (key === 'serverUrl') serverHealthCheck();
     if (SERVER.isConfigured()) syncServerMemory();
+  }
+  /* v13 Phase 11-13 setting reactions */
+  if (key === 'appLock') {
+    const row = $('#appPinRow');
+    if (row) row.style.display = v ? '' : 'none';
+    if (v && !S.getSetting('appPinHash')) U.toast('PIN set karo (4-8 digits) — niche field me', '🔒');
+    if (!v) { S.setSetting('appPinHash', ''); U.toast('App lock off', '🔓'); }
+  }
+  if (key === 'cloudConsent') SECX.setCloudConsent(!!v);
+  if (key === 'perfMonitor') { v ? PERFX.startFpsMeter() : PERFX.stopFpsMeter(); U.toast(v ? 'Performance monitor on' : 'Monitor off', '⚡'); }
+  if (key === 'cinematic' || key === 'highContrast' || key === 'textScale' || key === 'glassFX' || key === 'glowFX') {
+    try { CINEX.init(); } catch (_) {}
   }
 }
 
@@ -5371,6 +5527,22 @@ function syncSettingsUI() {
   set('#serverUrl', S.getSetting('serverUrl') || '');
   set('#serverToken', S.getSetting('serverToken') || '');
   set('#serverMode', S.getSetting('serverMode') !== false, 'checked');
+  set('#appLock', S.getSetting('appLock') === true, 'checked');
+  set('#cloudConsent', S.getSetting('cloudConsent') === true, 'checked');
+  set('#auditEnabled', S.getSetting('auditEnabled') !== false, 'checked');
+  set('#perfMonitor', S.getSetting('perfMonitor') === true, 'checked');
+  set('#batteryGate', S.getSetting('batteryGate') !== false, 'checked');
+  set('#aiCache', S.getSetting('aiCache') !== false, 'checked');
+  set('#cinematic', S.getSetting('cinematic') !== false, 'checked');
+  set('#highContrast', S.getSetting('highContrast') === true, 'checked');
+  set('#textScale', S.getSetting('textScale') || '1');
+  const pinRow = $('#appPinRow');
+  if (pinRow) pinRow.style.display = S.getSetting('appLock') ? '' : 'none';
+  const secxChip = $('#secxStatusChip');
+  if (secxChip) {
+    const d = SECX.dashboard();
+    secxChip.textContent = `Security: ${d.appLock ? '🔒 locked · ' : ''}${d.cloudConsent ? 'cloud on · ' : 'local-first · '}${d.audits} audit events · ${d.alerts.length} alerts`;
+  }
   set('#autoSetup', S.getSetting('autoSetup') !== false, 'checked');
   set('#callGuard', !!S.getSetting('callGuard'), 'checked');
   set('#callGuardTemplate', S.getSetting('callGuardTemplate') || '');
