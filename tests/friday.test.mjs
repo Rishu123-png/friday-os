@@ -721,3 +721,38 @@ test('v10 TR1: offline translator intent parses honestly', () => {
   const scr = resolve('translate the screen');
   assert.ok(!scr || scr.intent !== 'translate' );  // screen translation stays with vision
 });
+
+/* ---------------- v10.2 SUIT: zero-setup planner ---------------- */
+const SUIT = await import('../www/js/suit.js');
+
+test('suit: wifiOk allows wifi/unknown, blocks cellular + saveData', () => {
+  assert.ok(SUIT.wifiOk({ online: true, saveData: false, type: 'wifi' }));
+  assert.ok(SUIT.wifiOk({ online: true, saveData: false, type: '' }));          // WebView unknown
+  assert.ok(SUIT.wifiOk({ online: true, saveData: false, type: 'ethernet' }));
+  assert.ok(!SUIT.wifiOk({ online: true, saveData: true, type: 'wifi' }));      // data saver
+  assert.ok(!SUIT.wifiOk({ online: true, saveData: false, type: 'cellular' })); // mobile data
+  assert.ok(!SUIT.wifiOk({ online: false, saveData: false, type: 'wifi' }));
+});
+
+test('suit: planAutoSetup full queue on fresh install', () => {
+  const q = SUIT.planAutoSetup(() => '');
+  assert.deepEqual(q.map(p => p.id), ['memory', 'voice', 'ears']);   // wake skipped: wakeWord default off
+});
+
+test('suit: planAutoSetup includes wake when wake word on + no key/model', () => {
+  const vals = { wakeWord: true, porcupineKey: '', voskModelPath: '' };
+  const q = SUIT.planAutoSetup(k => vals[k] || '');
+  assert.deepEqual(q.map(p => p.id), ['memory', 'wake', 'voice', 'ears']);
+});
+
+test('suit: planAutoSetup skips what already exists, porcupine key skips wake', () => {
+  const vals = { neuralVoiceCfg: '{}', sherpaSttDir: '/x', embedModelPath: '/e.gguf', wakeWord: true, porcupineKey: 'pk' };
+  const q = SUIT.planAutoSetup(k => vals[k] || '');
+  assert.equal(q.length, 0);
+});
+
+test('suit: suitLine shows progress string', () => {
+  assert.equal(SUIT.suitLine(2, 4, 'Neural voice', 40), 'Suit systems 2/4: Neural voice… 40%');
+  assert.equal(SUIT.suitLine(1, 1, 'Memory brain'), 'Suit systems 1/1: Memory brain…');
+  assert.ok(SUIT.suitDoneLine().includes('up-to-date'));
+});
