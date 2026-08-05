@@ -27,7 +27,7 @@ import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
 import * as SUIT from './suit.js';
 import * as HERALD from './herald.js';
-import { CORE, Bus, Logger, formatLogEntry } from './fridaycore.js';   // v11 Phase 1
+import { CORE, Bus, Logger } from './fridaycore.js';   // v11 Phase 1
 import * as IGN from './ignite.js';   // v11.1 Phase 2: cinematic boot
 import * as HUD from './hud.js';      // v11.1 Phase 3: living HUD
 import * as VOX from './vox.js';      // v11.2 Phase 4: Voice Engine 2.0 — formal state machine
@@ -47,49 +47,56 @@ import * as CINEX from './cinex.js';  // v13.2 Phase 13: Cinematic UX
    where cross-module signals flow. */
 const bootFridayCore = () => {
   if (bootFridayCore.done) return; bootFridayCore.done = true;
+  /* v14.1: every health probe is wrapped — a crash in one module must report
+     ITS OWN error (shown in the diagnostics/status), not "health probe crash",
+     and can never take down the health loop. */
+  const probe = (name, fn) => {
+    try { return fn() || { ok: false, detail: name + ': no result' }; }
+    catch (e) { Logger.error('core', name + ' health probe error: ' + (e && e.message || e)); return { ok: false, detail: name + ' error: ' + (e && e.message || e).slice(0, 80) }; }
+  };
   try {
     CORE.register('voice', {
-      health: () => ({ ok: VOX.vox.get() !== 'ERROR' && VOX.vox.get() !== 'OFFLINE',
+      health: () => probe('voice', () => ({ ok: VOX.vox.get() !== 'ERROR' && VOX.vox.get() !== 'OFFLINE',
         detail: VOX.vox.get().toLowerCase() + ((typeof V.isSherpaVoiceArmed === 'function' && V.isSherpaVoiceArmed()) ? ' · neural' : '')
-          + (V.isWakeActive && V.isWakeActive() ? ' · ears on' : '') })
+          + (V.isWakeActive && V.isWakeActive() ? ' · ears on' : '') }))
     });
     CORE.register('memory', {
-      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.facts + ' facts · ' + d.summaries + ' digests' }; }
+      health: () => probe('memory', () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.facts + ' facts · ' + d.summaries + ' digests' }; })
     });
     /* v11.3: Phase 5/6/7 engines report as services too */
     CORE.register('cognition', {
-      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.retrievalMs + 'ms recall · ' + d.preferenceRows + ' prefs' }; }
+      health: () => probe('cognition', () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.retrievalMs + 'ms recall · ' + d.preferenceRows + ' prefs' }; })
     });
     CORE.register('visionx', {
-      health: () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.vision + ' scans · ' + d.qr + ' qr' }; }
+      health: () => probe('visionx', () => { const d = MEMEX.dashboard(); return { ok: true, detail: d.vision + ' scans · ' + d.qr + ' qr' }; })
     });
     CORE.register('autox', {
-      health: () => { const d = AUTOX.dashRows(); return { ok: true, detail: d.enabled + '/' + d.rules + ' rules' + (d.last ? ' · ok ' + (d.okRate ?? '—') + '%' : '') }; }
+      health: () => probe('autox', () => { const d = AUTOX.dashRows(); return { ok: true, detail: d.enabled + '/' + d.rules + ' rules' + (d.last ? ' · ok ' + (d.okRate ?? '—') + '%' : '') }; })
     });
     /* v12.0-12.2: Phases 8-10 engines report as services too */
     CORE.register('planx', {
-      health: () => { const s = PLANX.planStats(); return { ok: true, detail: s.total + ' plans · ' + s.failRate + '% fail · ' + s.retries + ' retries' }; }
+      health: () => probe('planx', () => { const s = PLANX.planStats(); return { ok: true, detail: s.total + ' plans · ' + s.failRate + '% fail · ' + s.retries + ' retries' }; })
     });
     CORE.register('intelx', {
-      health: () => { const d = INTELX.dashboard(); return { ok: true, detail: d.samples + ' obs · wake ' + (d.wakeHour != null ? d.wakeHour + ':00' : '?') + ' · apps ' + d.frequentApps.length }; }
+      health: () => probe('intelx', () => { const d = INTELX.dashboard(); return { ok: true, detail: d.samples + ' obs · wake ' + (d.wakeHour != null ? d.wakeHour + ':00' : '?') + ' · apps ' + d.frequentApps.length }; })
     });
     CORE.register('devx', {
-      health: () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥 HOT' : '') }; }
+      health: () => probe('devx', () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥 HOT' : '') }; })
     });
     /* v13.0-13.2: Phases 11-13 engines report as services too */
     CORE.register('secx', {
-      health: () => { const d = SECX.dashboard(); return { ok: true, detail: (d.appLock ? '🔒 locked · ' : '') + d.audits + ' audits · ' + d.alerts.length + ' alerts' }; }
+      health: () => probe('secx', () => { const d = SECX.dashboard(); return { ok: true, detail: (d.appLock ? '🔒 locked · ' : '') + d.audits + ' audits · ' + d.alerts.length + ' alerts' }; })
     });
     CORE.register('perfx', {
-      health: () => { const d = PERFX.dashboard(); return { ok: true, detail: (d.fps || '—') + ' fps · ' + (d.ram && d.ram.usedPct != null ? d.ram.usedPct + '% ram' : 'ram —') + ' · ' + (d.aiLatencyMs != null ? d.aiLatencyMs + 'ms ai' : 'ai —') }; }
+      health: () => probe('perfx', () => { const d = PERFX.dashboard(); return { ok: true, detail: (d.fps || '—') + ' fps · ' + (d.ram && d.ram.usedPct != null ? d.ram.usedPct + '% ram' : 'ram —') + ' · ' + (d.aiLatencyMs != null ? d.aiLatencyMs + 'ms ai' : 'ai —') }; })
     });
     CORE.register('cinex', {
-      health: () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; }
+      health: () => probe('cinex', () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; })
     });
-    CORE.register('vision', { health: () => ({ ok: true, detail: 'camera on demand' }) });
-    CORE.register('automation', { health: () => ({ ok: true, detail: 'routines+alarms' }) });
+    CORE.register('vision', { health: () => probe('vision', () => ({ ok: true, detail: 'camera on demand' })) });
+    CORE.register('automation', { health: () => probe('automation', () => ({ ok: true, detail: 'routines+alarms' })) });
     CORE.register('notifications', {
-      health: () => ({ ok: true, detail: NAT.isNative() ? 'listener service' : 'web mode (native only)' })
+      health: () => probe('notifications', () => ({ ok: true, detail: NAT.isNative() ? 'listener service' : 'web mode (native only)' }))
     });
     /* a few live signals onto the bus — keep chatter tiny */
     Bus.on('service:error', ev => { state.systemsRows = state.systemsRows || []; });
@@ -229,9 +236,17 @@ function hudInit() {
     if (b) Bus.emit('autox:battery', { level: b.level, charging: !!b.charging });   // v11.3 Phase 7: existing 30s poll doubles as trigger — zero new wakeups
     const w = [];
     if (b) w.push({ k: 'BATTERY', value: HUD.batteryLabel(b.level, b.charging) });
+    /* v14.1 fix: navigator.storage.estimate() is BROWSER ORIGIN quota, not
+       device storage — it showed "0.0/10.0 GB" and misled. In the APK use
+       real device storage; in web show nothing (HUD motto: no fake vitals). */
     try {
-      const e = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
-      if (e && e.quota) w.push({ k: 'STORAGE', value: HUD.storageLabel(e.usage, e.quota) });
+      if (NAT.isNative()) {
+        const si = await NAT.getStorageInfo().catch(() => null);
+        if (si && si.ok && si.totalGB) {
+          const free = typeof si.freeGB === 'number' ? si.freeGB : null;
+          if (free != null) w.push({ k: 'STORAGE', value: free.toFixed(1) + ' GB free', cls: free < 2 ? 'warn' : '' });
+        }
+      }
     } catch (_) {}
     w.push({ k: 'NET', value: HUD.netLabel(navigator.onLine, SERVER.isConfigured() ? true : undefined) });
     w.push({ k: 'WAKE', value: S.getSetting('wakeWord') ? 'ON 🎙' : 'OFF' });
@@ -272,12 +287,22 @@ function hudInit() {
     if (st === 'LISTENING') hudPush('🎙️', 'sun rahi hoon…');
     else if (st === 'UNDERSTANDING') hudPush('👂', 'samajh rahi hoon…');
     else if (st === 'EXECUTING') hudPush('⚡', e.detail ? e.detail.slice(0, 40) : 'kaam ho raha hai');
-    else if (st === 'ERROR') hudPush('🔴', 'voice fault — auto-recovery on');
+    else if (st === 'ERROR') hudPush('🔴', e.detail ? 'voice: ' + String(e.detail).slice(0, 40) : 'voice fault');
   });
   voxPaint(VOX.vox.get());
+  /* v14.1: a dead voice engine (3 real failures) must NOT be auto-revived
+     silently — that was the "recovery never succeeds" loop. User taps = retry. */
+  Bus.on('voice:dead', ev => {
+    state.voiceGiveUp = true;
+    const reason = (ev && (ev.reason || ev.error)) || 'voice fault';
+    VOX.vox.set('ERROR', String(reason).slice(0, 60));
+    hudPush('🔴', 'voice stopped: ' + String(reason).slice(0, 40));
+    setStatus('Voice fault: ' + String(reason).slice(0, 50) + ' — tap mic to retry', true);
+    Logger.error('voice', 'voice engine dead: ' + String(reason));
+  });
   /* typed commands skip the mic path, so a slow reconcile keeps the orb
      honest for keyboard traffic too (cheap — 2.5s, only touches classes) */
-  setInterval(() => { if (VOX.vox.get() === 'OFFLINE') VOX.vox.set('INITIALIZING'); }, 30000);
+  setInterval(() => { if (!state.voiceGiveUp && VOX.vox.get() === 'OFFLINE') VOX.vox.set('INITIALIZING'); }, 30000);
   setInterval(() => {
     const st = VOX.vox.get();
     if ((st === 'LISTENING' || st === 'UNDERSTANDING') && !state.listening && (Date.now() - VOX.vox.since() > 15000)) {
@@ -371,6 +396,8 @@ async function init() {
       state.listening = false;
       $('#micButton').classList.remove('listening');
       $('#micContainer')?.classList.remove('listening'); $('#inputWave')?.classList.remove('on');
+      state.voiceLastErr = err;                    // v14.1: keep the real cause for the status/audit
+      Logger.error('voice', 'voice onError: ' + String(err));
       if (wasChain && (err === 'no-speech' || err === 'busy' || err === 'client')) {
         setStatus('Tap to speak');
         return;
@@ -437,6 +464,11 @@ async function init() {
   setInterval(updateReactor, 60000);
   setInterval(computeSystemsLine, 120000);
   setInterval(() => { const mc = $('#micContainer'); if (mc) mc.classList.toggle('speaking', !!state.speaking); }, 700);
+  /* v14.1: status banner reacts to voice/core changes instead of only the
+     2-min poll — throttled so a flapping state can't thrash the DOM. */
+  const systemsThrottle = PERFX.throttle(() => computeSystemsLine(), 2500);
+  Bus.on('vox:state', () => systemsThrottle());
+  Bus.on('core:health', () => systemsThrottle());
 
   /* v8.0: Karen morning brief - once per day, first open before noon */
   try {
@@ -751,6 +783,8 @@ async function handleInput(text, opts = {}) {
       const done = state.planAsk; state.planAsk = null;
       done(text.trim()); return;
     }
+    /* v14.1: "send this photo" → next input is the contact name */
+    if (kind === 'send_img_to') return sendSharedImageTo(text);
     if (kind === 'note_text') { S.addItem(KEYS.NOTES, { text }); refresh('notes'); return reply(`Saved: "${text}"`); }
     if (kind === 'reminder_text') return handleInput('remind me to ' + text);
     if (kind === 'task_text') { S.addItem(KEYS.TASKS, { text, done: false }); refresh('tasks'); return reply(`Task added: "${text}"`); }
@@ -1973,6 +2007,27 @@ async function runAction(a, hit) {
     /* ================= v12.2 Phase 10: DEVICE DIAGNOSTICS ================= */
     case 'device_status': return runDiagnostics();
 
+    /* ================= v14.1: PHOTO actions (shared/captured image) ================= */
+    case 'send_image': {
+      const name = a.contact || a.name || '';
+      if (!name) {
+        reply('Kisko bhejna hai? Bolo contact ka naam — jaise "papa".');
+        state.expect = 'send_img_to';
+        return true;
+      }
+      return sendSharedImageTo(name);
+    }
+    case 'save_image': return saveSharedImageTo();
+    case 'photo_describe': {
+      const img = state.sharedImage;
+      if (!img) { reply('Abhi koi photo nahi hai describe karne ke liye.'); return true; }
+      thinking(true);
+      const v = await AI.callGroqVision(img.dataUrl, a.question || 'Describe this image').catch(() => null);
+      thinking(false);
+      reply(v && v.ok && v.text ? v.text : 'Vision unavailable (' + ((v && v.reason) || 'error') + ').', { source: 'live' });
+      return true;
+    }
+
     /* ================= v13 Phase 11-13: SECURITY / PERF / CINEMATIC ================= */
     case 'audit_log': return showAuditLog(a.query || '');
     case 'privacy_report': return showPrivacyReport();
@@ -2576,6 +2631,7 @@ async function computeSystemsLine() {
   }
   let caps = {};
   try { caps = await NAT.capabilities() || {}; } catch (e) {}
+  /* capability rows (permissions) */
   const rows = [
     { name: 'Notification read/reply', ok: !!caps.notifications, fix: 'Special access > Notification access > FRIDAY OS ON' },
     { name: 'FRIDAY Control (screen taps)', ok: !!caps.accessibility, fix: 'Accessibility > FRIDAY Control > ON' },
@@ -2584,12 +2640,36 @@ async function computeSystemsLine() {
     { name: 'SMS', ok: !!caps.sendSms, fix: 'Settings > Apps > FRIDAY OS > Permissions > SMS' },
     { name: 'Phone calls', ok: !!caps.phone, fix: 'Settings > Apps > FRIDAY OS > Permissions > Phone' }
   ];
-  state.systemsRows = rows;
-  const bad = rows.filter(r => !r.ok).length;
-  el.className = 'systems-line ' + (bad ? 'warn' : 'ok');
-  el.textContent = bad
-    ? `${bad} SYSTEM${bad > 1 ? 'S' : ''} NEED${bad > 1 ? '' : 'S'} ATTENTION - TAP HERE`
-    : 'ALL SYSTEMS NOMINAL';
+  /* v14.1: aggregate CORE service health + VOX state too — the old banner only
+     looked at permissions, so it said "ALL SYSTEMS NOMINAL" while voice was
+     dead and probes were crashing. */
+  let health = {};
+  try { health = await CORE.healthMap(); } catch (e) {}
+  const CRITICAL = ['voice', 'memory', 'secx', 'autox', 'planx', 'devx'];
+  const critFails = CRITICAL
+    .map(n => ({ n, s: health[n] }))
+    .filter(x => x.s && x.s.ok === false);
+  const warnFails = Object.entries(health).filter(([, s]) => s && s.ok === false && !CRITICAL.includes(s.name || '')).length;
+  const permMissing = rows.filter(r => !r.ok).length;
+  const voiceState = VOX.vox.get();
+  const voiceDead = voiceState === 'ERROR';
+
+  const critNames = critFails.map(x => x.n);
+  if (voiceDead && !critNames.includes('voice')) critNames.unshift('voice');
+
+  state.systemsRows = rows.concat(critFails.map(x => ({
+    name: 'Service: ' + x.n, ok: false, sev: 'crit', fix: (x.s && x.s.error) || (x.s && x.s.detail) || 'fault'
+  })));
+
+  const sev = critNames.length ? 'crit' : (permMissing || warnFails) ? 'warn' : 'ok';
+  el.className = 'systems-line ' + (sev === 'crit' ? 'crit' : sev === 'warn' ? 'warn' : 'ok');
+  if (sev === 'crit') {
+    el.textContent = `🔴 SYSTEM DEGRADED - ${critNames.slice(0, 3).join(', ')} - TAP HERE`;
+  } else if (sev === 'warn') {
+    el.textContent = `🟡 ${permMissing + warnFails} SYSTEM${(permMissing + warnFails) > 1 ? 'S' : ''} NEED${(permMissing + warnFails) > 1 ? '' : 'S'} ATTENTION - TAP HERE`;
+  } else {
+    el.textContent = '🟢 ALL SYSTEMS NOMINAL';
+  }
 }
 
 async function loadWeatherWidget() {
@@ -3284,22 +3364,72 @@ async function checkShareInbox() {
   const img = r.imageBase64;
   if (!text && !img) return;
   if (img) {
-    const dataUrl = 'data:' + (r.mime || 'image/jpeg') + ';base64,' + img;
+    const mime = r.mime || 'image/jpeg';
+    const dataUrl = 'data:' + mime + ';base64,' + img;
+    state.sharedImage = { dataUrl, mime, b64: img, at: Date.now() };   // v14.1: keep for send/save
     addMsg('user', 'Shared an image with you.', { image: dataUrl });
-    if (AI.hasGroq()) {
-      thinking(true);
-      const v = await AI.callGroqVision(dataUrl, text || 'Describe this shared image');
-      thinking(false);
-      reply(v && v.ok ? v.text : 'I can see you shared an image, but the vision model failed (' + ((v && v.reason) || 'error') + ').', { source: 'live' });
+    const v = await AI.callGroqVision(dataUrl, text || 'Describe this shared image').catch(() => null);
+    if (v && v.ok && v.text) {
+      reply(v.text, { source: 'live' });
     } else {
-      reply('Image received. Add a Groq key and I will describe anything you share.');
+      reply('Photo mil gayi. ' + ((v && v.reason) || 'Vision unavailable') + ' — but I can send it or save it for you. 👇', { source: 'live' });
     }
+    offerImageActions(dataUrl, mime);
     return;
   }
   const urlM = text.match(/https?:\/\/\S+/);
   addMsg('user', urlM ? 'Shared a link: ' + urlM[0] : 'Shared text: ' + text.slice(0, 200));
   if (urlM) doSummarizeShared(urlM[0], text);
   else doSummarizeShared(null, text);
+}
+
+/* v14.1: tappable actions for any photo — WhatsApp-send, save to gallery,
+   re-describe. Rendered as chips right under the image bubble. */
+function offerImageActions(dataUrl, mime) {
+  const box = $('#chatMessages');
+  if (!box) return;
+  const row = document.createElement('div');
+  row.className = 'clarify-chips img-actions';
+  const mk = (label, say) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'clarify-chip'; b.textContent = label;
+    b.addEventListener('click', () => { row.remove(); handleInput(say, { noChain: true }); });
+    row.appendChild(b);
+  };
+  mk('📤 Send on WhatsApp', 'send this photo on whatsapp');
+  mk('💾 Save photo', 'save this photo');
+  mk('🔍 Describe again', 'describe this photo');
+  box.appendChild(row);
+  scrollBottom();
+}
+
+async function sendSharedImageTo(contactName, opts = {}) {
+  const img = state.sharedImage;
+  if (!img) { reply('Koi photo abhi share nahi hui — pehle photo share karo, phir bolo "send to <name>".'); return true; }
+  const name = String(contactName || '').replace(/^(to|ko|for|se)\s+/i, '').trim();
+  if (!name) { reply('Kisko bhejna hai? Bolo "send to <naam>" — jaise "send to papa".'); return true; }
+  const c = await contactByName(name);
+  if (!c || !c.phone) { reply(`"${name}" contacts me nahi mila. Pehle "my father's name is Ramesh" jaise bolo, ya contact save karo.`); return true; }
+  if (!NAT.isNative()) { reply('Photo bhejna installed app me chalta hai (web build me WhatsApp kholke khud bhejo).'); return true; }
+  thinking(true);
+  const r = await NAT.sendImage(c.phone, img.b64, { caption: 'Sent by FRIDAY', mime: img.mime }).catch(() => null);
+  thinking(false);
+  if (r && r.ok) {
+    reply(`WhatsApp khul gaya — **${c.name}** ke chat me photo attached hai. Send dabao. 📤`);
+    V.speak(`WhatsApp open kar diya ${c.name} ke liye. Photo ready hai, bas send dabao.`);
+  } else {
+    reply('Photo WhatsApp me nahi khul payi (' + ((r && r.reason) || 'error') + '). WhatsApp installed hai?');
+  }
+  return true;
+}
+
+async function saveSharedImageTo() {
+  const img = state.sharedImage;
+  if (!img) { reply('Koi photo nahi hai save karne ke liye.'); return true; }
+  if (!NAT.isNative()) { reply('Web build me photo save nahi kar sakti — long-press karke save karo.'); return true; }
+  const r = await NAT.saveImage(img.b64, { mime: img.mime }).catch(() => null);
+  reply(r && r.ok ? 'Photo gallery me save ho gayi — **Pictures/FRIDAY** 📸' : 'Photo save nahi hui (' + ((r && r.reason) || 'error') + ').');
+  return true;
 }
 
 async function contactByName(name) {
@@ -4716,7 +4846,10 @@ function bindEvents() {
   // Mic
   $('#micButton').addEventListener('click', () => {
     if (state.speaking) { V.cancelSpeech(); state.speaking = false; return; }
-    if (state.listening) V.stopListening(); else V.listen();
+    if (state.listening) V.stopListening(); else {
+      state.voiceGiveUp = false;      // v14.1: tap mic = explicit retry
+      V.listen();
+    }
   });
 
   // Send

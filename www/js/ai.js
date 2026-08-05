@@ -7,7 +7,7 @@
 
    NOTHING here is required for the app to run. No key = still works. */
 
-import { getSetting, setSetting } from './store.js';
+import { getSetting } from './store.js';
 import { pick } from './nlp.js';
 import * as SERVER from './server.js';
 
@@ -313,8 +313,17 @@ export function offlineReply(text, context = {}) {
 /* ---------- v7.6: vision Q&A (Groq multimodal, llama-4-scout) ---------- */
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
-/** Ask about an image: (dataUrl or base64, question) -> {ok, text} */
+/**
+ * Describe an image: FRIDAY Cloud server first (no key needed in the app),
+ * then the local Groq key as fallback. (dataUrl or base64, question) -> {ok, text}.
+ */
 export async function callGroqVision(base64Image, question) {
+  /* v14.1: server vision — the recommended FRIDAY Cloud path */
+  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
+    const r = await SERVER.vision(base64Image, question);
+    if (r && r.ok && r.text) return { ok: true, text: r.text };
+    if (r && r.ok === false && r.reason && r.reason !== 'network') return r;  // server answered — honest
+  }
   if (!hasGroq()) return { ok: false, reason: 'no_key' };
   try {
     const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
