@@ -66,6 +66,7 @@ workflows:
         script: |
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout
           cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
+          cp native/res/xml/file_paths.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           ls -1 android/app/src/main/res/xml android/app/src/main/res/layout
 
@@ -163,6 +164,7 @@ workflows:
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
           cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
+          cp native/res/xml/file_paths.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
           cp native/proguard-rules.pro android/app/proguard-rules.pro
