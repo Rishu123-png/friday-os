@@ -1,3 +1,4 @@
+
 /* ===== FRIDAY OS — Server Client (the "real Friday" backend) =====
    Drop-in brain: when Settings → "FRIDAY Cloud" has a server URL, this
    module replaces Groq for chat, and provides server STT/TTS so the phone
@@ -89,8 +90,7 @@ export async function chat(messages, opts = {}) {
 }
 
 /** Transcribe an audio blob (from the mic or a file) via the server. */
-export async function stt(blob) {
-  const fd = new FormData();
+export async function stt(blob) {  const fd = new FormData();
   fd.append('file', blob, 'audio.webm');
   const r = await fetch(base() + '/v1/stt', {
     method: 'POST',
@@ -152,4 +152,17 @@ export async function fetchRaw(url) {
     if (!r.ok) return { ok: false };
     return await r.json();
   } catch (_) { return { ok: false }; }
+}
+
+/** Describe an image via the FRIDAY Cloud server (/v1/vision). */
+export async function vision(base64Image, question = '') {
+  if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+  try {
+    const r = await fetch(base() + '/v1/vision', {
+      method: 'POST', headers: headers(), body: JSON.stringify({ image_b64: base64Image, question })
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) return { ok: false, reason: (j && j.detail) || 'SERVER_VISION_' + r.status };
+    return { ok: !!j.ok, text: j.text || '', reason: j.ok ? '' : (j.detail || '') };
+  } catch (_) { return { ok: false, reason: 'network' }; }
 }
