@@ -28,7 +28,6 @@ export const DEFAULTS = {
   speechPitch: '1.1',
   voiceLang: 'en-US',
   wakeWord: false,
-  autoListen: false,
   bargeIn: true,
   streamingTts: true,
   // offline brain
@@ -49,7 +48,6 @@ export const DEFAULTS = {
   // Data
   saveMemory: true,
   locationAccess: false,
-  units: 'metric',
   // native (APK only)
   backgroundService: true,
   bootStart: false,
@@ -85,23 +83,17 @@ export const DEFAULTS = {
   // v12.1 PHASE 9 INTELX: Intelligence & Context Engine
   intelEnabled: true,      // proactive awareness master switch
   intelStudyMode: true,    // study-session suggestions
-  intelPrivacy: true,      // learning stays LOCAL; nothing leaves device w/o consent
   lastBackupAt: 0,         // weekly backup suggestion marker
   // v12.2 PHASE 10 DEVX: Device Engine
   devxAlerts: true,        // informative device alerts (low battery, heat, storage)
-  devxDashboard: false,    // hidden diagnostics dashboard (Settings → long-press Systems)
   // v13.0 PHASE 11 SECX: Security & Privacy Framework
   appLock: false,          // app lock (PIN, SHA-256 hash stored — never plaintext)
   appPinHash: '',          // SHA-256 of PIN (never stored in plaintext)
-  biometricLock: false,    // optional biometric unlock
   cloudConsent: false,     // privacy-first: cloud AI only with explicit consent
   cloudConsentSet: false,
   auditEnabled: true,      // audit trail (permissions, automation, security events)
-  threatMon: true,         // threat detector counters
-  secureCleanup: true,     // auto-clear temp files
   // v13.1 PHASE 12 PERFX: Performance & Optimization
   perfMonitor: false,      // developer performance monitor (FPS/CPU/RAM/latency)
-  lazyLoad: true,          // heavy modules load on demand, not at boot
   batteryGate: true,       // defer heavy AI when battery is critically low
   aiCache: true,           // short-TTL AI response cache (30 min)
   // v13.2 PHASE 13 CINEX: Cinematic UX
