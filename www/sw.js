@@ -3,7 +3,7 @@
    CDN libraries (vision OCR/objects, future transformers.js) are cached
    so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v12';
+const CACHE = 'friday-os-v14';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
@@ -19,6 +19,8 @@ const ASSETS = [
   './js/memex.js', './js/visionx.js', './js/autox.js',
   /* v12: Phases 8-10 — Planner / Intelligence / Device engines */
   './js/planx.js', './js/intelx.js', './js/devx.js',
+  /* v13: Phases 11-13 — Security / Performance / Cinematic engines */
+  './js/secx.js', './js/perfx.js', './js/cinex.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
