@@ -11,7 +11,7 @@
      Animation Optimizer / Background Task Manager / Performance Monitor
    ========================================================================== */
 
-import { getSetting, setSetting, cacheGet, cacheSet } from './store.js';
+import { getSetting, cacheGet, cacheSet } from './store.js';
 import { Bus, Logger } from './fridaycore.js';
 
 /* ---------------- 1) Startup optimization (lazy registry, pure) ---------------- */
