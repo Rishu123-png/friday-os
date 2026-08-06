@@ -10,7 +10,7 @@
    recomputes on demand. idles at ~0% extra CPU.
    ========================================================================== */
 
-import { getList, saveList, getSetting } from './store.js';
+import { getList, saveList } from './store.js';
 import { Bus, Logger } from './fridaycore.js';
 
 const DEVLOG = 'friday_devlog';
