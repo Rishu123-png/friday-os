@@ -9,7 +9,7 @@
 
    100% on-device. No Firebase, no cloud, no account. */
 
-import { KEYS, getList, saveList, addItem, getSetting } from './store.js';
+import { KEYS, getList, saveList, getSetting } from './store.js';
 import { semanticSearch } from './nlu.js';
 
 const FACTS = 'friday_facts';
