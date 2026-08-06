@@ -204,7 +204,9 @@ export function exportAll() {
     dump[KEYS.SETTINGS] = {
       ...dump[KEYS.SETTINGS],
       groqKey: '',
-      _note: 'API keys are intentionally not exported. Re-add them after import.'
+      serverToken: '',        // v15: FRIDAY Cloud token is a secret too
+      porcupineKey: '',       // v15: wake-word access key is a secret too
+      _note: 'API keys & tokens are intentionally not exported. Re-add them after import.'
     };
   }
   return { version: 7, exported: new Date().toISOString(), data: dump };
