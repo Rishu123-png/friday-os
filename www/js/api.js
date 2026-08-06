@@ -2,7 +2,7 @@
    Every endpoint here is FREE, requires NO API KEY, and is CORS-open.
    All responses cached so they degrade gracefully offline. */
 
-import { cacheGet, cacheSet, getSetting } from './store.js';
+import { cacheGet, cacheSet } from './store.js';
 
 const j = async (url, opts = {}) => {
   const res = await fetch(url, { headers: { 'Accept': 'application/json' }, ...opts });
