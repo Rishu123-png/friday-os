@@ -8,7 +8,7 @@
    starter plugins (off by default).
    ========================================================================== */
 
-import { getList, saveList } from './store.js';
+import { getList, saveList, getSetting } from './store.js';
 import { Bus, Logger } from './fridaycore.js';
 
 const PLUGINS_KEY = 'friday_plugins';
@@ -68,7 +68,10 @@ export function togglePlugin(id, on) {
   saveList(PLUGINS_KEY, getList(PLUGINS_KEY).map(p => p.id === id ? { ...p, enabled: !!on } : p));
   return true;
 }
-export function enabledPlugins() { return getList(PLUGINS_KEY).filter(p => p.enabled); }
+export function enabledPlugins() {
+  if (getSetting('pluginSystem') === false) return [];   // v15 RC: master switch
+  return getList(PLUGINS_KEY).filter(p => p.enabled);
+}
 
 /* ---------------- Runtime: dispatch a chat through plugin hooks ---------------- */
 /* Hooks live in the in-code REGISTRY (functions survive). Installed records
