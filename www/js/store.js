@@ -116,6 +116,7 @@ export const DEFAULTS = {
   uixAnimations: 'smooth', // smooth | minimal
   amoled: false,           // Phase 8: AMOLED pure-black mode
   pluginSystem: true,       // Phase pre-10: plugin system master switch
+  telemetry: false,          // RC1: opt-in telemetry (privacy-respecting)
   // telephony
   waCountryCode: '91'
 };
