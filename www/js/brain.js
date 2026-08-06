@@ -1087,6 +1087,37 @@ I('photo_save', t => /\b(save\w*|download\w*|store\w*|keep|saved? karo|download 
 I('photo_describe', t => /\b(what is this photo|describe this photo|photo (mein|me) kya hai|yeh photo kya hai|photo kya hai)\b/.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'photo_describe', question: t } }), 7);
 
+/* ================= v15 Phase 2: CHAT management =================
+   "chat stats" · "export chat" · "share chat" · "search chat <q>" */
+I('chat_stats', t => /\b(chat (stats|statistics)|conversation stats|conversation summary|baatcheet stats|chat ka (stats|hisab))\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'chat_stats' } }), 6);
+I('chat_export', t => /\b(export chat|save chat|download chat|chat export karo)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'chat_export' } }), 6);
+I('chat_share', t => /\b(share chat|send chat)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'chat_share' } }), 6);
+I('chat_search', t => /\b(search (in |my )?chat|chat me (search|dhoondo)|find (in )?chat|baatcheet me (search|dhoondo))\b/i.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(search (in |my )?chat|chat me (search|dhoondo|dhundo)|find (in )?chat|baatcheet me (search|dhoondo|dhundo)|for|about|me|in)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'chat_search', query: q } };
+  }, 6);
+
+/* ================= v15 Phase 3: AI diagnostics + workflows ================= */
+I('ai_diag', t => /\b(ai (diagnostics|usage|status|stats)|model usage|provider (status|health)|ai health)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'ai_diag' } }), 6);
+I('wf_list', t => /\b(workflows?|chains?|run workflow|list workflows)\b/i.test(t) && !/\brun workflow\s+([a-z0-9-]+)/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'wf_list' } }), 6);
+I('wf_run', t => /\brun workflow\s+([a-z0-9-]+)/i.test(t) ? 1 : 0,
+  t => {
+    const m = t.match(/run workflow\s+([a-z0-9-]+)/i);
+    const extra = t.replace(/run workflow\s+[a-z0-9-]+/i, '').replace(/\b(with|to|for|ko|se|mein|me)\b/gi, ' ').trim();
+    return { say: null, action: { type: 'wf_run', name: m[1].toLowerCase(), extra } };
+  }, 6);
+I('notif_search', t => /\b(search (my )?notifications?|notifications? (search|dhoondo)|notification history (search|find))\b/i.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(search (my )?notifications?|notifications? (search|dhoondo|dhundo|find)|notification history (search|find)|for|about|me|in)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'notif_search', query: q } };
+  }, 6);
+
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
   t => {

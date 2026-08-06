@@ -95,6 +95,7 @@ let handlers = {};
 let voices = [];
 let nativeReady = false;
 let wakeTimer = null;
+let micWatchdog = null;   // v15 Phase 2: caps any single listen session
 
 export function isListening() { return listening; }
 export function isWakeActive() { return wakeActive; }
@@ -296,6 +297,12 @@ export function listen() {
   if (useNative()) {
     wakeArmed = false;
     clearTimeout(wakeTimer);
+    /* v15 Phase 2: mic watchdog — if no final result within 45s, close the
+       mic (prevents infinite-listening hangs and battery drain). */
+    clearTimeout(micWatchdog);
+    micWatchdog = setTimeout(() => {
+      if (listening) { listening = false; NP().stopListening().catch(() => {}); if (vox.get() === 'LISTENING' || vox.get() === 'UNDERSTANDING') vox.set('READY', 'mic watchdog'); handlers.onEnd && handlers.onEnd(); }
+    }, 45000);
     ensureMicPermission().then(ok => {
       if (!ok) { handlers.onError && handlers.onError('mic-denied'); return; }
       NP().startListening({ lang: getSetting('voiceLang'), partial: true })
@@ -321,7 +328,16 @@ export function listen() {
   }
 }
 
+/* v15 Phase 2: release the mic when the app goes background — no audio
+   leaks, no surprise listening. Re-listens only if the user taps again. */
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && listening) stopListening();
+  });
+}
+
 export function stopListening() {
+  clearTimeout(micWatchdog);                    // v15 Phase 2: cancel the watchdog
   if (useNative()) {
     NP().stopListening().catch(() => {});
     listening = false;
