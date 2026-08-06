@@ -1112,3 +1112,22 @@ html.no-fx .radar-sweep, html.no-fx .scanlines, html.no-fx .core-visual { animat
 /* v14.1: photo action chips under a shared image */
 .img-actions{margin:4px 0 10px 44px}
 .img-actions .clarify-chip{font-size:.72rem;padding:6px 10px}
+
+/* ==========================================================================
+   v15 Phase 2 — UI polish: skeleton loaders + micro-interactions
+   (no layout changes, no navigation changes — purely additive polish)
+   ========================================================================== */
+.skel { position:relative; overflow:hidden; background:rgba(120,160,255,.08); border-radius:6px; min-height:14px; }
+.skel::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
+  background:linear-gradient(90deg, transparent, rgba(120,200,255,.14), transparent);
+  animation:skelSweep 1.4s ease-in-out infinite; }
+@keyframes skelSweep { 100% { transform:translateX(100%);} }
+.widget-body .skel-row { display:flex; flex-direction:column; gap:6px; }
+.msg-actions { display:inline-flex; gap:2px; margin-left:8px; opacity:0; transition:opacity .18s; }
+.message:hover .msg-actions, .message:active .msg-actions { opacity:.9; }
+.msg-act { background:transparent; border:none; color:var(--text-dim,#5f8fb0); font-size:.72rem; padding:1px 3px; cursor:pointer; border-radius:4px; }
+.msg-act:hover { color:var(--primary,#00e5ff); background:rgba(0,229,255,.1); }
+.msg-del:hover { color:#ff4d6d; }
+.message.pinned .message-bubble { border-color:rgba(255,215,0,.5); box-shadow:0 0 10px rgba(255,215,0,.12); }
+.stop-gen-btn { background:rgba(255,45,85,.15); border:1px solid rgba(255,45,85,.5); color:#ff8a9c; border-radius:999px; padding:6px 12px; font-size:.72rem; cursor:pointer; flex:0 0 auto; }
+.stop-gen-btn:active { transform:scale(.95); }
