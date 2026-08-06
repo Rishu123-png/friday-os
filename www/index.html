@@ -51,113 +51,267 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v11.3</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS v20.0</span></div>
       <div id="suitChip" class="suit-chip" hidden>Suit:</div>
-      <div class="status-right"><span class="status-indicator" id="aiStatus"><span class="dot"></span> Online</span></div>
+      <div class="status-right">
+        <div class="battery-status">
+          <span class="label">BATTERY</span>
+          <span class="value" id="statusBattery">70%</span>
+          <span class="charging-label" id="statusCharging">CHARGING</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Dashboard View (v5) -->
+    <!-- Dashboard View (v20.0 HUD) -->
     <div class="dashboard" id="dashboard">
-      <!-- AI Core + Waveform -->
-      <div class="ai-core-section" id="aiCoreWrap">
-        <canvas id="coreCanvas"></canvas>
-        <div class="core-visual">
-          <div class="hologram-ring ring-1"></div>
-          <div class="hologram-ring ring-2"></div>
-          <div class="hologram-ring ring-3"></div>
-        </div>
-        <div class="voice-waveform" id="voiceWaveform">
-          <div class="wave-bar" style="--i:0"></div><div class="wave-bar" style="--i:1"></div>
-          <div class="wave-bar" style="--i:2"></div><div class="wave-bar" style="--i:3"></div>
-          <div class="wave-bar" style="--i:4"></div><div class="wave-bar" style="--i:5"></div>
-          <div class="wave-bar" style="--i:6"></div><div class="wave-bar" style="--i:7"></div>
-          <div class="wave-bar" style="--i:8"></div><div class="wave-bar" style="--i:9"></div>
-          <div class="wave-bar" style="--i:10"></div><div class="wave-bar" style="--i:11"></div>
-          <div class="wave-bar" style="--i:12"></div><div class="wave-bar" style="--i:13"></div>
-          <div class="wave-bar" style="--i:14"></div><div class="wave-bar" style="--i:15"></div>
-          <div class="wave-bar" style="--i:16"></div><div class="wave-bar" style="--i:17"></div>
-          <div class="wave-bar" style="--i:18"></div><div class="wave-bar" style="--i:19"></div>
-          <div class="wave-bar" style="--i:20"></div><div class="wave-bar" style="--i:21"></div>
-          <div class="wave-bar" style="--i:22"></div><div class="wave-bar" style="--i:23"></div>
-        </div>
-        <p class="listening-text" id="listeningText">Tap to speak</p>
-        <p class="voice-transcript" id="voiceTranscript"></p>
+      <!-- Systems Optimal Line -->
+      <div class="systems-optimal-line">
+        <span class="dot"></span>
+        <span id="systemsLine">SYSTEMS OPTIMAL</span>
       </div>
 
-      <!-- Main Mic Button : v7.7 "Arc Reactor" — mic wrapped in live data rings -->
-      <div class="mic-container" id="micContainer">
-        <div class="reactor-ring ring-outer" id="ringBattery" title="Battery"></div>
-        <div class="reactor-ring ring-mid" id="ringSteps" title="Steps goal"></div>
-        <div class="reactor-ticks" id="reactorTicks"></div>
-        <button class="mic-button" id="micButton" aria-label="Voice Input">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            <line x1="12" y1="19" x2="12" y2="23"/>
-            <line x1="8" y1="23" x2="16" y2="23"/>
-          </svg>
-        </button>
-        <div class="mic-pulse"></div>
-        <div class="mic-pulse delay"></div>
-      </div>
-      <p class="systems-line" id="systemsLine">SYSTEMS CHECK...</p>
-
-      <!-- ===== v11.1 PHASE 3: The HUD — living command center =====
-           Layer 3 (live ring) + Layer 4 (service lights) + Layer 8 (context cards)
-           + Layer 5 (event feed) + Layer 7 (command dock). Every value REAL. -->
-      <div class="hud" id="hud">
-        <!-- v11.2 VOX: mic live-dot (Android-level honesty) + formal state line -->
-        <div class="hud-voxline">
-          <span id="micDot" class="mic-dot" title="Mic active"></span>
-          <span id="voxState" class="vox-state">READY</span>
-        </div>
-        <div class="hud-widgets" id="hudWidgets"></div>
-        <div class="hud-context" id="hudContext"></div>
-        <div class="hud-status" id="hudStatus"></div>
-        <div class="hud-feed" id="hudFeed"></div>
-        <div class="hud-dock" id="hudDock">
-          <button type="button" class="hud-dock-btn" data-dock="voice" title="Voice" aria-label="dock">🎙️</button>
-          <button type="button" class="hud-dock-btn" data-dock="camera" title="Vision" aria-label="dock">👁️</button>
-          <button type="button" class="hud-dock-btn" data-dock="auto" title="Automation" aria-label="dock">⚙️</button>
-          <button type="button" class="hud-dock-btn" data-dock="memory" title="Memory" aria-label="dock">🧠</button>
-          <button type="button" class="hud-dock-btn hud-sos" data-dock="sos" title="Emergency" aria-label="emergency">🆘</button>
-        </div>
-      </div>
-
-      <!-- Quick Actions -->
-      <div class="quick-actions" id="quickActions">
-        <button class="quick-action" data-action="time" aria-label="time"><span class="qa-icon">🕐</span><span class="qa-label">Time</span></button>
-        <button class="quick-action" data-action="weather" aria-label="weather"><span class="qa-icon">🌤️</span><span class="qa-label">Weather</span></button>
-        <button class="quick-action" data-action="note" aria-label="note"><span class="qa-icon">📝</span><span class="qa-label">Note</span></button>
-        <button class="quick-action" data-action="joke" aria-label="joke"><span class="qa-icon">😄</span><span class="qa-label">Joke</span></button>
-        <button class="quick-action" data-action="camera" aria-label="camera"><span class="qa-icon">📷</span><span class="qa-label">Vision</span></button>
-        <button class="quick-action" data-action="search" aria-label="search"><span class="qa-icon">🌐</span><span class="qa-label">Search</span></button>
-        <button class="quick-action" data-action="reminder" aria-label="reminder"><span class="qa-icon">⏰</span><span class="qa-label">Remind</span></button>
-        <button class="quick-action" data-action="translate" aria-label="translate"><span class="qa-icon">🌍</span><span class="qa-label">Translate</span></button>
-      </div>
-
-      <!-- Dashboard Widgets -->
-      <div class="dashboard-widgets" id="dashWidgets">
-        <div class="widget widget-weather" id="widgetWeather">
-          <div class="widget-header"><span class="widget-icon">🌤️</span><span>Weather</span></div>
-          <div class="widget-body" id="weatherData"><div class="skel-row"><span class="skel" style="width:70%"></span><span class="skel" style="width:45%"></span></div></div>
-        </div>
-        <div class="widget widget-reminders" id="widgetReminders">
-          <div class="widget-header"><span class="widget-icon">⏰</span><span>Reminders</span></div>
-          <div class="widget-body" id="remindersData">No reminders</div>
-        </div>
-        <div class="widget widget-notes" id="widgetNotes">
-          <div class="widget-header"><span class="widget-icon">📝</span><span>Quick Notes</span></div>
-          <div class="widget-body" id="notesData">No notes</div>
-        </div>
-        <div class="widget widget-system" id="widgetSystem">
-          <div class="widget-header"><span class="widget-icon">⚡</span><span>System</span></div>
-          <div class="widget-body" id="systemData">
-            <div class="sys-stat"><span>Memory Items</span><span id="sysMemCount">0</span></div>
-            <div class="sys-stat"><span>Chat Messages</span><span id="sysChatCount">0</span></div>
-            <div class="sys-stat"><span>Active Reminders</span><span id="sysRemCount">0</span></div>
-            <div class="sys-stat"><span>AI Provider</span><span id="sysProvider">Gemini</span></div>
+      <!-- Top Section: Location, Compass, Network -->
+      <div class="hud-row hud-top-row">
+        <div class="hud-module module-location">
+          <div class="module-header"><span class="icon">📍</span> LOCATION</div>
+          <div class="location-content">
+            <div class="location-name" id="locCity">GREATER NOIDA</div>
+            <div class="location-sub" id="locRegion">UTTAR PRADESH, INDIA</div>
+            <div class="globe-container">
+              <div class="globe-glow"></div>
+              <div class="globe-inner"></div>
+            </div>
+            <div class="coordinates" id="locCoords">28.47° N, 77.50° E</div>
+            <div class="loc-stats">
+              <div class="stat"><span>ACCURACY</span><span id="locAcc">5 m</span></div>
+              <div class="stat"><span>ALTITUDE</span><span id="locAlt">216 m</span></div>
+              <div class="stat"><span>SPEED</span><span id="locSpeed">0.0 km/h</span></div>
+            </div>
           </div>
+        </div>
+
+        <div class="hud-module module-compass">
+          <div class="compass-hud">
+            <div class="compass-ring-outer"></div>
+            <div class="compass-ring-inner">
+              <div class="compass-labels"><span>N</span><span>E</span><span>S</span><span>W</span></div>
+              <div class="compass-pointer"></div>
+            </div>
+            <div class="gps-signal">
+              <div class="signal-bars"><span class="bar on"></span><span class="bar on"></span><span class="bar on"></span><span class="bar"></span></div>
+              <div class="signal-label">12 SATELLITES</div>
+            </div>
+            <div class="compass-value" id="compassValue">135° SE</div>
+          </div>
+        </div>
+
+        <div class="hud-module module-network">
+          <div class="module-header"><span class="icon">📡</span> NETWORK</div>
+          <div class="network-content">
+            <div class="net-item">
+              <span class="label">Wi-Fi</span>
+              <span class="value highlight" id="netSsid">FRIDAY_HOME_5G</span>
+            </div>
+            <div class="net-item">
+              <span class="label">SIGNAL</span>
+              <span class="value" id="netSignal">-42 dBm</span>
+            </div>
+            <div class="net-item">
+              <span class="label">IP ADDRESS</span>
+              <span class="value" id="netIp">192.168.1.105</span>
+            </div>
+            <div class="net-item">
+              <span class="label">DOWNLOAD</span>
+              <span class="value" id="netDown">126.4 Mbps</span>
+            </div>
+            <div class="net-item">
+              <span class="label">UPLOAD</span>
+              <span class="value" id="netUp">63.8 Mbps</span>
+            </div>
+            <div class="net-item">
+              <span class="label">PING</span>
+              <span class="value" id="netPing">11 ms</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mid Section: Weather, AI Core, Bluetooth -->
+      <div class="hud-row hud-mid-row">
+        <div class="hud-module module-weather">
+          <div class="module-header"><span class="icon">☁️</span> WEATHER</div>
+          <div class="weather-content">
+            <div class="weather-main">
+              <span class="weather-icon">🌧️</span>
+              <span class="temp">27°C</span>
+            </div>
+            <div class="weather-desc">LIGHT RAIN</div>
+            <div class="weather-stats">
+              <div class="stat"><span>HUMIDITY</span><span>78%</span></div>
+              <div class="stat"><span>WIND</span><span>12 km/h</span></div>
+              <div class="stat"><span>UV INDEX</span><span>2 LOW</span></div>
+            </div>
+            <div class="weather-forecast">
+              <div class="f-day"><span>FRI</span><span>28°/24°</span></div>
+              <div class="f-day"><span>SAT</span><span>31°/25°</span></div>
+              <div class="f-day"><span>SUN</span><span>32°/26°</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-module module-ai-core">
+          <div class="ai-core-container" id="aiCoreWrap">
+            <div class="core-glow-bg"></div>
+            <canvas id="coreCanvas"></canvas>
+            <div class="core-label">AI CORE</div>
+            <div class="core-status" id="listeningText">LISTENING...</div>
+            <div class="voice-waveform" id="voiceWaveform">
+              <div class="wave-bar" style="--i:0"></div><div class="wave-bar" style="--i:1"></div>
+              <div class="wave-bar" style="--i:2"></div><div class="wave-bar" style="--i:3"></div>
+              <div class="wave-bar" style="--i:4"></div><div class="wave-bar" style="--i:5"></div>
+              <div class="wave-bar" style="--i:6"></div><div class="wave-bar" style="--i:7"></div>
+              <div class="wave-bar" style="--i:8"></div><div class="wave-bar" style="--i:9"></div>
+              <div class="wave-bar" style="--i:10"></div><div class="wave-bar" style="--i:11"></div>
+              <div class="wave-bar" style="--i:12"></div><div class="wave-bar" style="--i:13"></div>
+              <div class="wave-bar" style="--i:14"></div><div class="wave-bar" style="--i:15"></div>
+              <div class="wave-bar" style="--i:16"></div><div class="wave-bar" style="--i:17"></div>
+              <div class="wave-bar" style="--i:18"></div><div class="wave-bar" style="--i:19"></div>
+              <div class="wave-bar" style="--i:20"></div><div class="wave-bar" style="--i:21"></div>
+              <div class="wave-bar" style="--i:22"></div><div class="wave-bar" style="--i:23"></div>
+            </div>
+            <div class="core-quote">I'm always here, Boss.</div>
+            <!-- Hidden elements for JS compatibility -->
+            <div id="ringBattery" style="display:none"></div>
+            <div id="ringSteps" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="hud-module module-bluetooth">
+          <div class="module-header"><span class="icon"></span> BLUETOOTH</div>
+          <div class="bluetooth-content">
+            <div class="bt-status">SCAN ACTIVE</div>
+            <div class="bt-count">5 DEVICES FOUND</div>
+            <div class="bt-list">
+              <div class="bt-device connected">
+                <span class="bt-icon">🎧</span>
+                <div class="bt-info"><span>boAt Rockerz 550</span><span>Connected 90%</span></div>
+              </div>
+              <div class="bt-device">
+                <span class="bt-icon">🎧</span>
+                <div class="bt-info"><span>OnePlus Nord Buds</span><span>Paired 60%</span></div>
+              </div>
+              <div class="bt-device">
+                <span class="bt-icon">⌚</span>
+                <div class="bt-info"><span>Redmi Watch 3</span><span>Paired 80%</span></div>
+              </div>
+            </div>
+            <button class="bt-scan-btn">SCAN AGAIN</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Commands Section -->
+      <div class="quick-commands-grid">
+        <button class="cmd-btn" data-action="voice"><div class="cmd-icon">🎙️</div><span>VOICE</span></button>
+        <button class="cmd-btn" data-action="vision"><div class="cmd-icon">👁️</div><span>VISION</span></button>
+        <button class="cmd-btn" data-action="memory"><div class="cmd-icon">🧠</div><span>MEMORY</span></button>
+        <button class="cmd-btn" data-action="automation"><div class="cmd-icon">⚙️</div><span>AUTOMATION</span></button>
+        <button class="cmd-btn" data-action="notes"><div class="cmd-icon">📝</div><span>NOTES</span></button>
+        <button class="cmd-btn" data-action="music"><div class="cmd-icon">🎵</div><span>MUSIC</span></button>
+        <button class="cmd-btn" data-action="calls"><div class="cmd-icon">📞</div><span>CALLS</span></button>
+        <button class="cmd-btn" data-action="more"><div class="cmd-icon">⋮</div><span>MORE</span></button>
+      </div>
+
+      <!-- Bottom Section: Telemetry, Modules, Agenda -->
+      <div class="hud-row hud-bottom-row">
+        <div class="hud-module module-telemetry">
+          <div class="module-header">SYSTEM TELEMETRY</div>
+          <div class="telemetry-content">
+            <div class="tel-stats">
+              <div class="tel-stat">
+                <div class="tel-circle" style="--p:22"><span>22%</span></div>
+                <span>CPU</span>
+              </div>
+              <div class="tel-stat">
+                <div class="tel-circle" style="--p:48"><span>48%</span></div>
+                <span>RAM</span>
+              </div>
+              <div class="tel-stat">
+                <div class="tel-circle" style="--p:62"><span>62%</span></div>
+                <span>STORAGE</span>
+              </div>
+            </div>
+            <div class="tel-details">
+              <span>3.6 GB / 7.5 GB</span>
+              <span>78 GB / 126 GB</span>
+            </div>
+            <div class="tel-graph-container">
+              <div class="tel-temp">TEMP <span>34°C</span></div>
+              <canvas id="telemetryGraph"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-module module-active-modules">
+          <div class="module-header">ACTIVE MODULES</div>
+          <div class="modules-list">
+            <div class="mod-item"><span>🎙️ VOICE ENGINE</span><span class="mod-dot on"></span></div>
+            <div class="mod-item"><span>👁️ VISION ENGINE</span><span class="mod-dot standby"></span></div>
+            <div class="mod-item"><span>🧠 MEMORY ENGINE</span><span class="mod-dot on"></span></div>
+            <div class="mod-item"><span>⚙️ AUTOMATION</span><span class="mod-val">3 Active</span></div>
+            <div class="mod-item"><span>🔔 NOTIFICATIONS</span><span class="mod-val">Listening</span></div>
+            <div class="mod-item"><span>🌐 AI ROUTER</span><span class="mod-dot on"></span></div>
+          </div>
+        </div>
+
+        <div class="hud-module module-agenda">
+          <div class="module-header">TODAY'S AGENDA</div>
+          <div class="agenda-list">
+            <div class="agenda-item">
+              <span class="time">21:00</span>
+              <div class="details"><span>Workout</span><span>21:00 - 22:00</span></div>
+            </div>
+            <div class="agenda-item">
+              <span class="time">22:30</span>
+              <div class="details"><span>Project Deadline</span><span>22:30 - 23:30</span></div>
+            </div>
+            <div class="agenda-item">
+              <span class="time">23:00</span>
+              <div class="details"><span>Read Book</span><span>23:00 - 23:45</span></div>
+            </div>
+          </div>
+          <button class="view-calendar-btn">VIEW CALENDAR</button>
+        </div>
+      </div>
+
+      <!-- Footer Row: Suggestion, Alarm, Wake Word -->
+      <div class="hud-row hud-footer-row">
+        <div class="hud-module module-suggestion">
+          <div class="module-header">SMART SUGGESTION</div>
+          <div class="suggestion-content">
+            <span class="icon">💡</span>
+            <p>You have a meeting tomorrow at 10 AM.</p>
+          </div>
+          <button class="suggestion-btn">VIEW DETAILS</button>
+        </div>
+
+        <div class="hud-module module-alarm">
+          <div class="module-header">NEXT ALARM</div>
+          <div class="alarm-display">
+            <div class="alarm-time">06:30</div>
+            <div class="alarm-days">Everyday</div>
+          </div>
+          <button class="alarm-dismiss">DISMISS</button>
+        </div>
+
+        <div class="hud-module module-wake">
+          <div class="module-header">VOICE WAKE WORD</div>
+          <div class="wake-content">
+            <canvas id="wakeWaveform"></canvas>
+            <div class="wake-text">HEY FRIDAY</div>
+            <div class="wake-sub">Tap to change wake word</div>
+          </div>
+          <button class="wake-change">CHANGE</button>
         </div>
       </div>
     </div>
@@ -930,6 +1084,10 @@
   })();
   </script>
   <script type="module" src="js/app.js"></script>
+  <script type="module">
+    import { updateHUDV20 } from './js/hud_v20.js';
+    window.updateHUDV20 = updateHUDV20;
+  </script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
 <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a26be577cc69a7d0',t:'MTc4NTk5NjgxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
