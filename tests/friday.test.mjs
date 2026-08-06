@@ -1970,3 +1970,241 @@ test('workflow: failure returns failedAt + reason + history entry', async () => 
   const entry = WF.workflowLog().find(x => x.id === r.id);
   assert.ok(entry && entry.ok === false);
 });
+
+/* ================= v15 PHASE 4: SMART PRODUCTIVITY ================= */
+const NOTESX = await import('../www/js/notesx.js');
+const DOCAI = await import('../www/js/docai.js');
+const KNOW = await import('../www/js/knowledge.js');
+const PLANX4 = await import('../www/js/plannerx.js');
+
+/* ---- Notes ---- */
+test('notesx: addNote dedupes and normalizes', () => {
+  NOTESX.addNote({ text: 'Buy milk and bread', folder: 'errands' });
+  const again = NOTESX.addNote({ text: 'Buy milk and bread', folder: 'errands' });
+  assert.equal(again.folder, 'errands');           // dedupe → same record
+  assert.equal(NOTESX.notes().filter(n => n.text === 'Buy milk and bread').length, 1);
+  assert.ok(NOTESX.folders().some(f => f.name === 'errands'));
+  assert.equal(NOTESX.notesInFolder('errands').length, 1);
+});
+
+test('notesx: localSummary keeps key sentences + flashcards + mindmap', () => {
+  const text = 'Physics: Newton laws. First law is inertia. Second law is F=ma. Third law is action-reaction. Energy is conserved. Momentum is conserved.';
+  const sum = NOTESX.localSummary(text);
+  assert.ok(sum.length > 0 && sum.length < text.length);
+  const cards = NOTESX.flashcardsFrom('Q: What is inertia? A: A body at rest stays at rest.\nQ: Define force. A: Mass times acceleration.');
+  assert.equal(cards.length, 2);
+  const mm = NOTESX.mindmapFrom('# Physics Notes\n- Newton laws\n- Energy');
+  assert.ok(mm.topic.includes('Physics'));
+  assert.ok(mm.edges.length >= 2);
+});
+
+test('notesx: autoTags + noteStats + searchNotes', () => {
+  assert.ok(NOTESX.autoTags('revision for exam tomorrow').includes('study'));
+  const s = NOTESX.noteStats();
+  assert.ok(s.total >= 1 && typeof s.pinned === 'number');
+  const hits = NOTESX.searchNotes('milk');
+  assert.ok(hits.length >= 1);
+});
+
+/* ---- Documents ---- */
+test('docai: localDocSummary + table extraction', () => {
+  const txt = 'Report on Q3. Revenue grew strongly. Costs were stable. Outlook positive. Profits doubled. Team expanded.';
+  const sum = DOCAI.localDocSummary(txt);
+  assert.ok(sum.includes('Revenue'));
+  const tables = DOCAI.extractTables('| Name | Age |\n| --- | --- |\n| Ramesh | 30 |\n| Seema | 28 |');
+  assert.equal(tables.length, 1);
+  assert.equal(tables[0][1][0], 'Ramesh');
+});
+
+test('docai: resume analysis finds contact + skills + verdict', () => {
+  const resume = 'Rohan Sharma\nrohan@mail.com\n+91 9876543210\nSkills: Python, JavaScript, SQL\nWorked at Infosys as developer. 2 years experience. B.Tech degree.';
+  const r = DOCAI.analyzeResume(resume);
+  assert.equal(r.email, 'rohan@mail.com');
+  assert.ok(r.skills.includes('python'));
+  assert.ok(r.hasEducation);
+});
+
+test('docai: contract analysis finds money/dates/risk + answerFromDoc', () => {
+  const c = DOCAI.analyzeContract('Agreement between Acme and Beta. Payment: Rs. 50000 by 15/03/2026. Auto-renew clause applies.');
+  assert.ok(c.money.length >= 1);
+  assert.ok(c.dates.length >= 1);
+  assert.ok(c.risk.some(r => /auto.?renew/i.test(r)));
+  const ans = DOCAI.answerFromDoc('The total cost is five thousand rupees. Delivery in two days.', 'what is the cost');
+  assert.ok(ans && ans.toLowerCase().includes('cost'));
+});
+
+test('docai: researchSummary + stored docs', () => {
+  const rs = DOCAI.researchSummary('Abstract: we propose a method. Introduction: context. Conclusion: results are good. doi:10.1234/x');
+  assert.ok(rs.abstract.length > 0);
+  assert.ok(rs.citations >= 1);
+  const d = DOCAI.addDoc({ name: 'test.txt', kind: 'text', text: 'hello world document content here' });
+  assert.ok(d && DOCAI.docs().length >= 1);
+  DOCAI.deleteDoc(d.id);
+});
+
+/* ---- Knowledge base ---- */
+test('knowledge: searchAll spans notes+docs+chat + kbStats', () => {
+  KNOW.searchAll('milk');
+  const s = KNOW.kbStats();
+  assert.ok(s.total >= 1);
+  assert.ok(typeof s.bytes === 'number');
+  assert.ok(typeof s.categories === 'object');
+});
+
+test('knowledge: relatedContent finds topical overlap + categorizeItem', () => {
+  const rel = KNOW.relatedContent('how to study for physics exam');
+  assert.ok(Array.isArray(rel));
+  assert.ok(['fact', 'episode', 'knowledge'].includes(KNOW.categorizeItem('who is Albert Einstein')));
+});
+
+/* ---- Planner ---- */
+test('plannerx: parseSmartReminder splits text+time', () => {
+  const r = PLANX4.parseSmartReminder('remind me to call mom in 20 minutes');
+  assert.ok(r.text.includes('call mom'));
+  assert.ok(r.due && r.due.getTime() > Date.now());
+  const plain = PLANX4.parseSmartReminder('remind me to drink water');
+  assert.equal(plain.due, null);
+});
+
+test('plannerx: priorityScore ranks overdue/urgent above calm items', () => {
+  const now = Date.now();
+  const overdue = { type: 'reminder', text: 'pay bill', time: new Date(now - 3600000) };
+  const calm = { type: 'event', text: 'party next month', time: new Date(now + 30 * 86400000) };
+  assert.ok(PLANX4.priorityScore(overdue) > PLANX4.priorityScore(calm));
+  assert.equal(PLANX4.priorityScore({ ...overdue, done: true }), 0);
+});
+
+test('plannerx: weeklyPlan covers 7 days with Today/Tomorrow labels', () => {
+  const wk = PLANX4.weeklyPlan(7);
+  assert.equal(wk.length, 7);
+  assert.equal(wk[0].label, 'Today');
+  assert.equal(wk[1].label, 'Tomorrow');
+  assert.ok(wk.every(d => d.dateKey && Array.isArray(d.items)));
+});
+
+/* ================= v15 PHASE 5-9: STUDY · GUARDIAN · PLUGINS · UI ================= */
+const STUDYX = await import('../www/js/studyx.js');
+const GUARD = await import('../www/js/guardian.js');
+const PLUGINS = await import('../www/js/plugins.js');
+const UIX = await import('../www/js/uix.js');
+
+/* ---- Study ---- */
+test('studyx: subjectOf classifies + doubtPrompt builds a prompt', () => {
+  assert.equal(STUDYX.subjectOf('solve F=ma physics problem'), 'physics');
+  assert.equal(STUDYX.subjectOf('organic chemistry doubt'), 'chemistry');
+  assert.ok(STUDYX.doubtPrompt('what is inertia').includes('inertia'));
+});
+
+test('studyx: PYQ bank returns questions per subject', () => {
+  const p = STUDYX.pyqFor('physics', 2);
+  assert.equal(p.length, 2);
+  assert.ok(p[0].q.length > 10);
+  assert.ok(STUDYX.pyqFor('maths').length >= 1);
+});
+
+test('studyx: formulaSheet returns formulas', () => {
+  const f = STUDYX.formulaSheet('physics', 4);
+  assert.equal(f.length, 4);
+  assert.ok(f[0][0].includes('='));
+});
+
+test('studyx: mockTest + gradeTest', () => {
+  const t = STUDYX.mockTest('physics', 5);
+  assert.equal(t.questions.length, 5);
+  const g = STUDYX.gradeTest([{ correct: true }, { correct: true }, { correct: false }]);
+  assert.equal(g.correct, 2);
+  assert.equal(g.pct, 67);
+});
+
+test('studyx: progress + weekChart track sessions', () => {
+  const p = STUDYX.progress('physics');
+  assert.ok(typeof p.sessions === 'number');
+  const c = STUDYX.weekChart();
+  assert.equal(c.length, 7);
+  assert.ok(c.every(d => typeof d.min === 'number'));
+});
+
+/* ---- Guardian ---- */
+test('guardian: safety timers arm/disarm/confirm', () => {
+  const t = GUARD.addSafetyTimer({ minutes: 5 });
+  assert.equal(t.armed, true);
+  assert.ok(GUARD.dueSafetyTimers(t.due + 1).some(x => x.id === t.id));
+  assert.equal(GUARD.confirmSafetyTimer(t.id), true);
+  assert.ok(!GUARD.dueSafetyTimers(t.due + 1).some(x => x.id === t.id));
+  GUARD.disarmSafetyTimers();
+});
+
+test('guardian: breathing cycle is 4-4-4-4 pattern', () => {
+  const c = GUARD.breathingCycle(2);
+  assert.equal(c.length, 8);
+  assert.equal(c[0].name, 'Inhale'); assert.equal(c[0].sec, 4);
+  assert.equal(GUARD.breathPhaseAt(c, 10).name, 'Exhale');
+});
+
+test('guardian: heart-rate estimation from synthetic PPG', () => {
+  const fps = 30, sec = 12;
+  const frames = [];
+  for (let i = 0; i < fps * sec; i++) {
+    const v = 120 + Math.sin(2 * Math.PI * 1.2 * i / fps) * 8;   // ~72 bpm
+    frames.push(GUARD.frameAvg(100, v, 100));
+  }
+  const hr = GUARD.heartRate(frames, { fps });
+  assert.ok(hr.bpm >= 55 && hr.bpm <= 90, 'bpm ~72 got ' + hr.bpm);
+  assert.ok(hr.confidence > 0.3);
+  assert.equal(GUARD.heartRate([]).bpm, null);
+});
+
+test('guardian: med schedule round-trips', () => {
+  GUARD.setMedSchedule(['08:00', '14:00']);
+  assert.deepEqual(GUARD.medSchedule(), ['08:00', '14:00']);
+});
+
+/* ---- Plugins ---- */
+test('plugins: validateManifest + install/uninstall/toggle', () => {
+  assert.equal(PLUGINS.validateManifest({ id: 'x' }).ok, false);
+  assert.equal(PLUGINS.validateManifest({ id: 'ok-plugin', name: 'OK' }).ok, true);
+  const r = PLUGINS.installPlugin({ id: 'test-plugin', name: 'Test', version: '1.0.0' });
+  assert.equal(r.ok, true);
+  assert.equal(PLUGINS.installPlugin({ id: 'test-plugin', name: 'Test' }).ok, false, 'dup rejected');
+  assert.ok(PLUGINS.installed().some(p => p.id === 'test-plugin'));
+  PLUGINS.togglePlugin('test-plugin', false);
+  assert.ok(!PLUGINS.enabledPlugins().some(p => p.id === 'test-plugin'));
+  PLUGINS.uninstallPlugin('test-plugin');
+  assert.ok(!PLUGINS.installed().some(p => p.id === 'test-plugin'));
+});
+
+test('plugins: registry has starter plugins + claimChat works', () => {
+  assert.ok(PLUGINS.registry().length >= 3);
+  const r = PLUGINS.installPlugin({ id: 'currency', name: 'Currency', version: '1.0.0', hooks: { chat: t => /convert .* usd/i.test(t) ? 'currency' : null } });
+  assert.equal(r.ok, true);
+  const claim = PLUGINS.claimChat('convert 100 usd to inr');
+  assert.ok(claim && claim.plugin === 'currency');
+  assert.equal(PLUGINS.claimChat('hello'), null);
+  PLUGINS.uninstallPlugin('currency');
+});
+
+/* ---- UI ---- */
+test('uix: material palette derives contrast-correct colors', () => {
+  const p = UIX.materialPalette('#00d4ff');
+  assert.ok(p.primary === '#00d4ff');
+  assert.ok(/^#/.test(p.bg) && /^#/.test(p.surface));
+  const dark = UIX.materialPalette('#111111');
+  assert.equal(dark.onPrimary, '#ffffff');
+});
+
+test('uix: blend + dominantAccent + amoled policy', () => {
+  assert.equal(UIX.blend('#000000', '#ffffff', 1), '#ffffff');
+  assert.equal(UIX.dominantAccent([]), '#00d4ff');
+  const a = UIX.amoledPolicy({ enabled: true, battery: 10 });
+  assert.equal(a.pureBlack, true);
+  const off = UIX.amoledPolicy({ enabled: false, battery: 90 });
+  assert.equal(off.pureBlack, false);
+});
+
+test('uix: layoutHint + nav helpers + animation pref', () => {
+  assert.ok(['portrait', 'landscape', 'tablet'].includes(UIX.layoutHint().mode));
+  assert.ok(UIX.navItems().includes('chat'));
+  assert.equal(UIX.isNavPanel('activity'), false);
+  const ap = UIX.animationPref();
+  assert.ok(typeof ap.duration === 'number');
+});
