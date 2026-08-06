@@ -15,7 +15,7 @@
      Progress Tracker / Retry Manager / Result Verifier
    ========================================================================== */
 
-import { getList, saveList, getSetting } from './store.js';
+import { getList, saveList } from './store.js';
 import { Bus, Logger } from './fridaycore.js';
 import { needsConfirm } from './vox.js';      // VOX danger rules reuse (house style)
 
