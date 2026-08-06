@@ -1709,3 +1709,264 @@ test('brain: photo_save and photo_describe intents', () => {
   assert.equal(resolve('yeh photo kya hai').intent, 'photo_describe');
   assert.notEqual(resolve('make an image of a cyberpunk city').intent, 'photo_send');
 });
+
+/* ================= v15 DEVX: real thermal + sensors ================= */
+test('devx: sensorReport handles the native {present,x,y,z} shape', () => {
+  const r = DEVX.sensorReport({
+    accelerometer: { present: true, x: 0.1, y: 0.2, z: 9.8 },
+    gyroscope: { present: true, x: 0, y: 0, z: 0 },
+    light: { present: false },
+    proximity: { present: true, value: '5' }
+  });
+  assert.ok(r.present.includes('accelerometer'));
+  assert.ok(r.present.includes('gyroscope'));
+  assert.ok(r.present.includes('proximity'));
+  assert.ok(r.missing.includes('light'));
+});
+
+test('devx: sensorSummary collapses present sensors or says none', () => {
+  assert.equal(DEVX.sensorSummary({ light: { present: false } }), 'no sensors');
+  const s = DEVX.sensorSummary({ accelerometer: { present: true }, gyroscope: { present: true } });
+  assert.ok(s.includes('accelerometer') && s.includes('gyroscope'));
+});
+
+test('devx: thermal row shows cpu temp and throttling in diagnostics', () => {
+  const rows = DEVX.dashRows({
+    services: {}, metrics: { thermal: { celsius: 40, cpuCelsius: 52, throttling: true } }, extras: {}
+  });
+  const t = rows.find(r => r.k === 'Temperature');
+  assert.ok(t);
+  assert.ok(/40°C/.test(t.v) && /cpu 52°C/.test(t.v) && /throttling/.test(t.v));
+  assert.equal(t.sev, 'warm');
+});
+
+/* ================= v15 PHASE 2: UPGRADES ================= */
+const MEM2 = await import('../www/js/memory.js');
+const MEMEX2 = await import('../www/js/memex.js');
+const AUTOX2 = await import('../www/js/autox.js');
+const API2 = await import('../www/js/api.js');
+const DEVX2 = await import('../www/js/devx.js');
+
+/* ---- Memory: editable + pinning ---- */
+test('memory: editFact updates value in place and preserves id', () => {
+  const f = MEM2.saveFact({ key: 'user.city', label: 'You live in', value: 'Delhi' });
+  const edited = MEM2.editFact('user.city', 'Gurugram');
+  assert.equal(edited.key, 'user.city');
+  assert.equal(edited.value, 'Gurugram');
+  assert.equal(MEM2.getFact('user.city'), 'Gurugram');
+  MEM2.forgetFact('user.city');
+});
+
+test('memory: pin/unpin facts and pinnedFacts lists them', () => {
+  MEM2.saveFact({ key: 'user.blood', label: 'Blood group', value: 'B+' });
+  assert.equal(MEM2.setPin('user.blood', true), true);
+  assert.ok(MEM2.pinnedFacts().some(f => f.key === 'user.blood'));
+  assert.equal(MEM2.setPin('user.blood', false), true);
+  assert.ok(!MEM2.pinnedFacts().some(f => f.key === 'user.blood'));
+  MEM2.forgetFact('user.blood');
+});
+
+test('memory: memoryStats reports counts and bytes', () => {
+  const s = MEM2.memoryStats();
+  assert.ok(typeof s.facts === 'number');
+  assert.ok(typeof s.bytes === 'number' && s.bytes >= 0);
+  assert.ok(s.totalEntries >= s.facts);
+});
+
+test('memory: encrypted private facts round-trip via SECX AES-GCM', async () => {
+  const r = await MEM2.savePrivateFact('bank.acc', '1234567890', 'secret');
+  assert.equal(r.ok, true);
+  const v = await MEM2.getPrivateFact('bank.acc', 'secret');
+  assert.equal(v.value, '1234567890');
+  await MEM2.deletePrivateFact('bank.acc');
+  assert.equal(await MEM2.getPrivateFact('bank.acc', 'secret'), null);
+});
+
+/* ---- Memory: tiers + dedupe ---- */
+test('memex: tierOf classifies short-term episodes vs long-term facts', () => {
+  const now = Date.now();
+  assert.equal(MEMEX2.tierOf({ category: 'episode', ts: now - 1000 }, now), 'short');
+  assert.equal(MEMEX2.tierOf({ category: 'episode', ts: now - 20 * 864e5 }, now), 'long');
+  assert.equal(MEMEX2.tierOf({ category: 'fact', ts: now - 1000 }, now), 'long');
+});
+
+test('memex: findDuplicates groups near-identical texts', () => {
+  const groups = MEMEX2.findDuplicates([
+    { text: 'buy milk and bread' },
+    { text: 'buy milk and bread please' },
+    { text: 'call mom' }
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].length, 2);
+});
+
+/* ---- Chat analytics ---- */
+test('memex: convoStats summarizes a conversation', () => {
+  const s = MEMEX2.convoStats([
+    { role: 'user', text: 'hello', time: 1000 },
+    { role: 'ai', text: 'hi boss', time: 1100 },
+    { role: 'user', text: 'remind me to call mom', time: 1200 }
+  ]);
+  assert.equal(s.total, 3);
+  assert.equal(s.user, 2);
+  assert.equal(s.ai, 1);
+  assert.equal(s.avgUserLen > 0, true);
+});
+
+test('memex: searchChat finds substring matches case-insensitively', () => {
+  const hits = MEMEX2.searchChat([
+    { role: 'user', text: 'What is the weather' },
+    { role: 'ai', text: 'It is sunny' }
+  ], 'weather');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].i, 0);
+  assert.equal(MEMEX2.searchChat([{ role: 'user', text: 'x' }], '').length, 0);
+});
+
+test('memex: exportChat formats plain text with roles', () => {
+  const out = MEMEX2.exportChat([
+    { role: 'user', text: 'hi', time: 1000 },
+    { role: 'ai', text: 'hello', time: 1100 }
+  ], { withTime: false });
+  assert.ok(out.includes('You: hi'));
+  assert.ok(out.includes('FRIDAY: hello'));
+});
+
+/* ---- Automation: conflicts + retry ---- */
+test('autox: actionIntent extracts subject and on/off intent', () => {
+  assert.deepEqual(AUTOX2.actionIntent('turn on wifi'), { subject: 'wifi', intent: 'on' });
+  assert.deepEqual(AUTOX2.actionIntent('wifi band karo'), { subject: 'wifi', intent: 'off' });
+  assert.deepEqual(AUTOX2.actionIntent('open whatsapp'), null);
+});
+
+test('autox: detectConflicts finds opposite same-trigger rules', () => {
+  const { conflicts, redundant } = AUTOX2.detectConflicts([
+    { id: 'a', when: 'wifi_on', then: 'turn on wifi', enabled: true },
+    { id: 'b', when: 'wifi_on', then: 'turn off wifi', enabled: true },
+    { id: 'c', when: 'online', then: 'play music', enabled: true },
+    { id: 'd', when: 'online', then: 'play music', enabled: true }
+  ]);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].subject, 'wifi');
+  assert.equal(redundant.length, 1);
+});
+
+/* ---- API: offline queue ---- */
+test('api: offline queue enqueues, drains successes, keeps failures', async () => {
+  API2.enqueueOffline('fact', { key: 'a', value: '1' });
+  API2.enqueueOffline('fact', { key: 'b', value: '2' });
+  const r = await API2.drainOffline(async (kind, p) => p.key === 'a' ? { ok: true } : { ok: false });
+  assert.equal(r.sent, 1);
+  assert.equal(r.left, 1);
+  const q = API2.offlineQueue();
+  assert.equal(q.length, 1);
+  assert.equal(q[0].payload.key, 'b');
+});
+
+/* ---- Dashboard: history + sparkline ---- */
+test('devx: pushHistory keeps a capped rolling series', () => {
+  DEVX2.pushHistory({ battery: { level: 80, charging: false }, ram: null, thermal: { celsius: 40 }, network: { online: true } });
+  DEVX2.pushHistory({ battery: { level: 75, charging: false }, ram: null, thermal: { celsius: 41 }, network: { online: true } });
+  const bat = DEVX2.historySeries('battery', 5);
+  assert.equal(bat.length, 2);
+  assert.equal(bat[1].v, 75);
+});
+
+test('devx: sparkline returns a path with min/max/last', () => {
+  const s = DEVX2.sparkline([{ v: 10 }, { v: 30 }, { v: 20 }], { w: 120, h: 30 });
+  assert.ok(s && s.path.startsWith('M'));
+  assert.equal(s.lo, 10);
+  assert.equal(s.hi, 30);
+  assert.equal(s.last, 20);
+  assert.equal(DEVX2.sparkline([]), null);
+});
+
+/* ================= v15 PHASE 3: AIR ROUTER + WORKFLOW ================= */
+const AIR = await import('../www/js/airouter.js');
+const WF = await import('../www/js/workflow.js');
+
+test('air: task classification picks vision/code/translate/chat', () => {
+  assert.equal(AIR.classifyTask('describe this image'), 'vision');
+  assert.equal(AIR.classifyTask('write a function to sort'), 'code');
+  assert.equal(AIR.classifyTask('translate to hindi'), 'translate');
+  assert.equal(AIR.classifyTask('what time is it'), 'chat');
+});
+
+test('air: router falls back across providers and returns winner', async () => {
+  const calls = [];
+  const r = await AIR.route({
+    task: 'chat', messages: [{ role: 'user', content: 'hi' }],
+    providers: ['server', 'groq', 'ollama', 'local'],
+    exec: async (provider) => {
+      calls.push(provider);
+      if (provider === 'server') return { ok: false, reason: 'down' };
+      return { ok: true, text: 'from ' + provider };
+    }
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.provider, 'groq');
+  assert.ok(calls.includes('server') && calls.includes('groq'));
+});
+
+test('air: router reports failure when all providers fail', async () => {
+  const r = await AIR.route({
+    task: 'chat', messages: [],
+    providers: ['server', 'groq'],
+    exec: async () => ({ ok: false, reason: 'nope' })
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.reason.includes('nope'));
+});
+
+test('air: usage + health tracking accumulates', async () => {
+  const before = AIR.aiDiagnostics().totalCalls;
+  await AIR.route({ task: 'chat', messages: [], providers: ['groq'], exec: async () => ({ ok: true, text: 'x' }) });
+  assert.ok(AIR.aiDiagnostics().totalCalls >= before);
+  const h = AIR.healthMap();
+  assert.ok(h && typeof h === 'object');
+});
+
+test('workflow: templates exist for the 3 spec chains', () => {
+  assert.ok(WF.templateById('image-to-notes'));
+  assert.ok(WF.templateById('voice-translate-send'));
+  assert.ok(WF.templateById('doc-tasks-calendar'));
+  assert.equal(WF.templateById('image-to-notes').nodes.length, 3);
+});
+
+test('workflow: runs nodes in order, passes results downstream', async () => {
+  const r = await WF.runWorkflow(
+    { template: WF.templateById('image-to-notes'), ctx: { image: 'fake' } },
+    { runNode: async (tool, inputs) => {
+        if (tool === 'ocr') return { ok: true, result: 'TEXT FROM IMAGE' };
+        if (tool === 'summarize') return { ok: true, result: 'SUM: ' + (inputs.from || '') };
+        if (tool === 'save_note') return { ok: true, result: 'saved ' + (inputs.from || '') };
+        return { ok: false, reason: '?' };
+      } });
+  assert.equal(r.ok, true);
+  assert.equal(r.results.n1, 'TEXT FROM IMAGE');
+  assert.ok(r.results.n2.includes('TEXT FROM IMAGE'));
+  assert.ok(r.results.n3.includes('SUM:'));
+});
+
+test('workflow: retries a failing node then succeeds', async () => {
+  let tries = 0;
+  const r = await WF.runWorkflow(
+    { nodes: [{ id: 'a', tool: 'x', retries: 2 }], ctx: {} },
+    { runNode: async () => { tries++; return tries >= 2 ? { ok: true, result: 'ok' } : { ok: false, reason: 'flaky' }; } });
+  assert.equal(r.ok, true);
+  assert.equal(tries, 2);
+});
+
+test('workflow: failure returns failedAt + reason + history entry', async () => {
+  const before = WF.workflowLog().length;
+  let nodeId = 0;
+  const r = await WF.runWorkflow(
+    { nodes: [{ id: 'a', tool: 'x', retries: 0 }, { id: 'b', tool: 'y' }], ctx: {} },
+    { runNode: async (tool, inputs) => { nodeId++; return nodeId === 1 ? { ok: false, reason: 'boom' } : { ok: true, result: 'z' }; } });
+  assert.equal(r.ok, false);
+  assert.equal(r.failedAt, 'a');
+  assert.equal(r.reason, 'boom');
+  assert.equal(WF.workflowLog().length, before + 1);
+  const entry = WF.workflowLog().find(x => x.id === r.id);
+  assert.ok(entry && entry.ok === false);
+});
