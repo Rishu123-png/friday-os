@@ -102,6 +102,7 @@ package androidx.core.content;
 import android.content.Context;
 public class ContextCompat {
     public static int checkSelfPermission(Context c, String p) { return 0; }
+    public static java.util.concurrent.Executor getMainExecutor(Context c) { return Runnable::run; }
 }
 EOF
 cat > /tmp/capstubs/src/androidx/core/content/FileProvider.java << 'EOF'
@@ -128,5 +129,39 @@ public final class R {
 }
 EOF
 
+
+# v15 Phase 9: androidx.biometric stub (compile-check only; real dep in build.gradle)
+mkdir -p /tmp/capstubs/src/androidx/biometric
+cat > /tmp/capstubs/src/androidx/biometric/BiometricPrompt.java << 'EOJ'
+package androidx.biometric;
+public class BiometricPrompt {
+    public static class PromptInfo {
+        public static class Builder {
+            public Builder() {}
+            public Builder setTitle(String t) { return this; }
+            public Builder setSubtitle(String s) { return this; }
+            public Builder setNegativeButtonText(String s) { return this; }
+            public Builder setAllowedAuthenticators(int a) { return this; }
+            public PromptInfo build() { return new PromptInfo(); }
+        }
+    }
+    public static class CryptoObject {}
+    public static class AuthenticationResult { public CryptoObject getCryptoObject() { return null; } }
+    public abstract static class AuthenticationCallback {
+        public void onAuthenticationSucceeded(AuthenticationResult r) {}
+        public void onAuthenticationError(int c, CharSequence e) {}
+        public void onAuthenticationFailed() {}
+    }
+    public BiometricPrompt(android.app.Activity a, java.util.concurrent.Executor e, AuthenticationCallback c) {}
+    public void authenticate(PromptInfo p) {}
+}
+EOJ
+cat > /tmp/capstubs/src/androidx/biometric/BiometricManager.java << 'EOJ'
+package androidx.biometric;
+public class BiometricManager {
+    public static class Authenticators { public static final int BIOMETRIC_WEAK = 1; public static final int DEVICE_CREDENTIAL = 2; }
+}
+EOJ
+echo "biometric stub added"
 javac -cp /tmp/p34/android-34/android.jar -d /tmp/capstubs/out $(find /tmp/capstubs/src -name '*.java')
 echo "BUILDENV READY"
