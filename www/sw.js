@@ -21,7 +21,9 @@ const ASSETS = [
   /* v15 Phase 4: Smart Productivity */
   './js/notesx.js', './js/docai.js', './js/knowledge.js', './js/plannerx.js',
   /* v15 Phase 5-9: Study · Guardian · Plugins · UI */
-  './js/studyx.js', './js/guardian.js', './js/plugins.js', './js/uix.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
+  './js/studyx.js', './js/guardian.js', './js/plugins.js', './js/uix.js',
+  /* RC1: dev console (release tool) */
+  './js/devconsole.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
   './js/memex.js', './js/visionx.js', './js/autox.js',
   /* v12: Phases 8-10 — Planner / Intelligence / Device engines */
   './js/planx.js', './js/intelx.js', './js/devx.js',
