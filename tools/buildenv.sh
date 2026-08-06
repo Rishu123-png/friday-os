@@ -131,6 +131,11 @@ EOF
 
 
 # v15 Phase 9: androidx.biometric stub (compile-check only; real dep in build.gradle)
+mkdir -p /tmp/capstubs/src/androidx/fragment/app
+cat > /tmp/capstubs/src/androidx/fragment/app/FragmentActivity.java << 'EOJ'
+package androidx.fragment.app;
+public class FragmentActivity extends android.app.Activity {}
+EOJ
 mkdir -p /tmp/capstubs/src/androidx/biometric
 cat > /tmp/capstubs/src/androidx/biometric/BiometricPrompt.java << 'EOJ'
 package androidx.biometric;
@@ -152,7 +157,7 @@ public class BiometricPrompt {
         public void onAuthenticationError(int c, CharSequence e) {}
         public void onAuthenticationFailed() {}
     }
-    public BiometricPrompt(android.app.Activity a, java.util.concurrent.Executor e, AuthenticationCallback c) {}
+    public BiometricPrompt(androidx.fragment.app.FragmentActivity a, java.util.concurrent.Executor e, AuthenticationCallback c) {}
     public void authenticate(PromptInfo p) {}
 }
 EOJ
