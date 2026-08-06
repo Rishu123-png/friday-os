@@ -13,7 +13,6 @@
 import { getList, saveList } from './store.js';
 import { Bus, Logger } from './fridaycore.js';
 
-const WF_KEY = 'friday_workflows';
 const WFLOG = 'friday_workflow_log';
 
 /* ---------------- Templates (pure) ---------------- */
@@ -97,13 +96,3 @@ export async function runWorkflow({ id = 'wf-' + Date.now(), template = null, no
 }
 
 export function workflowLog() { return getList(WFLOG).slice(0, 50); }
-
-/* ---------------- Stored custom workflows (runtime) ---------------- */
-export function myWorkflows() { return getList(WF_KEY); }
-export function saveWorkflow(wf) {
-  const list = getList(WF_KEY);
-  const rec = { id: 'wf-' + Date.now(), ts: Date.now(), ...wf };
-  saveList(WF_KEY, [rec, ...list].slice(0, 20));
-  return rec;
-}
-export function deleteWorkflow(id) { saveList(WF_KEY, getList(WF_KEY).filter(w => w.id !== id)); }
