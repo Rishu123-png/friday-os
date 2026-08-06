@@ -2292,3 +2292,37 @@ test('rc1: study progress includes today vs goal', () => {
   assert.ok(typeof p.goal === 'number' && p.goal > 0);
   assert.ok(typeof p.todayMin === 'number');
 });
+
+/* ================= v20 HUD REAL-DATA helpers ================= */
+const HUDV20 = await import('../www/js/hud_v20.js');
+
+test('hudv20: compassLabel maps degrees honestly', () => {
+  assert.equal(HUDV20.compassLabel(0), '0° N');
+  assert.equal(HUDV20.compassLabel(90), '90° E');
+  assert.equal(HUDV20.compassLabel(135), '135° SE');
+  assert.equal(HUDV20.compassLabel(null), '—');
+});
+
+test('hudv20: fmtCoord adds hemisphere', () => {
+  assert.equal(HUDV20.fmtCoord(28.6139, 'lat'), '28.61° N');
+  assert.equal(HUDV20.fmtCoord(-33.86, 'lat'), '33.86° S');
+  assert.equal(HUDV20.fmtCoord(77.2, 'lon'), '77.20° E');
+  assert.equal(HUDV20.fmtCoord(null, 'lat'), '—');
+});
+
+test('hudv20: fmtSpeed + fmtBytesMB + netQuality', () => {
+  assert.equal(HUDV20.fmtSpeed(12.34), '12.3 km/h');
+  assert.equal(HUDV20.fmtSpeed(null), '—');
+  assert.equal(HUDV20.fmtBytesMB(209715200), '200.0 GB');
+  assert.equal(HUDV20.netQuality(40, 12), 'Excellent');
+  assert.equal(HUDV20.netQuality(300, 0.3), 'Weak');
+  assert.equal(HUDV20.netQuality(null, null), '—');
+});
+
+test('hudv20: voiceStateLabel maps all states, no fake', () => {
+  assert.equal(HUDV20.voiceStateLabel('LISTENING'), 'LISTENING');
+  assert.equal(HUDV20.voiceStateLabel('SPEAKING'), 'SPEAKING');
+  assert.equal(HUDV20.voiceStateLabel('ERROR'), 'FAULT');
+  assert.equal(HUDV20.voiceStateLabel('SLEEPING'), 'STANDBY');
+  assert.equal(HUDV20.voiceStateLabel('GARBAGE'), 'GARBAGE');
+});
