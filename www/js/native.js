@@ -309,6 +309,13 @@ export async function mediaControl(action) {
 }
 
 /* ================= DEVICE ACTIONS (Phase C) ================= */
+/* v15 DEVX Phase-10 completion: real thermal + sensor reads (APK only) */
+export async function getThermal() {
+  return call('getThermal');
+}
+export async function getSensors() {
+  return call('getSensors');
+}
 export async function takeScreenshot() { return call('takeScreenshot'); }
 export async function lockScreen() { return call('lockScreen'); }
 export async function ringLoud() { return call('ringLoud'); }
