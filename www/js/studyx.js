@@ -6,7 +6,7 @@
    duplicate store (reads friday_study).
    ========================================================================== */
 
-import { getList } from './store.js';
+import { getList, getSetting } from './store.js';
 import { revisionPlan } from './planx.js';
 
 const STUDY = 'friday_study';
@@ -109,7 +109,8 @@ export function progress(subject = '') {
   let streak = 0;
   const d = new Date();
   while (days.has(d.toDateString())) { streak++; d.setDate(d.getDate() - 1); }
-  return { subject: subject || 'all', sessions: sessions.length, totalMin, weekMin, days: days.size, streak };
+  const goal = getSetting('studyGoalMin') || 120;
+  return { subject: subject || 'all', sessions: sessions.length, totalMin, weekMin, days: days.size, streak, goal, todayMin: sessions.filter(s => new Date(s.at).toDateString() === new Date().toDateString()).reduce((a, s) => a + (s.min || 0), 0) };
 }
 
 /* Weekly study chart (7 bars) for the dashboard. */
