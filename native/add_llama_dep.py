@@ -70,6 +70,11 @@ if TRANSLATE_ENABLED:
 DEPS.append(('androidx.health.connect:connect-client',
              'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
 
+# v15 Phase 9: androidx.biometric (BiometricPrompt for fingerprint/face unlock)
+BIOMETRIC_VERSION = '1.1.0'
+DEPS.append(('androidx.biometric:biometric',
+             'implementation "androidx.biometric:biometric:%s"' % BIOMETRIC_VERSION))
+
 
 def raise_min_sdk():
     """Ensure the project's minSdkVersion >= MIN_SDK_FLOOR. Idempotent."""
