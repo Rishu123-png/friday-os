@@ -74,6 +74,8 @@ workflows:
         script: |
           mkdir -p android/app/src/main/res/drawable
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
+          mkdir -p android/app/src/main/res/raw
+          cp native/res/raw/keep.xml android/app/src/main/res/raw/
           ls -1 android/app/src/main/res/drawable
 
       - name: Register plugin with Capacitor
@@ -167,6 +169,8 @@ workflows:
           cp native/res/xml/file_paths.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
+          mkdir -p android/app/src/main/res/raw
+          cp native/res/raw/keep.xml android/app/src/main/res/raw/
           cp native/proguard-rules.pro android/app/proguard-rules.pro
 
       - name: Register plugins + patch manifest + deps
