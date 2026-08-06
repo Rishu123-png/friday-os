@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RC1: keep resources referenced only by name at runtime (shrinkResources
+     would otherwise strip them in release builds) -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_icon,@xml/file_paths,@xml/friday_accessibility,@xml/friday_widget_info,@layout/friday_widget" />
