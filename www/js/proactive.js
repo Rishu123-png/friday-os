@@ -4,8 +4,8 @@
    Rules evaluate silently in the background. When one fires, FRIDAY offers
    a suggestion. Each rule has a cooldown so she never nags. */
 
-import { KEYS, getList, getSetting, cacheGet, cacheSet } from './store.js';
-import { allFacts, patterns, getFact, stats } from './memory.js';
+import { KEYS, getList, cacheGet, cacheSet } from './store.js';
+import { patterns, getFact, stats } from './memory.js';
 
 const SEEN = 'friday_proactive_seen';
 const seen = () => { try { return JSON.parse(localStorage.getItem(SEEN)) || {}; } catch (_) { return {}; } };
