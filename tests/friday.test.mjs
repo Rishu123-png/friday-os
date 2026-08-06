@@ -2208,3 +2208,87 @@ test('uix: layoutHint + nav helpers + animation pref', () => {
   const ap = UIX.animationPref();
   assert.ok(typeof ap.duration === 'number');
 });
+
+/* ================= v15 PHASE 9: BIOMETRIC + ENCRYPTED BACKUP (secx) ================= */
+const SECX2 = await import('../www/js/secx.js');
+
+test('secx: authGate runs biometric only when enabled, else needs PIN', async () => {
+  SECX2.setBiometric(true);
+  const ok = await SECX2.authGate({ nativeBiometric: async () => true });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.method, 'biometric');
+  const no = await SECX2.authGate({ nativeBiometric: async () => false });
+  assert.equal(no.ok, false);
+  assert.equal(no.method, 'needs_pin');
+  SECX2.setBiometric(false);
+  const off = await SECX2.authGate({ nativeBiometric: async () => true });
+  assert.equal(off.ok, false, 'disabled → no biometric prompt');
+});
+
+test('secx: encrypted backup round-trips and rejects wrong passphrase', async () => {
+  const b = await SECX2.encryptedBackup('secret123', { exportAll: () => ({ notes: [{ text: 'hi' }] }) });
+  assert.equal(b.ok, true);
+  const rest = await SECX2.restoreEncryptedBackup(b.blob, 'secret123');
+  assert.equal(rest.ok, true);
+  assert.equal(rest.data.notes[0].text, 'hi');
+  const bad = await SECX2.restoreEncryptedBackup(b.blob, 'wrong');
+  assert.equal(bad.ok, false);
+  const notEnc = await SECX2.restoreEncryptedBackup('{"v":1}', 'x');
+  assert.equal(notEnc.ok, false);
+});
+
+test('secx: secureKeyPut/Get uses keystore bridge when provided, else local', async () => {
+  await SECX2.secureKeyPut('demo', 'val1', { nativeKeystore: async (n, v) => ({ ok: true }) });
+  const k = await SECX2.secureKeyGet('demo', { nativeKeystore: async (n) => ({ ok: true, value: 'from-keystore' }) });
+  assert.equal(k.method, 'keystore');
+  assert.equal(k.value, 'from-keystore');
+  await SECX2.secureKeyPut('demo2', 'val2');
+  const l = await SECX2.secureKeyGet('demo2');
+  assert.equal(l.method, 'local');
+  assert.equal(l.value, 'val2');
+});
+
+/* ================= RC1: DEV CONSOLE / TELEMETRY / PLUGIN SWITCH / STUDY GOAL ================= */
+const DEVCON = await import('../www/js/devconsole.js');
+const PLUGINS2 = await import('../www/js/plugins.js');
+const STUDYX2 = await import('../www/js/studyx.js');
+
+test('rc1: telemetry is opt-in and records only when on', () => {
+  DEVCON.setTelemetry(false);
+  DEVCON.record('js_error', { msg: 'x' });
+  assert.equal(DEVCON.telemetry().length, 0, 'off → no records');
+  DEVCON.setTelemetry(true);
+  DEVCON.record('js_error', { msg: 'test crash' });
+  assert.ok(DEVCON.telemetry().some(t => t.kind === 'js_error'));
+  DEVCON.setTelemetry(false);
+});
+
+test('rc1: telemetry export is a versioned local blob', () => {
+  DEVCON.setTelemetry(true);
+  const blob = DEVCON.exportTelemetry();
+  assert.equal(blob.v, 1);
+  assert.equal(blob.app, 'friday-os');
+  assert.ok(Array.isArray(blob.telemetry));
+  DEVCON.setTelemetry(false);
+});
+
+test('rc1: plugin master switch disables all plugins', async () => {
+  const r = PLUGINS2.installPlugin({ id: 'switch-test', name: 'T', version: '1.0.0', hookCode: "t => /x/.test(t) ? 'x' : null" });
+  assert.equal(r.ok, true);
+  // enable (default true) → claim works via string hook
+  const claimOn = PLUGINS2.claimChat('x');
+  assert.ok(claimOn && claimOn.plugin === 'switch-test');
+  // turn master switch off → no claims (via setSetting so the store cache updates)
+  const STORE = await import('../www/js/store.js');
+  STORE.setSetting('pluginSystem', false);
+  assert.equal(PLUGINS2.enabledPlugins().length, 0);
+  assert.equal(PLUGINS2.claimChat('x'), null);
+  STORE.setSetting('pluginSystem', true);
+  PLUGINS2.uninstallPlugin('switch-test');
+});
+
+test('rc1: study progress includes today vs goal', () => {
+  const p = STUDYX2.progress('physics');
+  assert.ok(typeof p.goal === 'number' && p.goal > 0);
+  assert.ok(typeof p.todayMin === 'number');
+});
