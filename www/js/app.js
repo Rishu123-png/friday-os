@@ -51,6 +51,7 @@ import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
 import * as SECX from './secx.js';    // v13.0 Phase 11: Security & Privacy Framework
 import * as PERFX from './perfx.js';  // v13.1 Phase 12: Performance & Optimization
 import * as CINEX from './cinex.js';  // v13.2 Phase 13: Cinematic UX
+import * as HUDV20 from './hud_v20.js'; // v20.0 HUD real-data engine
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -531,6 +532,9 @@ async function init() {
     if (c && c.visionRemoved) Logger.info('memex', 'cleanup removed ' + c.visionRemoved + ' stale scans');
   } catch (_) {} }, 7000);
   loadWeatherWidget();
+
+  /* v20.0 HUD: connect every module to real device data */
+  try { HUDV20.initHUDV20(); } catch (e) { Logger.error('hud', 'init: ' + (e && e.message)); }
 
   /* v7.7 HUD: arc-reactor rings (battery/steps) + systems status line */
   updateReactor();
@@ -5730,7 +5734,33 @@ function bindEvents() {
       camera: () => openCamera('photo'),
       search: () => U.openPanel('sub-search'),
       reminder: () => { U.closeAllPanels(); U.openPanel('activity'); refresh('activity'); },
-      translate: () => U.openPanel('sub-translate')
+      translate: () => U.openPanel('sub-translate'),
+      /* v20 HUD quick commands (cmd-btn) */
+      voice: () => { if (!state.listening && !state.speaking) V.listen(); },
+      vision: () => openCamera('photo'),
+      memory: () => { U.openPanel('activity'); refresh('activity'); },
+      automation: () => { U.openPanel('activity'); refresh('activity'); },
+      notes: () => { U.openPanel('activity'); refresh('notes'); },
+      music: () => { if (NAT.isNative()) NAT.mediaControl('playpause').catch(() => {}); else U.toast('Music needs the APK', '🎵'); },
+      calls: () => { U.openPanel('activity'); refresh('activity'); },
+      more: () => { U.openPanel('settings'); }
+    };
+    (acts[a] || (() => {}))();
+  }));
+
+  /* v20 HUD: .cmd-btn quick commands share the same action map */
+  $$('.cmd-btn').forEach(b => b.addEventListener('click', () => {
+    D.tap();
+    const a = b.dataset.action;
+    const acts = {
+      voice: () => { if (!state.listening && !state.speaking) V.listen(); },
+      vision: () => openCamera('photo'),
+      memory: () => { U.openPanel('activity'); refresh('activity'); },
+      automation: () => { U.openPanel('activity'); refresh('activity'); },
+      notes: () => { U.openPanel('activity'); refresh('notes'); },
+      music: () => { if (NAT.isNative()) NAT.mediaControl('playpause').catch(() => {}); else U.toast('Music needs the APK', '🎵'); },
+      calls: () => { U.openPanel('activity'); refresh('activity'); },
+      more: () => { U.openPanel('settings'); }
     };
     (acts[a] || (() => {}))();
   }));
