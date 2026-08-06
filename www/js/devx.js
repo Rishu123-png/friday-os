@@ -87,10 +87,19 @@ export function netStatus(n = {}) {
 /* ---------------- 6) Bluetooth + Sensors (pure) ---------------- */
 
 export function sensorReport(sensors = {}) {
+  /* sensor entries are { present, x?, y?, z?, value? } */
+  const isPres = v => v && (v.present === true || (typeof v === 'object' && (v.x !== undefined || v.value !== undefined)));
   return {
-    present: Object.entries(sensors).filter(([, v]) => !!v).map(([k]) => k),
-    missing: Object.entries(sensors).filter(([, v]) => !v).map(([k]) => k)
+    present: Object.entries(sensors).filter(([, v]) => isPres(v)).map(([k]) => k),
+    missing: Object.entries(sensors).filter(([, v]) => !isPres(v)).map(([k]) => k)
   };
+}
+
+/** Human summary of the sensor map — used by the diagnostics dashboard. */
+export function sensorSummary(sensors = {}) {
+  const s = sensorReport(sensors || {});
+  if (!s.present.length) return 'no sensors';
+  return s.present.join(', ');
 }
 
 export function btStatus(bt = {}) {
@@ -137,12 +146,20 @@ export function dashRows({ services = {}, metrics = {}, extras = {} } = {}) {
   rows.push({ k: 'Running services', v: `${svcOk}/${svcCount}`, sev: svcOk === svcCount ? 'ok' : 'warn' });
   if (extras.aiLatencyMs != null) rows.push({ k: 'AI latency', v: extras.aiLatencyMs + ' ms', sev: extras.aiLatencyMs < 800 ? 'ok' : 'warn' });
   if (metrics.battery) rows.push({ k: 'Battery', v: batteryStatus(metrics.battery).pct + '%', sev: batteryStatus(metrics.battery).tier });
-  if (metrics.thermal) { const t = thermalStatus(metrics.thermal); rows.push({ k: 'Temperature', v: t.celsius != null ? t.celsius + '°C' : '—', sev: t.tier }); }
+  if (metrics.thermal) {
+    const t = thermalStatus(metrics.thermal);
+    const th = metrics.thermal;
+    let v = t.celsius != null ? t.celsius + '°C' : '—';
+    if (th && th.cpuCelsius != null && th.cpuCelsius !== th.celsius) v += ' (cpu ' + th.cpuCelsius + '°C)';
+    if (th && th.throttling) v += ' ⚠ throttling';
+    rows.push({ k: 'Temperature', v, sev: t.tier });
+  }
   if (metrics.ram) { const r = ramStatus(metrics.ram); rows.push({ k: 'RAM', v: r.usedPct != null ? r.usedPct + '% used' : '—', sev: r.pressure }); }
   if (metrics.storage) { const s = storageStatus(metrics.storage); rows.push({ k: 'Storage', v: s.usedPct != null ? s.usedPct + '% used · ' + s.freeGB + 'GB free' : '—', sev: s.tier }); }
   if (extras.automations != null) rows.push({ k: 'Active automations', v: extras.automations, sev: 'ok' });
   if (extras.voice != null) rows.push({ k: 'Voice', v: extras.voice, sev: 'ok' });
   if (extras.vision != null) rows.push({ k: 'Vision', v: extras.vision, sev: 'ok' });
+  if (metrics.sensors) { const s = sensorSummary(metrics.sensors); if (s !== 'no sensors') rows.push({ k: 'Sensors', v: s, sev: 'ok' }); }
   if (extras.planner != null) rows.push({ k: 'Planner', v: extras.planner, sev: 'ok' });
   if (extras.eventQueue != null) rows.push({ k: 'Event queue', v: extras.eventQueue, sev: 'ok' });
   if (extras.uptimeSec != null) rows.push({ k: 'Uptime', v: Math.round(extras.uptimeSec / 60) + ' min', sev: 'ok' });
@@ -224,6 +241,7 @@ export function dashboard() {
     storage: storageStatus(_snap.storage),
     thermal: thermalStatus(_snap.thermal),
     network: netStatus(_snap.network),
-    ram: ramStatus(_snap.ram)
+    ram: ramStatus(_snap.ram),
+    sensors: sensorSummary(_snap.sensors)   // v15: real sensor availability
   };
 }
