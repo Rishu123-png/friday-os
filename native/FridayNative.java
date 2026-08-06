@@ -1083,6 +1083,40 @@ public class FridayNative extends Plugin {
         return ".jpg";
     }
 
+
+    /* ============ v15 Phase 9: biometric authentication (BiometricPrompt) ============ */
+    @PluginMethod
+    public void biometricAuth(PluginCall call) {
+        try {
+            android.app.Activity act = getActivity();
+            if (act == null) { call.resolve(fail("no_activity")); return; }
+            if (Build.VERSION.SDK_INT < 28) { call.resolve(fail("unsupported_api")); return; }
+            final PluginCall fcall = call;
+            androidx.biometric.BiometricPrompt.CryptoObject crypto = null;
+            java.util.concurrent.Executor executor = androidx.core.content.ContextCompat.getMainExecutor(act);
+            androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(act, executor,
+                new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                    @Override public void onAuthenticationSucceeded(androidx.biometric.BiometricPrompt.AuthenticationResult result) {
+                        JSObject r = ok(); r.put("ok", true); fcall.resolve(r);
+                    }
+                    @Override public void onAuthenticationError(int code, CharSequence err) {
+                        fcall.resolve(fail(err != null ? err.toString() : "biometric_error_" + code));
+                    }
+                    @Override public void onAuthenticationFailed() {
+                        fcall.resolve(fail("failed"));
+                    }
+                });
+            androidx.biometric.BiometricPrompt.PromptInfo info = new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                .setTitle("FRIDAY unlock")
+                .setSubtitle("Fingerprint / face se FRIDAY kholo")
+                .setNegativeButtonText("Use PIN instead")
+                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                .build();
+            prompt.authenticate(info);
+            call.setKeepAlive(true);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
     /* ============ v15 Phase 7: dynamic shortcuts ============ */
     @PluginMethod
     public void setShortcuts(PluginCall call) {
