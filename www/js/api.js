@@ -2,7 +2,36 @@
    Every endpoint here is FREE, requires NO API KEY, and is CORS-open.
    All responses cached so they degrade gracefully offline. */
 
-import { cacheGet, cacheSet } from './store.js';
+import { cacheGet, cacheSet, getList, saveList } from './store.js';
+
+/* ================= v15 Phase 2: OFFLINE QUEUE =================
+   Writes that fail while offline are queued and replayed when the app
+   comes back online. callers: memory-fact push, note save, etc. */
+const QUEUE_KEY = 'friday_offline';
+
+export function offlineQueue() { return getList(QUEUE_KEY).slice(0, 50); }
+
+export function enqueueOffline(kind, payload) {
+  const q = getList(QUEUE_KEY);
+  q.push({ kind, payload, at: Date.now() });
+  saveList(QUEUE_KEY, q.slice(-100));
+  return q.length;
+}
+
+/** Replay the queue through an injected async sender(kind, payload).
+    Removes entries that resolve truthy; keeps failures for next time. */
+export async function drainOffline(send) {
+  const q = getList(QUEUE_KEY);
+  if (!q.length || typeof send !== 'function') return { sent: 0, left: q.length };
+  let sent = 0;
+  const kept = [];
+  for (const item of q) {
+    try { const r = await send(item.kind, item.payload); if (r && r.ok !== false) { sent++; continue; } } catch (_) {}
+    kept.push(item);
+  }
+  saveList(QUEUE_KEY, kept);
+  return { sent, left: kept.length };
+}
 
 const j = async (url, opts = {}) => {
   const res = await fetch(url, { headers: { 'Accept': 'application/json' }, ...opts });
