@@ -34,6 +34,8 @@ import * as VOX from './vox.js';      // v11.2 Phase 4: Voice Engine 2.0 — for
 import * as MEMEX from './memex.js';  // v11.3 Phase 5: Cognitive Memory Engine
 import * as VISIONX from './visionx.js'; // v11.3 Phase 6: AI Vision System
 import * as AUTOX from './autox.js';  // v11.3 Phase 7: Intelligent Automation Engine
+import * as AIR from './airouter.js'; // v15 Phase 3: AI Router + Analytics
+import * as WF from './workflow.js';  // v15 Phase 3: AI Workflow Engine
 import * as PLANX from './planx.js';  // v12.0 Phase 8: AI Planner & Reasoning Engine
 import * as INTELX from './intelx.js';// v12.1 Phase 9: Intelligence & Context Engine
 import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
@@ -81,7 +83,7 @@ const bootFridayCore = () => {
       health: () => probe('intelx', () => { const d = INTELX.dashboard(); return { ok: true, detail: d.samples + ' obs · wake ' + (d.wakeHour != null ? d.wakeHour + ':00' : '?') + ' · apps ' + d.frequentApps.length }; })
     });
     CORE.register('devx', {
-      health: () => probe('devx', () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥 HOT' : '') }; })
+      health: () => probe('devx', () => { const d = DEVX.dashboard(); return { ok: true, detail: (d.battery && d.battery.pct != null ? d.battery.pct + '%' : '—') + ' · ' + (d.storage && d.storage.freeGB != null ? d.storage.freeGB + 'GB free' : '—') + (d.thermal && d.thermal.celsius != null ? ' · ' + d.thermal.celsius + '°C' : '') + (d.sensors && d.sensors !== 'no sensors' ? ' · ' + d.sensors.split(', ').length + ' sensors' : '') + (d.thermal && d.thermal.tier === 'hot' ? ' · 🔥' : '') }; })
     });
     /* v13.0-13.2: Phases 11-13 engines report as services too */
     CORE.register('secx', {
@@ -89,6 +91,13 @@ const bootFridayCore = () => {
     });
     CORE.register('perfx', {
       health: () => probe('perfx', () => { const d = PERFX.dashboard(); return { ok: true, detail: (d.fps || '—') + ' fps · ' + (d.ram && d.ram.usedPct != null ? d.ram.usedPct + '% ram' : 'ram —') + ' · ' + (d.aiLatencyMs != null ? d.aiLatencyMs + 'ms ai' : 'ai —') }; })
+    });
+    /* v15 Phase 3: AI router + workflow report as services */
+    CORE.register('air', {
+      health: () => probe('air', () => { const d = AIR.aiDiagnostics(); return { ok: true, detail: d.available.length + ' providers · ' + d.totalCalls + ' calls · fail ' + d.providers.reduce((a, p) => a + (p.fail || 0), 0) }; })
+    });
+    CORE.register('workflow', {
+      health: () => probe('workflow', () => ({ ok: true, detail: WF.workflowLog().length + ' runs' }))
     });
     CORE.register('cinex', {
       health: () => probe('cinex', () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; })
@@ -181,9 +190,15 @@ function bootScan() {
     { label: 'CPU', run: async () => ({ ok: true, detail: (navigator.hardwareConcurrency || '?') + ' cores' }) },
     { label: 'Battery', run: async () => { const b = await D.battery(); return b ? { ok: true, detail: HUD.batteryLabel(b.level, b.charging) } : { ok: false, detail: 'n/a' }; } },
     { label: 'Storage', run: async () => {
-        if (!navigator.storage || !navigator.storage.estimate) return { ok: false, detail: 'n/a' };
-        const e = await navigator.storage.estimate();
-        return { ok: !!e.quota, detail: HUD.storageLabel(e.usage, e.quota) || 'n/a' };
+        /* v15: real device storage in the APK; browser-origin quota is NOT
+           device storage (it showed misleading "0.0/10.0 GB") — so in web we
+           say n/a instead of reporting a number that means nothing. */
+        if (NAT.isNative()) {
+          const r = await NAT.getStorageInfo().catch(() => null);
+          if (r && r.ok && r.totalGB) return { ok: true, detail: (typeof r.freeGB === 'number' ? r.freeGB.toFixed(1) : '?') + ' GB free' };
+          return { ok: false, detail: 'n/a' };
+        }
+        return { ok: false, detail: 'n/a' };
       } },
     { label: 'Network', run: async () => ({ ok: navigator.onLine, detail: HUD.netLabel(navigator.onLine) }) },
     { label: 'FRIDAY Cloud', run: async () => {
@@ -449,6 +464,7 @@ async function init() {
   }); } catch (e) {}
   bootPhase8to10();   // v12.0-12.2: Planner + Intelligence + Device engines (fire-and-forget)
   bootPhase11to14();  // v13-14: Security + Performance + Cinematic + release wiring
+  AIR.init();         // v15 Phase 3: AI router online
   /* v11.3 Phase 5: daily digest + cleanup of expired vision memories */
   setTimeout(() => { try {
     const s = MEMEX.dailyDigest(new Date().toDateString(), 'ke sessions me');
@@ -771,7 +787,9 @@ async function handleInput(text, opts = {}) {
     if (f.key === 'user.name') { S.setSetting('userName', f.value); syncSettingsUI(); }
     U.toast(`Learned: ${f.label} — ${f.value}`, '🧠', 2200);
     /* v10.1: push learned facts to the FRIDAY Cloud server (cross-device) */
-    learned.forEach(ff => SERVER.rememberFact({ key: ff.key, label: ff.label, value: ff.value }).catch(() => {}));
+    learned.forEach(ff => SERVER.rememberFact({ key: ff.key, label: ff.label, value: ff.value })
+      .then(r => { if (!(r && r.ok)) API.enqueueOffline('fact', { key: ff.key, label: ff.label, value: ff.value }); })
+      .catch(() => API.enqueueOffline('fact', { key: ff.key, label: ff.label, value: ff.value })));   // v15 Phase 2: offline-safe learning
   }
 
   // follow-up capture ("What should I remind you about?")
@@ -993,7 +1011,9 @@ async function streamLocalChat(text) {
    model downloads). The server injects memory + runs its own tool loop. */
 async function streamServerChat(text) {
   thinking(true);
-  let el = null, acc = '', rafPending = false;
+  showStopBtn();                                   // v15 Phase 2: stop generation
+  const ctl = new AbortController(); state.abortCtl = ctl;
+  let el = null, acc = '', rafPending = false, stopped = false;
   const flush = () => {
     rafPending = false;
     if (!el) return;
@@ -1005,7 +1025,9 @@ async function streamServerChat(text) {
       role: m.role === 'user' ? 'user' : 'assistant', content: m.text
     }));
     const final = await SERVER.chat([...history, { role: 'user', content: text }], {
+      signal: ctl.signal,
       onToken: (_, sofar) => {
+        if (ctl.signal.aborted) { stopped = true; return; }
         acc = sofar;
         if (!el) { hideTyping(); el = addMsg('ai', '', { returnEl: true, source: 'live' }); }
         if (!rafPending) { rafPending = true; requestAnimationFrame(flush); }
@@ -1025,7 +1047,17 @@ async function streamServerChat(text) {
     armTalkWait(out);
   } catch (e) {
     thinking(false);
-    reply(errMsg(e));
+    /* user pressed Stop → keep what streamed, don't error out */
+    if (stopped || (e && e.name === 'AbortError')) {
+      const out = (acc || '').trim();
+      if (out && el) { el.querySelector('.message-bubble').innerHTML = U.renderRich(out); const rec = state.messages[state.messages.length - 1]; if (rec) { rec.text = out; saveChat(); } S.remember('ai', out); }
+      setStatus('Stopped — tap mic to continue');
+    } else {
+      reply(errMsg(e));
+    }
+  } finally {
+    if (state.abortCtl === ctl) state.abortCtl = null;
+    const sb = $('#stopGenBtn'); if (sb) sb.remove();
   }
 }
 
@@ -2028,6 +2060,62 @@ async function runAction(a, hit) {
       return true;
     }
 
+    /* ================= v15 Phase 2: CHAT management ================= */
+    case 'chat_stats': {
+      const s = MEMEX.convoStats(state.messages);
+      const mins = Math.round(s.durationMs / 60000);
+      reply(`**Chat stats** — ${s.total} messages (you ${s.user}, FRIDAY ${s.ai})\n• Avg you: ${s.avgUserLen} chars · Avg FRIDAY: ${s.avgAiLen} chars\n• Session: ~${mins} min · Topics: ${s.topics.length ? s.topics.join(', ') : '—'}`);
+      return true;
+    }
+    case 'chat_export': {
+      const text = MEMEX.exportChat(state.messages);
+      D.download(`friday-chat-${Date.now()}.txt`, text, 'text/plain');
+      reply('Chat export kiya — file download ho gayi.');
+      return true;
+    }
+    case 'chat_share': {
+      const text = MEMEX.exportChat(state.messages.slice(-80));
+      if (NAT.isNative()) { await D.share('FRIDAY chat', text).catch(() => D.copy(text).then(() => reply('Share sheet nahi khula — chat copied kiya.'))); reply('Chat share ho raha hai.'); }
+      else { D.copy(text); reply('Chat copied to clipboard — kahin bhi paste karo.'); }
+      return true;
+    }
+    /* ================= v15 Phase 3: AI ROUTER / WORKFLOW / ANALYTICS ================= */
+    case 'ai_diag': {
+      const d = AIR.aiDiagnostics();
+      const rows = d.providers.map(p => `• ${p.label}: ${p.ok} ok / ${p.fail} fail (${p.failRate}%)`).join('\n');
+      reply(`**AI diagnostics**\n• Providers configured: ${d.available.length ? d.available.join(', ') : 'none'} · pref: ${d.pref}\n• Total calls: ${d.totalCalls}\n${rows}\n\nSay "workflows" to list chains.`);
+      return true;
+    }
+    case 'wf_list': {
+      const t = WF.templates().map(x => `${x.id} — ${x.name}`).join('\n');
+      reply(`**Workflow templates**\n${t}\n\nSay "run workflow image-to-notes" (with a photo shared).`);
+      return true;
+    }
+    case 'wf_run': return runWorkflowFlow(a.name, { image: state.sharedImage ? state.sharedImage.dataUrl : null, name: (a.extra || '').trim() });
+
+    /* ================= v15 Phase 3: NOTIFICATION INTELLIGENCE ================= */
+    case 'notif_search': {
+      if (!NAT.isNative()) { reply(nativeOnly('notification search')); return true; }
+      const q = (a.query || '').trim();
+      if (!q) { reply('Kya search karun? Bolo "search notifications <kuch>".'); return true; }
+      const r = await NAT.getNotifLog('', 80).catch(() => null);
+      const items = (r && r.items) || recentNotifs;
+      const hits = items.filter(n => (n.title + ' ' + (n.text || '')).toLowerCase().includes(q.toLowerCase())).slice(0, 6);
+      if (!hits.length) { reply(`"${q}" notifications me nahi mila.`); return true; }
+      reply(`"${q}" — ${hits.length} match${hits.length > 1 ? 'es' : ''}:\n` + hits.map(n => `• ${NAT.friendlyApp(n.pkg)}: ${n.title} — ${String(n.text || '').slice(0, 60)}`).join('\n'));
+      return true;
+    }
+
+    case 'chat_search': {
+      const q = (a.query || '').trim();
+      if (!q) { reply('Kya search karun? Bolo "search chat <kuch>".'); return true; }
+      const hits = MEMEX.searchChat(state.messages, q);
+      if (!hits.length) { reply(`"${q}" chat me nahi mila.`); return true; }
+      const lines = hits.slice(-5).map(h => `• ${h.msg.role === 'user' ? 'You' : 'FRIDAY'}: ${String(h.msg.text).slice(0, 80)}`);
+      reply(`"${q}" — ${hits.length} match${hits.length > 1 ? 'es' : ''}:\n` + lines.join('\n'));
+      return true;
+    }
+
     /* ================= v13 Phase 11-13: SECURITY / PERF / CINEMATIC ================= */
     case 'audit_log': return showAuditLog(a.query || '');
     case 'privacy_report': return showPrivacyReport();
@@ -2495,10 +2583,21 @@ function bootPhase8to10() {
           const m = typeof performance !== 'undefined' && performance.memory ? performance.memory : null;
           return m ? { totalMB: m.jsHeapSizeLimit / 1048576, usedMB: m.usedJSHeapSize / 1048576, cachedMB: 0 } : null;
         },
-        thermal: () => null,
-        sensors: () => null
+        /* v15: real thermal + sensor reads (APK); web degrades to null */
+        thermal: async () => {
+          if (!NAT.isNative()) return null;
+          const r = await NAT.getThermal().catch(() => null);
+          if (!r || !r.ok) return null;
+          return { celsius: r.celsius, batteryCelsius: r.batteryCelsius, cpuCelsius: r.cpuCelsius, throttling: !!r.throttling };
+        },
+        sensors: async () => {
+          if (!NAT.isNative()) return null;
+          const r = await NAT.getSensors().catch(() => null);
+          if (!r || !r.ok || !r.sensors) return null;
+          return r.sensors;
+        }
       });
-      Bus.on('autox:battery', () => { DEVX.refresh().catch(() => {}); });
+      Bus.on('autox:battery', () => { DEVX.refresh().then(m => { if (m) DEVX.pushHistory(m); }).catch(() => {}); });
       setInterval(() => Bus.emit('devx:refresh'), 120000);
       Bus.on('devx:alert', alerts => {
         if (S.getSetting('devxAlerts') === false) return;
@@ -2528,7 +2627,7 @@ function bootPhase8to10() {
 async function runDiagnostics() {
   thinking(true);
   try {
-    await DEVX.refresh().catch(() => {});
+    await DEVX.refresh().then(m => { if (m) DEVX.pushHistory(m); }).catch(() => {});
     const svc = await CORE.healthMap().catch(() => ({}));
     const metrics = DEVX.snapshot();
     const logs = Logger.all();
@@ -2544,8 +2643,12 @@ async function runDiagnostics() {
     };
     const rows = DEVX.dashRows({ services: svc, metrics, extras });
     const warn = rows.filter(r => r.sev === 'warn' || r.sev === 'crit');
+    /* v15 Phase 2: battery history sparkline inline in the diagnostics card */
+    const bat = DEVX.sparkline(DEVX.historySeries('battery', 30), { w: 120, h: 26 });
+    const spark = bat ? `\n\n📈 **Battery (last ~1h)** — ${bat.last}% (min ${bat.lo} · max ${bat.hi})\n` +
+      `<svg viewBox="${bat.viewBox}" style="width:100%;max-width:280px;height:34px;background:rgba(0,229,255,.05);border-radius:6px"><path d="${bat.path}" fill="none" stroke="#00e5ff" stroke-width="1.5"/></svg>` : '';
     const text = '**🔬 Device diagnostics**\n' + rows.map(r =>
-      (r.sev === 'ok' ? '✅' : r.sev === 'warn' ? '⚠️' : '🔴') + ' ' + r.k + ': ' + r.v).join('\n');
+      (r.sev === 'ok' ? '✅' : r.sev === 'warn' ? '⚠️' : '🔴') + ' ' + r.k + ': ' + r.v).join('\n') + spark;
     addMsg('ai', text, { proactive: true });
     V.speak(`Diagnostics done. ${rows.length} checks, ${warn.length} need attention.`);
   } catch (e) { reply('Diagnostics hiccup: ' + (e && e.message)); }
@@ -2583,6 +2686,176 @@ function surfaceIntelSuggestion(s) {
   });
   box.appendChild(row);
   scrollBottom();
+}
+
+/* ================= v15 Phase 3: AI ROUTER + WORKFLOW ================= */
+
+/* Router executor — one provider call. Returns {ok, text|skipped, reason, ms}. */
+async function routerExec(provider, messages, opts = {}) {
+  switch (provider) {
+    case 'server': {
+      if (!SERVER.isConfigured()) return { ok: false, reason: 'not configured' };
+      let acc = '';
+      const full = await SERVER.chat(messages, {
+        signal: opts.signal,
+        onToken: opts.onToken ? (t, sofar) => { acc = sofar; opts.onToken(t, sofar); } : null
+      });
+      if (!full && !acc) return { ok: false, reason: 'empty' };
+      return { ok: true, text: (full || acc), tokens: Math.round((full || acc).length / 4) };
+    }
+    case 'groq': {
+      if (!AI.hasGroq()) return { ok: false, reason: 'no key' };
+      const full = await AI.callGroq(messages, {
+        stream: !!opts.onToken, onToken: opts.onToken, maxTokens: opts.maxTokens || 1024,
+        temperature: opts.temperature, model: opts.model
+      });
+      if (!full) return { ok: false, reason: 'empty' };
+      return { ok: true, text: full, tokens: Math.round(full.length / 4) };
+    }
+    case 'ollama': {
+      const base = (getSetting('ollamaUrl') || '').trim().replace(/\/+$/, '');
+      if (!base) return { ok: false, reason: 'not configured' };
+      const model = getSetting('ollamaModel') || 'llama3';
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 60000);
+      try {
+        const res = await fetch(base + '/api/chat', {
+          method: 'POST', signal: ctl.signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, stream: !!opts.onToken })
+        });
+        clearTimeout(to);
+        if (!res.ok) return { ok: false, reason: 'http ' + res.status };
+        if (!opts.onToken) {
+          const j = await res.json();
+          const text = (j.message && j.message.content) || '';
+          return text ? { ok: true, text } : { ok: false, reason: 'empty' };
+        }
+        // streaming: ndjson lines
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '', full = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const j = JSON.parse(line);
+              const piece = (j.message && j.message.content) || '';
+              if (piece) { full += piece; opts.onToken(piece, full); }
+            } catch (_) {}
+          }
+        }
+        return full ? { ok: true, text: full } : { ok: false, reason: 'empty' };
+      } catch (e) {
+        clearTimeout(to);
+        return { ok: false, reason: e && e.name === 'AbortError' ? 'timeout' : 'network' };
+      }
+    }
+    case 'local': {
+      /* on-device llama.cpp via localbrain */
+      if (!LB.wantLocal(String((messages[messages.length - 1] || {}).content || ''), true)) return { ok: false, reason: 'local unavailable' };
+      const q = String((messages[messages.length - 1] || {}).content || '');
+      const r = await LB.askLocal(AI.systemPrompt().split('TRUST & ACCURACY')[0].trim(), q, {
+        onToken: opts.onToken ? (_, sofar) => opts.onToken('', sofar) : null
+      });
+      const text = (r.ok ? r.text : '').trim();
+      return text ? { ok: true, text } : { ok: false, reason: 'empty' };
+    }
+    default: return { ok: false, reason: 'unknown provider' };
+  }
+}
+
+/* Route a chat through AIR (used by askGroq when not on server/local-first). */
+async function askViaRouter(text, messages, sys) {
+  const task = AIR.classifyTask(text);
+  return AIR.route({
+    task, messages: [{ role: 'system', content: sys }, ...messages, { role: 'user', content: text }],
+    onToken: null, exec: routerExec,
+    opts: { maxTokens: 1200, temperature: 0.6 }
+  });
+}
+
+/* Workflow node runners — map tools onto existing FRIDAY skills. */
+async function workflowNode(tool, inputs, ctx) {
+  switch (tool) {
+    case 'ocr': {
+      const img = inputs.image || inputs.input || ctx.image;
+      if (!img) return { ok: false, reason: 'no image' };
+      const src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img;
+      const r = await VIS.ocr(src, () => {});
+      return { ok: !!(r && r.text), result: (r && r.text) || '', reason: r ? '' : 'ocr failed' };
+    }
+    case 'summarize': {
+      const text = inputs.from || inputs.text || '';
+      if (!text) return { ok: false, reason: 'no text' };
+      if (AI.hasGroq() || SERVER.isConfigured()) {
+        try {
+          const g = await AI.callGroq([{ role: 'system', content: 'Summarize in 4-6 short plain lines.' }, { role: 'user', content: String(text).slice(0, 3000) }], { maxTokens: 240 });
+          if (g) return { ok: true, result: g };
+        } catch (_) {}
+      }
+      const first = String(text).split(/(?<=[.!?])\s+/).slice(0, 4).join(' ');
+      return { ok: true, result: first.slice(0, 600) };
+    }
+    case 'save_note': {
+      S.addItem(KEYS.NOTES, { text: '📎 ' + String(inputs.from || inputs.text || '').slice(0, 800) });
+      refresh('notes');
+      return { ok: true, result: 'saved' };
+    }
+    case 'translate': {
+      const text = inputs.from || inputs.text || '';
+      const to = inputs.to || ctx.to || 'hi';
+      const r = await API.quickTranslate(String(text), to).catch(() => null);
+      return r && r.ok ? { ok: true, result: r.text } : { ok: false, reason: 'translate failed' };
+    }
+    case 'send_message': {
+      const name = inputs.name || ctx.name || '';
+      const body = inputs.from || inputs.text || '';
+      if (!name) return { ok: false, reason: 'no contact' };
+      const c = await contactByName(name);
+      if (!c || !c.phone) return { ok: false, reason: 'contact not found' };
+      if (ctx.app === 'whatsapp' || inputs.app === 'whatsapp') {
+        await runAction({ type: 'whatsapp', number: c.phone, body, name: c.name }, {});
+      } else {
+        await runAction({ type: 'sms', number: c.phone, body, name: c.name }, {});
+      }
+      return { ok: true, result: 'sent to ' + name };
+    }
+    case 'extract_tasks': {
+      const text = inputs.from || '';
+      const matches = String(text).match(/(?:^|\n|\b)(?:task|todo|karna hai|do this|remember to)\s*[:,\-]?\s*([^\n]{3,80})/gi) || [];
+      const tasks = matches.slice(0, 6).map(m => m.replace(/^(?:task|todo|karna hai|do this|remember to)\s*[:,\-]?\s*/i, '').trim());
+      return { ok: true, result: tasks };
+    }
+    case 'add_calendar': {
+      const tasks = inputs.from || [];
+      (Array.isArray(tasks) ? tasks : [tasks]).slice(0, 6).forEach(t => S.addItem(KEYS.EVENTS, { text: t }));
+      refresh('events');
+      return { ok: true, result: 'added ' + (Array.isArray(tasks) ? tasks.length : 1) + ' events' };
+    }
+    default: return { ok: false, reason: 'unknown tool ' + tool };
+  }
+}
+
+/* Run a workflow template by name (or custom id) with ctx. */
+async function runWorkflowFlow(name, ctx = {}) {
+  const tpl = WF.templateById(name);
+  if (!tpl) { reply(`Workflow "${name}" nahi mila. Templates: ${WF.templates().map(t => t.id).join(', ')}.`); return true; }
+  thinking(true);
+  const r = await WF.runWorkflow({ template: tpl, ctx }, { runNode: workflowNode }).catch(() => ({ ok: false, reason: 'workflow crashed' }));
+  thinking(false);
+  if (r.ok) {
+    reply(`⚙️ **${tpl.name}** complete in ${r.ms}ms.`);
+    V.speak(`${tpl.name} ho gaya.`);
+  } else {
+    reply(`Workflow failed at "${r.failedAt || '?'}" — ${r.reason}.`);
+  }
+  return true;
 }
 
 /* ================= ASYNC SKILLS ================= */
@@ -4370,7 +4643,7 @@ function addMsg(role, text, opts = {}) {
   const msg = { role, text, time: Date.now() };
   state.messages.push(msg);
   saveChat();
-  const el = buildMsgEl(msg, opts);
+  const el = buildMsgEl(msg, { ...opts, idx: state.messages.length - 1 });
   $('#chatMessages').appendChild(el);
   scrollBottom();
   updateCounters();
@@ -4379,7 +4652,7 @@ function addMsg(role, text, opts = {}) {
 
 function buildMsgEl(msg, opts = {}) {
   const div = document.createElement('div');
-  div.className = 'message ' + msg.role;
+  div.className = 'message ' + msg.role + (msg.pinned ? ' pinned' : '');
   const label = msg.role === 'user' ? 'You' : AI.persona().name;
   const time = new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const link = opts.link ? `<a class="msg-link" href="${opts.link}" target="_blank" rel="noopener">Read more →</a>` : '';
@@ -4390,9 +4663,45 @@ function buildMsgEl(msg, opts = {}) {
               : opts.source === 'mind' ? ' <span class="src-badge mind" title="From general knowledge - not live phone data">&#128173; mind</span>'
               : opts.source === 'on-device' ? ' <span class="src-badge local" title="Generated 100% on this phone - no cloud, no key">&#129504; on-device</span>' : '';
   const img = opts.image ? `<img class="msg-image" src="${opts.image}" alt="shared or generated image">` : '';
+  const idx = opts.idx != null ? opts.idx : '';
+  /* v15 Phase 2: per-message actions — copy / pin / regenerate(AI) / delete */
+  const actions = `<span class="msg-actions">
+      <button type="button" class="msg-act" data-msg-copy="${idx}" title="Copy">⧉</button>
+      <button type="button" class="msg-act" data-msg-pin="${idx}" title="${msg.pinned ? 'Unpin' : 'Pin'}">📌</button>
+      ${msg.role === 'ai' ? `<button type="button" class="msg-act" data-msg-regen="${idx}" title="Regenerate">↻</button>` : ''}
+      <button type="button" class="msg-act msg-del" data-msg-del="${idx}" title="Delete">✕</button>
+    </span>`;
   div.innerHTML = `<div class="message-bubble">${img}${U.renderRich(msg.text)}${link}</div>
-    <div class="message-meta"><span class="message-label">${label}${badge}</span><span>${time}</span></div>`;
+    <div class="message-meta"><span class="message-label">${label}${badge}</span><span>${time}</span>${actions}</div>`;
   return div;
+}
+
+/* Rebuild the whole chat list from state (used by delete/pin/regen/load). */
+function renderChat() {
+  const c = $('#chatMessages');
+  if (!c) return;
+  c.innerHTML = '';
+  state.messages.forEach((m, i) => c.appendChild(buildMsgEl(m, { idx: i })));
+  scrollBottom();
+}
+
+/* v15 Phase 2: stop an in-flight generation (AbortController on the stream). */
+function stopGeneration() {
+  if (state.abortCtl) { try { state.abortCtl.abort(); } catch (_) {} state.abortCtl = null; }
+  state.llmBusy = false;
+  hideTyping();
+  thinking(false);
+  const sb = $('#stopGenBtn'); if (sb) sb.remove();
+  setStatus('Tap to speak');
+}
+function showStopBtn() {
+  if ($('#stopGenBtn')) return;
+  const wrap = $('#inputWrapper');
+  if (!wrap) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.id = 'stopGenBtn'; b.className = 'stop-gen-btn'; b.textContent = '■ Stop';
+  b.addEventListener('click', stopGeneration);
+  wrap.insertBefore(b, $('#sendButton'));
 }
 
 function showTyping() {
@@ -4417,9 +4726,7 @@ function scrollBottom() {
 function saveChat() { S.saveList(KEYS.CHAT, state.messages.slice(-200)); }
 function loadChat() {
   state.messages = S.getList(KEYS.CHAT);
-  const c = $('#chatMessages');
-  state.messages.slice(-60).forEach(m => c.appendChild(buildMsgEl(m)));
-  scrollBottom();
+  renderChat();
 }
 
 /* ================= REMINDERS ================= */
@@ -4877,6 +5184,30 @@ function bindEvents() {
 
   // Panel close
   document.addEventListener('click', e => {
+    /* v15 Phase 2: per-message actions (copy / pin / regenerate / delete) */
+    const mc = e.target.closest('[data-msg-copy]');
+    if (mc) { const m = state.messages[+mc.dataset.msgCopy]; if (m) D.copy(m.text).then(() => U.toast('Copied', '📋')); return; }
+    const mp = e.target.closest('[data-msg-pin]');
+    if (mp) {
+      const i = +mp.dataset.msgPin, m = state.messages[i];
+      if (m) { m.pinned = !m.pinned; saveChat(); renderChat(); U.toast(m.pinned ? 'Pinned 📌' : 'Unpinned', '📌'); }
+      return;
+    }
+    const mr = e.target.closest('[data-msg-regen]');
+    if (mr) {
+      const i = +mr.dataset.msgRegen;
+      let user = '';
+      for (let j = i - 1; j >= 0; j--) { if (state.messages[j] && state.messages[j].role === 'user') { user = state.messages[j].text; break; } }
+      if (user) { state.messages.splice(i, 1); saveChat(); renderChat(); return handleInput(user, { noChain: true, silentEcho: true }); }
+      U.toast('No prompt to regenerate', '⚠️');
+      return;
+    }
+    const md = e.target.closest('[data-msg-del]');
+    if (md) {
+      const i = +md.dataset.msgDel;
+      if (state.messages[i]) { state.messages.splice(i, 1); saveChat(); renderChat(); updateCounters(); }
+      return;
+    }
     const closeBtn = e.target.closest('.panel-close');
     if (closeBtn) {
       U.closePanel(closeBtn.dataset.close);
@@ -5269,7 +5600,13 @@ function bindEvents() {
   D.onShake(() => { if (!state.listening) { D.buzz(); V.listen(); } });
 
   // online/offline
-  addEventListener('online', () => { U.toast('Back online'); AUTO.runTrigger('online'); Bus.emit('autox:net', { online: true }); });   // v11.3
+  addEventListener('online', () => { U.toast('Back online'); AUTO.runTrigger('online'); Bus.emit('autox:net', { online: true });
+    /* v15 Phase 2: replay queued offline writes (learned facts → server) */
+    API.drainOffline(async (kind, payload) => {
+      if (kind === 'fact' && SERVER.isConfigured()) return SERVER.rememberFact({ key: payload.key, label: payload.label, value: payload.value });
+      return { ok: false };
+    }).then(r => { if (r.sent) Logger.info('core', 'offline queue drained: ' + r.sent + ' sent'); });
+  });   // v11.3
   addEventListener('offline', () => { U.toast('Offline - local engine active'); AUTO.runTrigger('offline'); Bus.emit('autox:net', { online: false }); });   // v11.3
 
   // back button closes panels
