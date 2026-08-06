@@ -11,6 +11,7 @@
 
 import { KEYS, getList, saveList, getSetting } from './store.js';
 import { semanticSearch } from './nlu.js';
+import { securePut, secureGet, privateDel } from './secx.js';   // v15 Phase 2: encrypted sensitive memory
 
 const FACTS = 'friday_facts';
 const PATTERNS = 'friday_patterns';
@@ -155,6 +156,67 @@ export function getFact(key) { return getList(FACTS).find(f => f.key === key)?.v
 export function forgetFact(key, value) {
   const rest = getList(FACTS).filter(f => !(f.key === key && (!value || f.value === value)));
   saveList(FACTS, rest);
+}
+
+/* ================= v15 Phase 2: memory upgrades ================= */
+
+/** Edit a stored fact in place (preserves id/created). Returns the updated fact. */
+export function editFact(key, value, label = null) {
+  const list = getList(FACTS);
+  const rec = list.find(f => f.key === key);
+  if (!rec) return saveFact({ key, label: label || key, value });
+  rec.value = String(value).slice(0, 500);
+  if (label) rec.label = label;
+  rec.updated = Date.now();
+  saveList(FACTS, list);
+  return rec;
+}
+
+/** Pin / unpin a fact — pinned memories never auto-expire and rank highest. */
+export function setPin(key, on = true) {
+  const list = getList(FACTS);
+  const rec = list.find(f => f.key === key);
+  if (!rec) return false;
+  rec.pinned = !!on;
+  rec.updated = Date.now();
+  saveList(FACTS, list);
+  return true;
+}
+export function pinnedFacts() { return getList(FACTS).filter(f => f.pinned); }
+
+/* ---- Encrypted sensitive memory (uses SECX AES-GCM; key = user secret) ---- */
+const PRIVATE_NS = 'mem_';
+export async function savePrivateFact(key, value, secret) {
+  const e = await securePut(PRIVATE_NS + key, { key, value, ts: Date.now() }, secret);
+  return e.ok ? { ok: true } : { ok: false, reason: e.reason };
+}
+export async function getPrivateFact(key, secret) {
+  const d = await secureGet(PRIVATE_NS + key, secret);
+  return d.ok ? d.value : null;
+}
+export async function deletePrivateFact(key) {
+  privateDel('enc_' + PRIVATE_NS + key);
+  return true;
+}
+
+/* ---- Memory usage statistics (bytes + category counts + tiers) ---- */
+export function memoryStats() {
+  const facts = getList(FACTS);
+  const eps = getList(EPISODES);
+  const pats = getList(PATTERNS);
+  const keys = [FACTS, EPISODES, PATTERNS, 'friday_memory', 'friday_notes'];
+  let bytes = 0;
+  for (const k of keys) { try { bytes += (localStorage.getItem(k) || '').length * 2; } catch (_) {} }
+  const cat = { facts: facts.length, episodes: eps.length, patterns: pats.length, pinned: facts.filter(f => f.pinned).length };
+  const shortTerm = eps.filter(e => e.ts && Date.now() - e.ts < 7 * 864e5).length;
+  return {
+    ...cat,
+    shortTermEpisodes: shortTerm,
+    longTermFacts: facts.length,
+    totalEntries: facts.length + eps.length + pats.length,
+    bytes,
+    bytesHuman: bytes > 1048576 ? (bytes / 1048576).toFixed(2) + ' MB' : bytes > 1024 ? (bytes / 1024).toFixed(1) + ' KB' : bytes + ' B'
+  };
 }
 
 /* ================= 3. PATTERN LEARNING ================= */
