@@ -78,6 +78,69 @@ export function addRule(r) {
 export function toggleRule(id, on) { saveList(RULES, getList(RULES).map(r => r.id === id ? { ...r, enabled: on } : r)); }
 export function deleteRule(id) { saveList(RULES, getList(RULES).filter(r => r.id !== id)); }
 
+/* ---------------- 2b) Conflict detection + failed-rule retry (v15 Phase 2) ---------------- */
+
+/** Extract (subject, intent) from an action string — for conflict analysis. */
+export function actionIntent(text) {
+  const t = String(text || '').toLowerCase();
+  const SUBJ = { wifi: 'wifi', bluetooth: 'bluetooth', dnd: 'dnd', 'do not disturb': 'dnd',
+                 torch: 'torch', flashlight: 'torch', airplane: 'airplane', 'battery saver': 'battery_saver' };
+  const ON = /\b(on|open|start|enable|turn on|chalao|allow|resume)\b/;
+  const OFF = /\b(off|close|stop|disable|turn off|band|bando|hatao|mute)\b/;
+  for (const [k, v] of Object.entries(SUBJ)) {
+    if (t.includes(k)) {
+      if (ON.test(t) && !OFF.test(t)) return { subject: v, intent: 'on' };
+      if (OFF.test(t) && !ON.test(t)) return { subject: v, intent: 'off' };
+      return { subject: v, intent: 'toggle' };
+    }
+  }
+  return null;
+}
+
+/** Pure: find conflicting rule pairs (same trigger, opposite actions on the
+    same subject) and redundant pairs (same trigger, identical action). */
+export function detectConflicts(rules = []) {
+  const conflicts = [], redundant = [];
+  const active = rules.filter(r => r.enabled);
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i], b = active[j];
+      if (a.when !== b.when) continue;
+      const ai = actionIntent(a.then), bi = actionIntent(b.then);
+      if (ai && bi && ai.subject === bi.subject && ai.intent !== bi.intent && ai.intent !== 'toggle' && bi.intent !== 'toggle') {
+        conflicts.push({ a: a.id, b: b.id, trigger: a.when, subject: ai.subject, actionA: a.then, actionB: b.then });
+      } else if (String(a.then).trim() === String(b.then).trim()) {
+        redundant.push({ a: a.id, b: b.id, trigger: a.when, action: a.then });
+      }
+    }
+  }
+  return { conflicts, redundant };
+}
+
+/** Last failures from the execution log (for retry). */
+export function failedRules() {
+  const log = getList(XLOG);
+  const out = [];
+  const seen = new Set();
+  for (const l of log) {
+    if (l.ok === false && l.rule && !seen.has(l.rule)) { seen.add(l.rule); out.push(l); }
+  }
+  return out.slice(0, 10);
+}
+
+/** Re-run the most recent failed rule(s) via the injected executor. */
+export async function retryFailed(exec = _exec) {
+  const fails = failedRules();
+  let ok = 0;
+  for (const f of fails) {
+    const rule = getList(RULES).find(r => (r.name || r.then.slice(0, 30)) === f.rule);
+    if (!rule) continue;
+    const r = await fireRule(rule, {}, f.trigger || 'retry');
+    if (r) ok++;
+  }
+  return { tried: fails.length, ok };
+}
+
 /* ---------------- 3) Sensible starter rules (seeded once) ---------------- */
 
 const SEEDS = [
