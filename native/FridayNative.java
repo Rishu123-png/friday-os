@@ -1092,9 +1092,13 @@ public class FridayNative extends Plugin {
             if (act == null) { call.resolve(fail("no_activity")); return; }
             if (Build.VERSION.SDK_INT < 28) { call.resolve(fail("unsupported_api")); return; }
             final PluginCall fcall = call;
-            androidx.biometric.BiometricPrompt.CryptoObject crypto = null;
+            /* androidx.biometric 1.1.0 needs a FragmentActivity (not a plain
+               Activity). Capacitor's BridgeActivity extends AppCompatActivity,
+               so the cast is always safe here. */
+            if (!(act instanceof androidx.fragment.app.FragmentActivity)) { call.resolve(fail("not_fragment_activity")); return; }
+            androidx.fragment.app.FragmentActivity fa = (androidx.fragment.app.FragmentActivity) act;
             java.util.concurrent.Executor executor = androidx.core.content.ContextCompat.getMainExecutor(act);
-            androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(act, executor,
+            androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(fa, executor,
                 new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
                     @Override public void onAuthenticationSucceeded(androidx.biometric.BiometricPrompt.AuthenticationResult result) {
                         JSObject r = ok(); r.put("ok", true); fcall.resolve(r);
@@ -1109,7 +1113,9 @@ public class FridayNative extends Plugin {
             androidx.biometric.BiometricPrompt.PromptInfo info = new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
                 .setTitle("FRIDAY unlock")
                 .setSubtitle("Fingerprint / face se FRIDAY kholo")
-                .setNegativeButtonText("Use PIN instead")
+                /* DEVICE_CREDENTIAL gives its own system fallback (PIN/pattern),
+                   so a custom negative button must NOT be set (Android throws
+                   IllegalArgumentException if both are used). */
                 .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
                 .build();
             prompt.authenticate(info);
