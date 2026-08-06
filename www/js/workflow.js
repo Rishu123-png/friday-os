@@ -39,6 +39,14 @@ export const TEMPLATES = {
       { id: 'n2', tool: 'extract_tasks', data: { from: 'n1' } },
       { id: 'n3', tool: 'add_calendar', data: { from: 'n2' } }
     ]
+  },
+  'pdf-deadlines-calendar': {
+    name: 'PDF → Extract Deadlines → Calendar',
+    nodes: [
+      { id: 'n1', tool: 'ocr', data: { input: 'document' } },
+      { id: 'n2', tool: 'extract_deadlines', data: { from: 'n1' } },
+      { id: 'n3', tool: 'add_calendar', data: { from: 'n2' } }
+    ]
   }
 };
 
