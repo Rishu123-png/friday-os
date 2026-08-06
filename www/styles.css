@@ -1131,3 +1131,37 @@ html.no-fx .radar-sweep, html.no-fx .scanlines, html.no-fx .core-visual { animat
 .message.pinned .message-bubble { border-color:rgba(255,215,0,.5); box-shadow:0 0 10px rgba(255,215,0,.12); }
 .stop-gen-btn { background:rgba(255,45,85,.15); border:1px solid rgba(255,45,85,.5); color:#ff8a9c; border-radius:999px; padding:6px 12px; font-size:.72rem; cursor:pointer; flex:0 0 auto; }
 .stop-gen-btn:active { transform:scale(.95); }
+
+/* ==========================================================================
+   v15 Phase 8 — Premium UI/UX (AMOLED · tablet · Material-You · polish)
+   Additive + adaptive; no layout rewrite. Driven by data attrs UIX sets.
+   ========================================================================== */
+/* AMOLED: pure black surfaces when html[data-amoled="1"] */
+html[data-amoled="1"] { --bg-dark:#000; --bg-card:#000; --bg-card-hover:#0a0a0a; --border:#161616; }
+html[data-amoled="1"] body, html[data-amoled="1"] .panel, html[data-amoled="1"] .sub-panel,
+html[data-amoled="1"] .status-bar, html[data-amoled="1"] .nav-bar, html[data-amoled="1"] .message-bubble,
+html[data-amoled="1"] .widget { background:#000 !important; }
+
+/* Tablet: two-column dashboard widgets on wide screens */
+html[data-layout="tablet"] .dashboard-widgets { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+html[data-layout="tablet"] .dashboard-widgets .widget { width:auto; }
+html[data-layout="tablet"] .input-wrapper { max-width:640px; }
+html[data-layout="tablet"] .chat-messages { max-width:860px; margin:0 auto; width:100%; }
+
+/* Material-You accent tint: primary hue drives glow via a subtle overlay */
+body::before { background:
+  radial-gradient(ellipse 80% 55% at 50% 30%, color-mix(in srgb, var(--primary,#00d4ff) 9%, transparent), transparent 70%),
+  radial-gradient(ellipse 120% 100% at 50% 100%, color-mix(in srgb, var(--secondary,#7a5cff) 6%, transparent), transparent 60%); }
+
+/* Premium glass depth */
+.widget, .panel, .sub-panel, .settings-group, .message-bubble {
+  box-shadow: 0 10px 34px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.nav-btn.active { box-shadow: 0 0 12px color-mix(in srgb, var(--primary,#00d4ff) 30%, transparent) inset, 0 0 8px color-mix(in srgb, var(--primary,#00d4ff) 18%, transparent); }
+
+/* Smooth transitions (respect reduced-motion via base media query) */
+.message-bubble, .widget, .nav-btn, .quick-action, .panel, .sub-panel { transition: transform .2s ease, opacity .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.quick-action:active, .nav-btn:active, .tool-add-btn:active, .chip-btn:active { transform: scale(.95); }
+
+/* Large touch targets (a11y) */
+html[data-hc="1"] .nav-btn, html[data-hc="1"] .quick-action { min-height:44px; }
