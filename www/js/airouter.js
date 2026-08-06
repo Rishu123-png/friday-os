@@ -32,10 +32,6 @@ export const TASK_PROVIDERS = {
   translate: ['server', 'groq']
 };
 
-export function providerById(id) {
-  return PROVIDERS.find(p => p.id === id) || null;
-}
-
 /* Which providers are configured right now? (pure-ish, reads settings) */
 export function availableProviders() {
   const out = [];
@@ -48,9 +44,11 @@ export function availableProviders() {
 
 /* ---------------- Usage + cost tracking (store-backed) ---------------- */
 const USAGE_KEY = 'friday_ai_usage';
+const analyticsOn = () => getSetting('aiAnalytics') !== false;
 
 export function usage() { return getList(USAGE_KEY); }
 function bump(cat, n = 1) {
+  if (!analyticsOn()) return;
   const u = getList(USAGE_KEY);
   const rec = u.find(r => r.cat === cat);
   if (rec) { rec.n += n; rec.ts = Date.now(); }
@@ -66,6 +64,7 @@ export function healthMap() {
   try { return JSON.parse(localStorage.getItem(HEALTH_KEY) || '{}'); } catch (_) { return {}; }
 }
 function recordHealth(id, ok, ms, err = '') {
+  if (!analyticsOn()) return;
   const h = healthMap();
   const row = h[id] || { ok: 0, fail: 0, lastMs: null, lastErr: '' };
   ok ? row.ok++ : row.fail++;
