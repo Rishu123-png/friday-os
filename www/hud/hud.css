@@ -1,0 +1,37 @@
+/* hud.css — neon FRIDAY OS HUD (lightweight) */
+:root{
+  --bg:#02050a;--panel:#051026;--accent:#08f;--accent2:#6ef;--glass:rgba(10,20,40,0.4);
+  --ok:#3df59a;--warn:#ffd166;--bad:#ff6b6b;--glass-border:rgba(120,200,255,0.06);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#bfe9ff;background:radial-gradient(ellipse at center,#001020 0%, #00060a 60%);}
+.hud{max-width:900px;margin:10px auto;padding:18px}
+header.top{display:flex;justify-content:space-between;align-items:center;color:var(--accent2);padding:8px 12px}
+header .title{font-weight:700;font-size:20px;letter-spacing:1px}
+.status{font-size:13px}
+.status .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-left:8px;vertical-align:middle}
+.status .ok{background:var(--ok)}
+.columns{display:flex;gap:12px}
+.left,.right{width:220px}
+.center{flex:1;display:flex;flex-direction:column;align-items:center}
+.panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid var(--glass-border);padding:12px;border-radius:8px;color:#aeeaff;margin-bottom:12px;backdrop-filter:blur(6px)}
+.panel h3{margin:0 0 8px 0;font-size:12px;color:var(--accent)}
+.location .small{font-size:12px;color:#89d1ff}
+.weather .big{font-size:28px;font-weight:700}
+.core{width:320px;height:320px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
+#orb{width:260px;height:260px}
+.glow{filter:blur(6px)}
+.listening{color:var(--accent2);margin-top:6px}
+.wave{width:260px;height:28px;margin-top:6px}
+.quick{display:flex;gap:8px;margin-top:12px}
+.btn{background:transparent;border:1px solid var(--glass-border);padding:8px 12px;border-radius:8px;color:#cceeff}
+.bottom{display:flex;gap:12px;margin-top:16px}
+.telemetry,.modules,.agenda{flex:1}
+.meters div{display:flex;justify-content:space-between;padding:6px 0}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-left:8px}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.footer{display:flex;justify-content:center;padding:18px}
+.mic{width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 30% 30%, rgba(110,238,255,0.15), rgba(8,8,35,0.6));display:flex;align-items:center;justify-content:center;font-size:36px;border:2px solid rgba(8,150,255,0.3)}
+ul{padding-left:18px;margin:0}
+#bt-list li{padding:4px 0}
+@media(max-width:920px){.left,.right{display:none}.hud{padding:12px}}

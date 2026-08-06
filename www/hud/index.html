@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FRIDAY OS — HUD</title>
+  <link rel="stylesheet" href="hud.css">
+</head>
+<body>
+  <div class="hud">
+    <header class="top">
+      <div class="title">FRIDAY OS v20.0</div>
+      <div class="status">SYSTEMS OPTIMAL <span class="dot ok"></span></div>
+    </header>
+
+    <div class="columns">
+      <aside class="left">
+        <section class="panel location">
+          <h3>LOCATION</h3>
+          <div id="loc-name">Unknown</div>
+          <div class="small">Lat: <span id="lat">--</span> Lon: <span id="lon">--</span></div>
+        </section>
+
+        <section class="panel weather">
+          <h3>WEATHER</h3>
+          <div class="big" id="weather-temp">--°C</div>
+          <div id="weather-desc">--</div>
+        </section>
+      </aside>
+
+      <main class="center">
+        <div class="core">
+          <svg id="orb" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="g1" cx="50%" cy="50%">
+                <stop offset="0%" stop-color="#6ef" stop-opacity="1"/>
+                <stop offset="60%" stop-color="#08f" stop-opacity="0.25"/>
+                <stop offset="100%" stop-color="#001" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <circle cx="100" cy="100" r="70" fill="url(#g1)" class="glow" />
+            <g class="wire">
+              <path d="M20,100 C60,40 140,40 180,100 C140,160 60,160 20,100 Z" stroke="#45f" stroke-width="0.6" fill="none"/>
+              <circle cx="100" cy="100" r="6" fill="#6ff" />
+            </g>
+          </svg>
+
+          <div class="listening">LISTENING…</div>
+          <div class="wave"><canvas id="wave"></canvas></div>
+        </div>
+
+        <div class="quick">
+          <button class="btn">VOICE</button>
+          <button class="btn">VISION</button>
+          <button class="btn">MEMORY</button>
+          <button class="btn">AUTOMATION</button>
+        </div>
+      </main>
+
+      <aside class="right">
+        <section class="panel network">
+          <h3>NETWORK</h3>
+          <div>IP: <span id="ip">--</span></div>
+          <div>Download: <span id="dl">--</span></div>
+          <div>Upload: <span id="ul">--</span></div>
+        </section>
+
+        <section class="panel devices">
+          <h3>BLUETOOTH</h3>
+          <ul id="bt-list"><li>none</li></ul>
+        </section>
+      </aside>
+    </div>
+
+    <section class="bottom">
+      <div class="telemetry panel">
+        <h3>SYSTEM TELEMETRY</h3>
+        <div class="meters">
+          <div>CPU <span id="cpu">--%</span></div>
+          <div>RAM <span id="ram">--%</span></div>
+          <div>STORAGE <span id="stor">--%</span></div>
+        </div>
+      </div>
+
+      <div class="modules panel">
+        <h3>ACTIVE MODULES</h3>
+        <ul id="modules">
+          <li>Voice Engine <span class="dot ok"></span></li>
+          <li>Vision Engine <span class="dot warn"></span></li>
+          <li>Memory Engine <span class="dot ok"></span></li>
+        </ul>
+      </div>
+
+      <div class="agenda panel">
+        <h3>TODAY'S AGENDA</h3>
+        <ul id="agenda"><li>No events</li></ul>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="mic" id="mic">🎙</div>
+    </footer>
+  </div>
+
+  <script src="hud.js"></script>
+</body>
+</html>
