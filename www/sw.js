@@ -38,7 +38,7 @@ const NO_CACHE = [
 ];
 
 /* Cross-origin hosts whose scripts/models SHOULD be cached (offline AI) */
-const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co', 'xenova-transformers'];
+const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co'];  // v15: removed dead 'xenova-transformers' entry (a package path, not a host)
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
