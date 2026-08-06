@@ -32,6 +32,12 @@ import android.provider.Telephony;
 import android.telephony.SmsManager;
 import android.text.TextUtils;
 import android.view.KeyEvent;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.core.content.ContextCompat;
 
@@ -709,6 +715,154 @@ public class FridayNative extends Plugin {
             r.put("charging", charging);
             call.resolve(r);
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    /* ============ v15 DEVX: thermal + sensors (Phase 10 completion) ============ */
+
+    /** Real device temperature: battery temp (BatteryManager) + CPU temp
+        (thermal-zone files, best-effort) + throttling state (API 29+). */
+    @PluginMethod
+    public void getThermal(PluginCall call) {
+        JSObject r = ok();
+        try {
+            double batteryC = Double.NaN;
+            try {
+                // BATTERY_PROPERTY_TEMPERATURE is API 28+; the ACTION_BATTERY_CHANGED
+                // intent carries EXTRA_TEMPERATURE (tenths of °C) on ALL API levels.
+                android.content.IntentFilter f = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+                Intent bs = getContext().registerReceiver(null, f);
+                if (bs != null) {
+                    int tenths = bs.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                    if (tenths != Integer.MIN_VALUE) batteryC = tenths / 10.0;
+                }
+            } catch (Throwable ignored) {}
+
+            Double cpuC = null;
+            try {
+                // /sys/class/thermal/thermal_zone*/temp is in millidegrees; pick
+                // the zone labelled "cpu" if present, else the first valid zone.
+                java.io.File dir = new java.io.File("/sys/class/thermal");
+                java.io.File[] zones = dir.listFiles();
+                double best = Double.NaN;
+                if (zones != null) {
+                    for (java.io.File z : zones) {
+                        if (!z.isDirectory()) continue;
+                        java.io.File type = new java.io.File(z, "type");
+                        java.io.File temp = new java.io.File(z, "temp");
+                        if (!type.exists() || !temp.exists()) continue;
+                        String tname = readSmall(type).trim().toLowerCase();
+                        String tval = readSmall(temp).trim();
+                        if (tval.isEmpty()) continue;
+                        try {
+                            double v = Double.parseDouble(tval) / 1000.0;
+                            if (v > 0 && (tname.contains("cpu") || Double.isNaN(best))) best = v;
+                        } catch (Throwable ignored) {}
+                    }
+                }
+                if (!Double.isNaN(best)) cpuC = Math.round(best * 10) / 10.0;
+            } catch (Throwable ignored) {}
+
+            int thermalStatus = 0;   // 0 = none (not throttling)
+            boolean throttling = false;
+            if (Build.VERSION.SDK_INT >= 29) {
+                try {
+                    android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                    thermalStatus = pm.getCurrentThermalStatus();
+                    throttling = thermalStatus >= android.os.PowerManager.THERMAL_STATUS_LIGHT;
+                } catch (Throwable ignored) {}
+            }
+            // battery temp drives the primary celsius (matches devx.thermalStatus tiers)
+            double c = !Double.isNaN(batteryC) ? batteryC
+                     : (cpuC != null ? cpuC : Double.NaN);
+            r.put("celsius", Double.isNaN(c) ? null : Math.round(c * 10) / 10.0);
+            r.put("batteryCelsius", Double.isNaN(batteryC) ? null : Math.round(batteryC * 10) / 10.0);
+            r.put("cpuCelsius", cpuC);
+            r.put("throttling", throttling);
+            r.put("thermalStatus", thermalStatus);
+            call.resolve(r);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    /** Sensor availability + one-shot latest readings (no continuous listener). */
+    @PluginMethod
+    public void getSensors(PluginCall call) {
+        JSObject r = ok();
+        try {
+            SensorManager sm = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
+            if (sm == null) { call.resolve(fail("no_sensor_service")); return; }
+            JSObject sensors = new JSObject();
+            final Object[] vals = new Object[8];
+            final boolean[] got = new boolean[8];
+            SensorEventListener lis = new SensorEventListener() {
+                @Override public void onSensorChanged(SensorEvent e) {
+                    int i = sensorIndex(e.sensor.getType());
+                    if (i < 0) return;
+                    float[] v = e.values;
+                    switch (e.sensor.getType()) {
+                        case Sensor.TYPE_ACCELEROMETER: if (!got[i]) { vals[i] = new double[]{ rnd(v[0]), rnd(v[1]), rnd(v[2]) }; got[i]=true; } break;
+                        case Sensor.TYPE_GYROSCOPE:      if (!got[i]) { vals[i] = new double[]{ rnd(v[0]), rnd(v[1]), rnd(v[2]) }; got[i]=true; } break;
+                        case Sensor.TYPE_LIGHT:          if (!got[i]) { vals[i] = Math.round(v[0]); got[i]=true; } break;
+                        case Sensor.TYPE_PROXIMITY:      if (!got[i]) { vals[i] = rnd(v[0]); got[i]=true; } break;
+                        case Sensor.TYPE_MAGNETIC_FIELD: if (!got[i]) { vals[i] = new double[]{ rnd(v[0]), rnd(v[1]), rnd(v[2]) }; got[i]=true; } break;
+                        case Sensor.TYPE_STEP_COUNTER:   if (!got[i]) { vals[i] = Math.round(v[0]); got[i]=true; } break;
+                        default: break;
+                    }
+                }
+                @Override public void onAccuracyChanged(Sensor s, int a) {}
+            };
+            int[] types = { Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_LIGHT,
+                            Sensor.TYPE_PROXIMITY, Sensor.TYPE_MAGNETIC_FIELD, Sensor.TYPE_STEP_COUNTER,
+                            Sensor.TYPE_GRAVITY, Sensor.TYPE_ROTATION_VECTOR };
+            java.util.List<Sensor> regs = new java.util.ArrayList<>();
+            for (int ty : types) {
+                Sensor s = sm.getDefaultSensor(ty);
+                if (s != null) { sm.registerListener(lis, s, SensorManager.SENSOR_DELAY_UI); regs.add(s); }
+            }
+            // wait briefly for first events, then resolve (never block long)
+            final boolean[] done = { false };
+            Handler h = new Handler(Looper.getMainLooper());
+            h.postDelayed(() -> {
+                for (Sensor s : regs) { try { sm.unregisterListener(lis, s); } catch (Throwable ignored) {} }
+                sensors.put("accelerometer", pack(0, vals[0], got[0]));
+                sensors.put("gyroscope", pack(1, vals[1], got[1]));
+                sensors.put("light", pack(2, vals[2], got[2]));
+                sensors.put("proximity", pack(3, vals[3], got[3]));
+                sensors.put("magnetometer", pack(4, vals[4], got[4]));
+                sensors.put("stepCounter", pack(5, vals[5], got[5]));
+                sensors.put("gravity", pack(6, vals[6], got[6]));
+                sensors.put("rotationVector", pack(7, vals[7], got[7]));
+                r.put("sensors", sensors);
+                if (!done[0]) { done[0] = true; call.resolve(r); }
+            }, 500);
+            h.postDelayed(() -> { if (!done[0]) { done[0] = true; for (Sensor s : regs) { try { sm.unregisterListener(lis, s); } catch (Throwable ignored) {} } call.resolve(r); } }, 1200);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    private static int sensorIndex(int type) {
+        switch (type) {
+            case Sensor.TYPE_ACCELEROMETER: return 0;
+            case Sensor.TYPE_GYROSCOPE: return 1;
+            case Sensor.TYPE_LIGHT: return 2;
+            case Sensor.TYPE_PROXIMITY: return 3;
+            case Sensor.TYPE_MAGNETIC_FIELD: return 4;
+            case Sensor.TYPE_STEP_COUNTER: return 5;
+            case Sensor.TYPE_GRAVITY: return 6;
+            case Sensor.TYPE_ROTATION_VECTOR: return 7;
+            default: return -1;
+        }
+    }
+    private static double rnd(float f) { return Math.round(f * 100.0) / 100.0; }
+    private static JSObject pack(int i, Object v, boolean got) {
+        JSObject o = new JSObject();
+        o.put("present", v != null || got);
+        if (v instanceof double[]) { double[] d = (double[]) v; o.put("x", d[0]); o.put("y", d[1]); o.put("z", d[2]); }
+        else if (v != null) o.put("value", v.toString());
+        return o;
+    }
+    private static String readSmall(java.io.File f) {
+        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            return br.readLine() == null ? "" : br.readLine();
+        } catch (Throwable ignored) { return ""; }
     }
 @PluginMethod
     public void getStorageInfo(PluginCall call) {
