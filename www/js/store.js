@@ -102,6 +102,11 @@ export const DEFAULTS = {
   glowFX: true,            // neon glow effects
   highContrast: false,     // high-contrast mode
   textScale: '1',          // text scale (1 | 1.1 | 1.25 | 1.5)
+  // v15 PHASE 3 AIR: AI Router
+  aiProviderPref: '',      // preferred provider: '' | server | groq | ollama | local
+  ollamaUrl: '',           // http://host:11434 (local Ollama server)
+  ollamaModel: 'llama3',   // Ollama model name
+  aiAnalytics: true,       // usage + health tracking (local only)
   // telephony
   waCountryCode: '91'
 };
