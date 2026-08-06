@@ -107,6 +107,15 @@ export const DEFAULTS = {
   ollamaUrl: '',           // http://host:11434 (local Ollama server)
   ollamaModel: 'llama3',   // Ollama model name
   aiAnalytics: true,       // usage + health tracking (local only)
+  // v15 PHASE 5-9: Study · Guardian · Plugins · UI · Biometric
+  studyGoalMin: 120,       // daily study minutes goal
+  safetyTimerEscalate: false, // escalate safety timer to SOS on no-confirm
+  biometricLock: false,    // Phase 9: biometric unlock
+  uixReducedMotion: true,  // Phase 8: honor reduced-motion
+  uixLargeTouch: false,
+  uixAnimations: 'smooth', // smooth | minimal
+  amoled: false,           // Phase 8: AMOLED pure-black mode
+  pluginSystem: true,       // Phase pre-10: plugin system master switch
   // telephony
   waCountryCode: '91'
 };
