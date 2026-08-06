@@ -226,6 +226,13 @@ export async function fetchSecure(url, opts = {}, { retries = 2, backoffMs = 700
     try {
       const res = await fetch(url, { ...opts, signal: ctl.signal });
       clearTimeout(to);
+      /* v15 Phase 2: rate-limit aware — 429/503 get a LONGER, separate backoff
+         (server asked us to slow down; hammering it makes it worse). */
+      if ((res.status === 429 || res.status === 503) && attempt < retries) {
+        attempt++;
+        await new Promise(r => setTimeout(r, (backoffMs * 4) * Math.pow(2, attempt - 1)));
+        continue;
+      }
       return { ok: res.ok, status: res.status, body: res.ok ? await res.text() : null };
     } catch (e) {
       attempt++;
