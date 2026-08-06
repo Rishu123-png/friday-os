@@ -32,6 +32,15 @@ export function importance({ category = 'episode', freq = 0, confidence = 0.8, l
   return Math.max(0, Math.min(100, Math.round(s)));
 }
 
+/* v15 Phase 2: memory tier — short-term (recent episodes) vs long-term (durable). */
+export function tierOf(entry, now = Date.now()) {
+  if (!entry) return 'long';
+  if (entry.category === 'episode' || entry.category === 'temp' || entry.kind === 'episode') {
+    return (now - (entry.ts || now)) < 7 * 864e5 ? 'short' : 'long';
+  }
+  return 'long';
+}
+
 /** Auto-expiry: only temp/episodic junk dies; anything important stays. (pure) */
 export function shouldExpire(entry, now = Date.now()) {
   if ((entry.category === 'pinned') || entry.pinned) return false;
@@ -60,6 +69,20 @@ export function dedupeKey(text) {
     .replace(/\b(please|boss|yaar|bhai|friday|jarvis|ok|okay|hey|the|a|an|toh|na|ya)\b/g, ' ')
     .replace(/[^\p{L}\p{N} ]/gu, ' ')
     .replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+/** Group near-duplicate items (same dedupeKey) — for cleanup suggestions. (pure) */
+export function findDuplicates(items = [], textOf = x => x.text) {
+  const groups = [];
+  const seen = new Map();
+  for (const it of items) {
+    const k = dedupeKey(textOf(it));
+    if (!k) continue;
+    if (seen.has(k)) seen.get(k).push(it);
+    else seen.set(k, [it]);
+  }
+  for (const [, arr] of seen) if (arr.length > 1) groups.push(arr);
+  return groups;
 }
 
 /* ---------------- 3) Conversation summarizer (pure) ---------------- */
@@ -100,6 +123,46 @@ export function summarize(msgs = [], { dateLabel = 'that day' } = {}) {
   if (intents.length) parts.push('mostly ' + intents.join(', '));
   if (topics.length) parts.push('topics: ' + topics.join(', '));
   return { summary: parts.join(' · '), tasks, followups, topics, nMsg: user.length };
+}
+
+/* ---------------- 3b) Chat analytics + search + export (pure, v15 Phase 2) ---------------- */
+
+/** Conversation statistics from a message list. */
+export function convoStats(messages = []) {
+  const msgs = messages.filter(m => m && m.text);
+  const user = msgs.filter(m => m.role === 'user');
+  const ai = msgs.filter(m => m.role === 'ai' || m.role === 'assistant');
+  const totalChars = msgs.reduce((a, m) => a + String(m.text).length, 0);
+  const userChars = user.reduce((a, m) => a + String(m.text).length, 0);
+  let first = msgs[0] && msgs[0].time, last = msgs[msgs.length - 1] && msgs[msgs.length - 1].time;
+  if (msgs.length && msgs[0].ts) { first = msgs[0].ts; last = msgs[msgs.length - 1].ts; }
+  return {
+    total: msgs.length, user: user.length, ai: ai.length,
+    avgUserLen: user.length ? Math.round(userChars / user.length) : 0,
+    avgAiLen: ai.length ? Math.round((totalChars - userChars) / ai.length) : 0,
+    durationMs: first && last ? Math.max(0, last - first) : 0,
+    topics: topicsOf(user.map(m => m.text), 4)
+  };
+}
+
+/** Case/script-insensitive chat search. Returns {msg, index} matches. */
+export function searchChat(messages = [], q = '') {
+  const needle = String(q || '').trim().toLowerCase();
+  if (!needle) return [];
+  return messages
+    .map((m, i) => ({ msg: m, i }))
+    .filter(({ msg }) => msg && msg.text && String(msg.text).toLowerCase().includes(needle));
+}
+
+/** Plain-text export of a conversation (chat share/export). */
+export function exportChat(messages = [], { withTime = true } = {}) {
+  return (messages || [])
+    .map(m => {
+      const who = m.role === 'user' ? 'You' : 'FRIDAY';
+      const t = withTime && m.time ? ` [${new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}]` : '';
+      return `${who}${t}: ${String(m.text || '')}`;
+    })
+    .join('\n');
 }
 
 /* ---------------- 4) Preference learner ---------------- */
@@ -174,10 +237,17 @@ export function dailyDigest(todayKey = new Date().toDateString(), label = 'aaj')
 export function cleanup() {
   const now = Date.now();
   const vis = getList(SKEYS.VISION);
-  const kept = vis.filter(v => !shouldExpire({ ...v, category: 'vision' }, now));
-  let removed = vis.length - kept.length;
-  saveList(SKEYS.VISION, kept.slice(0, 60));
-  return { visionRemoved: removed, kept: kept.length };
+  const keptVis = vis.filter(v => !shouldExpire({ ...v, category: 'vision' }, now));
+  const visionRemoved = vis.length - keptVis.length;
+  saveList(SKEYS.VISION, keptVis.slice(0, 60));
+
+  /* v15 Phase 2: prune expired episodic memory too (30d, unaccessed, low-importance). */
+  const eps = episodes();
+  const keptEps = eps.filter(e => !shouldExpire({ ...e, category: e.category || 'episode' }, now));
+  const epRemoved = eps.length - keptEps.length;
+  saveList('friday_episodes', keptEps.slice(0, 1000));
+
+  return { visionRemoved, episodeRemoved: epRemoved, kept: keptVis.length };
 }
 
 /* ---------------- 7) Developer dashboard model ---------------- */
