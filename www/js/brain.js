@@ -1203,6 +1203,14 @@ I('plugin_list', t => /\b(plugins?|plugin list|extensions?)\b/i.test(t) ? 1 : 0,
 I('plugin_install', t => /\b(install plugin|plugin install)\s+([a-z0-9-]+)/i.test(t) ? 1 : 0,
   t => { const m = t.match(/\b(?:install plugin|plugin install)\s+([a-z0-9-]+)/i); return { say: null, action: { type: 'plugin_install', id: m[1] } }; }, 5);
 
+/* ================= RC1: DEV CONSOLE / TELEMETRY ================= */
+I('dev_console', t => /\b(dev console|developer console|dev tools|diagnostics panel)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'dev_console' } }), 5);
+I('telemetry', t => /\b(telemetry (on|off|enable|disable)|crash (reporting|telemetry)|analytics (on|off))\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'telemetry', on: !/\b(off|disable|band)\b/.test(t) } }), 5);
+I('telemetry_export', t => /\b(export telemetry|telemetry export|crash log export)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'telemetry_export' } }), 5);
+
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
   t => {

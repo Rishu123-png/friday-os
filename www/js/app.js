@@ -44,6 +44,7 @@ import * as STUDYX from './studyx.js'; // v15 Phase 5: AI Study Assistant
 import * as GUARD from './guardian.js';// v15 Phase 6: Personal Guardian
 import * as PLUGINS from './plugins.js';// v15 pre-10: Plugin System
 import * as UIX from './uix.js';       // v15 Phase 8: Premium UI/UX
+import * as DEVCON from './devconsole.js';// RC1: developer console + telemetry
 import * as PLANX from './planx.js';  // v12.0 Phase 8: AI Planner & Reasoning Engine
 import * as INTELX from './intelx.js';// v12.1 Phase 9: Intelligence & Context Engine
 import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
@@ -125,6 +126,9 @@ const bootFridayCore = () => {
     });
     CORE.register('uix', {
       health: () => probe('uix', () => ({ ok: true, detail: UIX.isTablet() ? 'tablet layout' : 'phone · ' + UIX.layoutHint().mode }))
+    });
+    CORE.register('devconsole', {
+      health: () => probe('devconsole', () => ({ ok: true, detail: 'telemetry ' + (DEVCON.telemetryOn() ? 'on' : 'off') + ' · ' + DEVCON.telemetry().length + ' entries' }))
     });
     /* v15 Phase 3: AI router + workflow report as services */
     CORE.register('air', {
@@ -508,6 +512,7 @@ async function init() {
   bootPhase11to14();  // v13-14: Security + Performance + Cinematic + release wiring
   AIR.init();         // v15 Phase 3: AI router online
   PLUGINS.init();     // v15 pre-10: plugin system
+  DEVCON.init();      // RC1: dev console telemetry (opt-in)
   UIX.init();         // v15 Phase 8: UI helpers apply (Material-You/AMOLED/tablet)
   /* v15 Phase 7: dynamic shortcuts (APK) + plugin claim hook into chat */
   try {
@@ -2275,7 +2280,7 @@ async function runAction(a, hit) {
       const p = STUDYX.progress(subj);
       const chart = STUDYX.weekChart();
       const bars = chart.map(d => `${d.day}: ${'█'.repeat(Math.min(12, Math.round(d.min / 10)))} ${d.min}m`).join('\n');
-      reply(`📊 **Study progress — ${p.subject}**\n• ${p.sessions} sessions · ${p.totalMin} min total\n• This week: ${p.weekMin} min · streak: ${p.streak}d\n${bars}`);
+      reply(`📊 **Study progress — ${p.subject}**\n• ${p.sessions} sessions · ${p.totalMin} min total\n• Today: ${p.todayMin} min / ${p.goal} min goal · This week: ${p.weekMin} min · streak: ${p.streak}d\n${bars}`);
       return true;
     }
     case 'study_mock': {
@@ -2368,6 +2373,25 @@ async function runAction(a, hit) {
     case 'plugin_uninstall': {
       PLUGINS.uninstallPlugin(a.id);
       reply(`Plugin "${a.id}" uninstall ho gaya.`);
+      return true;
+    }
+
+    /* ================= RC1: DEV CONSOLE (release tool) ================= */
+    case 'dev_console': {
+      const report = DEVCON.devReport({ perf: PERFX, core: CORE, air: AIR });
+      addMsg('ai', '**🛠 Dev console**\n' + report, { proactive: true });
+      return true;
+    }
+    case 'telemetry': {
+      const on = a.on !== false;
+      DEVCON.setTelemetry(on);
+      reply(on ? 'Telemetry ON (opt-in) — crashes/perf counters recorded locally. "export telemetry" se file milegi.' : 'Telemetry OFF.');
+      return true;
+    }
+    case 'telemetry_export': {
+      const blob = JSON.stringify(DEVCON.exportTelemetry(), null, 2);
+      D.download(`friday-telemetry-${Date.now()}.json`, blob, 'application/json');
+      reply('Telemetry export kiya (local file). Kuch bhi bina permission device se bahar nahi jaata.');
       return true;
     }
 
