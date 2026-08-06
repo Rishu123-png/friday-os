@@ -59,6 +59,7 @@ export function thermalStatus(t = {}) {
 /* ---------------- 4) RAM Monitor (pure) ---------------- */
 
 export function ramStatus(m = {}) {
+  if (!m || typeof m !== 'object') return { usedPct: null, freeMB: null, cachedMB: null, pressure: 'unknown' };
   const total = m.totalMB || 0;
   const used = m.usedMB || 0;
   if (!total) return { usedPct: null, freeMB: null, cachedMB: null, pressure: 'unknown' };
@@ -173,6 +174,47 @@ export function devLog() { return getList(DEVLOG).slice(0, 60); }
 
 function log(entry) {
   saveList(DEVLOG, [{ ts: Date.now(), ...entry }, ...getList(DEVLOG)].slice(0, 150));
+}
+
+/* ---------------- 9b) History + sparklines (v15 Phase 2) ---------------- */
+let _hist = { battery: [], ram: [], temp: [], net: [] };
+const HIST_CAP = 120;   // ~4h at the 120s refresh
+
+/** Record a metrics snapshot into the rolling history. */
+export function pushHistory(metrics = {}) {
+  const t = Date.now();
+  const b = batteryStatus(metrics.battery);
+  const r = ramStatus(metrics.ram);
+  const th = thermalStatus(metrics.thermal);
+  const n = netStatus(metrics.network);
+  if (b.pct != null) { _hist.battery.push({ t, v: b.pct }); if (_hist.battery.length > HIST_CAP) _hist.battery.shift(); }
+  if (r.usedPct != null) { _hist.ram.push({ t, v: r.usedPct }); if (_hist.ram.length > HIST_CAP) _hist.ram.shift(); }
+  if (th.celsius != null) { _hist.temp.push({ t, v: th.celsius }); if (_hist.temp.length > HIST_CAP) _hist.temp.shift(); }
+  if (n.online != null) { _hist.net.push({ t, v: n.online ? 1 : 0 }); if (_hist.net.length > HIST_CAP) _hist.net.shift(); }
+  return _hist;
+}
+
+export function historySeries(kind = 'battery', n = 30) {
+  return (_hist[kind] || []).slice(-n);
+}
+
+/** Pure: tiny inline SVG sparkline (path string + viewBox) for a series. */
+export function sparkline(series = [], { w = 120, h = 30, min = null, max = null } = {}) {
+  if (!series.length) return null;
+  const vals = series.map(s => s.v);
+  const lo = min != null ? min : Math.min(...vals);
+  const hi = max != null ? max : Math.max(...vals);
+  const span = (hi - lo) || 1;
+  const pts = series.map((s, i) => {
+    const x = (i / (series.length - 1)) * w;
+    const y = h - ((s.v - lo) / span) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return {
+    path: 'M' + pts.join(' L'),
+    viewBox: `0 0 ${w} ${h}`,
+    lo: Math.round(lo), hi: Math.round(hi), last: vals[vals.length - 1]
+  };
 }
 
 /* ---------------- 10) Runtime monitor ----------------
