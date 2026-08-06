@@ -261,6 +261,14 @@ async function startApp() {
     bs.style.display = 'none';
   }
   $('#app').classList.remove('hidden');
+  /* v15 Phase 9: if app-lock + biometric are on, prompt to unlock after boot */
+  setTimeout(() => {
+    if (SECX.biometricEnabled() && NAT.isNative()) {
+      SECX.authGate({ nativeBiometric: () => NAT.biometricPrompt() }).then(r => {
+        if (r.ok) { U.toast('Unlocked 🔓', '✅'); SECX.unlockApp(); }
+      }).catch(() => {});
+    }
+  }, 2500);
   window.__stage = 'init';
   /* v11.2 VOX: boot finished → the voice engine parks at READY (or SLEEPING
      if the wake word is armed — startWakeWord moves it there itself). */

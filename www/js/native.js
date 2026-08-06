@@ -665,3 +665,9 @@ export function sherpaAddListener(event, cb) {
 export async function setShortcuts(shortcuts) {
   return call('setShortcuts', { shortcuts: (shortcuts || []).map((s, i) => ({ id: 'sc' + i, title: s.title, action: s.action })) });
 }
+
+/* ================= v15 Phase 9: BIOMETRIC AUTH ================= */
+/** Native BiometricPrompt (fingerprint/face). Returns {ok} or {ok:false, reason}. */
+export async function biometricPrompt() {
+  return call('biometricAuth');
+}
