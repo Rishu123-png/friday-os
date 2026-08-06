@@ -17,7 +17,11 @@ const ASSETS = [
   './js/health.js', './js/i18n.js', './js/localbrain.js', './js/semantic.js',
   './js/vault.js', './js/server.js',
   /* v15 Phase 3: AI router + workflow engine */
-  './js/airouter.js', './js/workflow.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
+  './js/airouter.js', './js/workflow.js',
+  /* v15 Phase 4: Smart Productivity */
+  './js/notesx.js', './js/docai.js', './js/knowledge.js', './js/plannerx.js',
+  /* v15 Phase 5-9: Study · Guardian · Plugins · UI */
+  './js/studyx.js', './js/guardian.js', './js/plugins.js', './js/uix.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
   './js/memex.js', './js/visionx.js', './js/autox.js',
   /* v12: Phases 8-10 — Planner / Intelligence / Device engines */
   './js/planx.js', './js/intelx.js', './js/devx.js',
