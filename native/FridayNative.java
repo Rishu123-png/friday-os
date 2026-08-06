@@ -1082,8 +1082,46 @@ public class FridayNative extends Plugin {
         if (m.contains("gif")) return ".gif";
         return ".jpg";
     }
-    private static String mimeOf(String ext) {
-        String e = (ext == null ? "" : ext.toLowerCase());
+
+    /* ============ v15 Phase 7: dynamic shortcuts ============ */
+    @PluginMethod
+    public void setShortcuts(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT < 25) { call.resolve(fail("unsupported")); return; }
+            android.content.pm.ShortcutManager sm = getContext().getSystemService(android.content.pm.ShortcutManager.class);
+            if (sm == null) { call.resolve(fail("no_manager")); return; }
+            com.getcapacitor.JSArray arr = call.getArray("shortcuts");
+            java.util.List<android.content.pm.ShortcutInfo> list = new java.util.ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                Object _o = arr.get(i);
+                if (!(_o instanceof com.getcapacitor.JSObject)) continue;
+                com.getcapacitor.JSObject o = (com.getcapacitor.JSObject) _o;
+                if (o == null) continue;
+                String id = o.getString("id", "s" + i);
+                String title = o.getString("title", "FRIDAY");
+                String action = o.getString("action", "voice");
+                Intent intent = new Intent(getContext(), getActivity().getClass())
+                        .setAction(Intent.ACTION_MAIN)
+                        .putExtra("shortcut", action);
+                int iconRes = 0;
+                try {
+                    iconRes = getContext().getResources().getIdentifier("ic_stat_icon", "drawable", getContext().getPackageName());
+                } catch (Throwable ignored) {}
+                android.content.pm.ShortcutInfo.Builder b = new android.content.pm.ShortcutInfo.Builder(getContext(), id)
+                        .setShortLabel(title)
+                        .setLongLabel(title)
+                        .setIntent(intent);
+                if (iconRes != 0) b.setIcon(android.graphics.drawable.Icon.createWithResource(getContext(), iconRes));
+                else b.setIcon(android.graphics.drawable.Icon.createWithResource(getContext(), android.R.drawable.ic_btn_speak_now));
+                list.add(b.build());
+            }
+            sm.setDynamicShortcuts(list);
+            JSObject r = ok(); r.put("count", list.size());
+            call.resolve(r);
+        } catch (Throwable t) { call.resolve(fail(t.getMessage())); }
+    }
+
+    private static String mimeOf(String ext) {        String e = (ext == null ? "" : ext.toLowerCase());
         if (e.contains("png")) return "image/png";
         if (e.contains("webp")) return "image/webp";
         if (e.contains("gif")) return "image/gif";
