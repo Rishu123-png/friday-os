@@ -659,3 +659,9 @@ export function sherpaAddListener(event, cb) {
   if (!p || typeof p.addListener !== 'function') return null;
   try { return p.addListener(event, cb); } catch (_) { return null; }
 }
+
+/* ================= v15 Phase 7: DYNAMIC SHORTCUTS ================= */
+/** Set Android launcher dynamic shortcuts (APK only). */
+export async function setShortcuts(shortcuts) {
+  return call('setShortcuts', { shortcuts: (shortcuts || []).map((s, i) => ({ id: 'sc' + i, title: s.title, action: s.action })) });
+}

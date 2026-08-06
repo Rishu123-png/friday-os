@@ -99,6 +99,62 @@ export function appLocked() { return getSetting('appLock') === true && !!getSett
 export function unlockApp() { setSetting('appLock', false); audit('auth', 'app unlocked'); }
 export function lockApp() { setSetting('appLock', true); audit('auth', 'app locked'); }
 
+/* ================= v15 Phase 9: Biometric + Encrypted backups ================= */
+
+/** Biometric enrollment flag + availability (native decided by app.js/native). */
+export function biometricEnabled() { return getSetting('biometricLock') === true; }
+export function setBiometric(on) { setSetting('biometricLock', !!on); audit('auth', on ? 'biometric enabled' : 'biometric disabled'); }
+
+/** Guard: if biometric is set, run the native prompt first (injected), then PIN fallback. */
+export async function authGate({ nativeBiometric = null } = {}) {
+  if (biometricEnabled() && nativeBiometric && typeof nativeBiometric === 'function') {
+    const ok = await nativeBiometric().catch(() => false);
+    if (ok) { unlockApp(); return { ok: true, method: 'biometric' }; }
+  }
+  return { ok: false, method: 'needs_pin' };
+}
+
+/** Encrypted backup: encrypt the full exportAll() blob with a user passphrase.
+    Uses encryptJSON (AES-256-GCM). Returns a portable JSON string. */
+export async function encryptedBackup(passphrase, { exportAll = null } = {}) {
+  if (!exportAll) return { ok: false, reason: 'no exporter' };
+  const data = exportAll();
+  const e = await encryptJSON(data, passphrase);
+  if (!e.ok) return { ok: false, reason: e.reason };
+  return { ok: true, blob: JSON.stringify({ v: 2, enc: true, at: Date.now(), data: e.value }) };
+}
+
+/** Restore an encrypted backup. */
+export async function restoreEncryptedBackup(blob, passphrase) {
+  try {
+    const outer = JSON.parse(blob);
+    if (!outer.enc) return { ok: false, reason: 'not an encrypted backup' };
+    const d = await decryptJSON(outer.data, passphrase);
+    if (!d.ok) return { ok: false, reason: 'wrong passphrase or corrupt' };
+    return { ok: true, data: d.value };
+  } catch (_) { return { ok: false, reason: 'corrupt blob' }; }
+}
+
+/** Secure key storage note: app secrets (groq/serverToken) ideally live in the
+    native keystore. This exposes a save/load bridge the native layer can back
+    with Android Keystore when wired (falls back to private tier locally). */
+export async function secureKeyPut(name, value, { nativeKeystore = null } = {}) {
+  if (nativeKeystore && typeof nativeKeystore === 'function') {
+    const r = await nativeKeystore(name, value).catch(() => null);
+    if (r && r.ok) return { ok: true, method: 'keystore' };
+  }
+  privatePut('key_' + name, value);   // local fallback (cleartext — documented)
+  return { ok: true, method: 'local' };
+}
+export async function secureKeyGet(name, { nativeKeystore = null } = {}) {
+  if (nativeKeystore && typeof nativeKeystore === 'function') {
+    const r = await nativeKeystore(name).catch(() => null);
+    if (r && r.ok) return { ok: true, value: r.value, method: 'keystore' };
+  }
+  const v = privateGet('key_' + name);
+  return v != null ? { ok: true, value: v, method: 'local' } : { ok: false, reason: 'not found' };
+}
+
 export function backendToken() {
   // Session token for backend — read from settings, never logged or stored in plaintext logs.
   return (getSetting('serverToken') || '').trim();
