@@ -1118,6 +1118,91 @@ I('notif_search', t => /\b(search (my )?notifications?|notifications? (search|dh
     return { say: null, action: { type: 'notif_search', query: q } };
   }, 6);
 
+/* ================= v15 Phase 4: SMART PRODUCTIVITY ================= */
+/* Notes: "note: X", "note in folder F: X", "summarize note X", "flashcards X", "mindmap X", "folders" */
+I('note_save', t => /^(note|note down|add note|yaad note|note likho)[:\s]+(.{2,400})$/i.test(t)
+   || /\b(note|notes)\b[\s\S]{0,12}\b(add|save|banao|likho|rakho)\b/i.test(t) ? 1 : 0,
+  t => {
+    let text = t.replace(/^(note down|note|add note|yaad note|note likho)[:\s]+/i, '');
+    let folder = '';
+    const fm = text.match(/\bin (?:folder |the )?([a-z][a-z\s]{1,20}?)\s*[:\-]\s*(.+)$/i);
+    if (fm) { folder = fm[1].trim(); text = fm[2].trim(); }
+    return { say: null, action: { type: 'note_save', text, folder } };
+  }, 5);
+I('note_summary', t => /\b(summarize (my )?note|note summary|note ka summary|summarize note)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:summarize|summary)\s+(?:note|notes)\s+(?:on|about|of|for)?\s*(.+)$/i); return { say: null, action: { type: 'note_summary', topic: m ? m[1].trim() : '' } }; }, 5);
+I('note_flashcards', t => /\b(flashcards?|flash cards|quiz cards)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:flashcards?|flash cards)\s+(?:on|about|of|for)?\s*(.+)$/i); return { say: null, action: { type: 'note_flashcards', topic: m ? m[1].trim() : '' } }; }, 5);
+I('note_mindmap', t => /\b(mind ?map|mindmap)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:mind ?map|mindmap)\s+(?:on|of|for)?\s*(.+)$/i); return { say: null, action: { type: 'note_mindmap', topic: m ? m[1].trim() : '' } }; }, 5);
+I('note_folders', t => /\b(folders?|note folders|folder list)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'note_folder' } }), 5);
+/* Documents: "read pdf", "pdf summary", "ask pdf: Q", "resume analysis", "contract analysis" */
+I('doc_read', t => /\b(read (a |this |the )?(pdf|document|file)|read pdf|pdf read karo)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'doc_read' } }), 5);
+I('doc_summary', t => /\b(pdf|document|doc)\b[\s\S]{0,10}\b(summary|summarize|summarise)\b|\b(summary|summarize)\b[\s\S]{0,10}\b(pdf|document)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:summary|summarize)\s+(?:of |the )?([a-z0-9 ._-]{1,40})$/i); return { say: null, action: { type: 'doc_summary', doc: m ? m[1].trim() : '' } }; }, 5);
+I('doc_ask', t => /\bask (the |this )?(pdf|document|doc)\b|\bpdf (mein|me) kya\b|\bwhat does the (pdf|document|doc) (say|mean)\b/i.test(t) ? 1 : 0,
+  t => {
+    const q = t.replace(/\b(ask (the |this )?(pdf|document|doc)|what does the (pdf|document|doc) (say|mean)|pdf (mein|me) kya hai|baare mein)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    return { say: null, action: { type: 'doc_ask', question: q } };
+  }, 5);
+I('doc_resume', t => /\b(resume analysis|resume check|analy[sz]e (this |the )?(resume|cv)|resume (mein|me) kya|my resume)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'doc_resume' } }), 6);
+I('doc_contract', t => /\b(contract|agreement)\b.*\b(analy|check|review)\b|\b(analy|check|review)\b.*\b(contract|agreement)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'doc_contract' } }), 5);
+/* Knowledge base: "search all X", "knowledge stats" */
+I('kb_search', t => /\b(search all|search (my )?(notes|docs|documents|knowledge)|sab (search|khojo)|knowledge search)\b/i.test(t) ? 1 : 0,
+  t => { const q = t.replace(/\b(search all|search (my )?(notes|docs|documents|knowledge)|sab (search|khojo)|knowledge search|for|about|me|in)\b/gi, ' ').replace(/\s+/g, ' ').trim(); return { say: null, action: { type: 'kb_search', query: q } }; }, 5);
+I('kb_stats', t => /\b(knowledge (base )?stats|kb stats|meri kitni (notes|docs|chats))\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'kb_stats' } }), 5);
+/* Planner: "today's agenda", "weekly plan", "priorities" */
+I('plan_today', t => /\b(today'?s (agenda|plan|schedule)|aaj ka (plan|agenda|schedule)|what'?s on (today|aaj)|agenda (for )?today)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'plan_today' } }), 5);
+I('plan_week', t => /\b(weekly (plan|agenda|schedule)|this week'?s (plan|agenda)|isse hafte ka plan|week (ka )?plan)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'plan_week' } }), 5);
+I('plan_priorities', t => /\b((today'?s|my) (priorit|suggest|focus)|priorities? (for )?today|kya (karna|karun) (pehle|first)|suggest (priorit|what to do))\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'plan_priorities' } }), 5);
+
+/* ================= v15 Phase 5-9 intents ================= */
+/* Study */
+I('study_doubt', t => /\b(solve|doubt|samjhao|explain|kaise (karein|kare|hoti)|help me with)\b/i.test(t) ? 1 : 0,
+  t => { const q = t.replace(/\b(solve|doubt|samjhao|explain|help me with)\b/gi, ' ').replace(/\s+/g, ' ').trim(); return { say: null, action: { type: 'study_doubt', query: q } }; }, 6);
+I('study_pyq', t => /\b(pyq|previous year|past year|last year (questions|papers))\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:pyq|previous year|past year|last year)\s+(?:for|of|questions?)?\s*(physics|chemistry|maths?|biology|english|history)?/i); return { say: null, action: { type: 'study_pyq', subject: m && m[1] ? m[1] : '' } }; }, 5);
+I('study_formula', t => /\b(formula sheets?|formulas? (of|for)|important formulas?)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:formula|formulas)\s+(?:of|for)?\s*(physics|chemistry|maths?|biology)?/i); return { say: null, action: { type: 'study_formula', subject: m && m[1] ? m[1] : 'physics' } }; }, 5);
+I('study_revision', t => /\b(revision plan|study plan|padhai plan|revision schedule)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:revision|study)\s+(?:plan|schedule)\s+(?:for|of)?\s*([a-z ]{2,20})?/i); const d = t.match(/\b(\d+)\s*days?\b/); return { say: null, action: { type: 'study_revision', subject: m && m[1] ? m[1] : 'physics', days: d ? d[1] : '7' } }; }, 5);
+I('study_progress', t => /\b(study progress|padhai (progress|stats)|mera study (report|stats)|progress (report|stats))\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'study_progress', subject: '' } }), 5);
+I('study_mock', t => /\b(mock test|mock test (on|for)|practice test|nd[a]? mock)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:mock test|practice test)\s+(?:on|for)?\s*(physics|chemistry|maths?|biology|english)?/i); return { say: null, action: { type: 'study_mock', subject: m && m[1] ? m[1] : 'general' } }; }, 5);
+/* Guardian */
+I('safety_timer', t => /\b(safety timer|check on me (in|after)|safety check in)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(\d+)\s*(min|minute|minutes)?\b/); return { say: null, action: { type: 'safety_timer', minutes: m ? m[1] : '30' } }; }, 5);
+I('safety_cancel', t => /\b(cancel (safety )?timers?|safety timer off|disarm safety)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'safety_cancel' } }), 5);
+I('breathe', t => /\b(breathing exercise|breathe|breathing|saanse)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'breathe', rounds: '4' } }), 5);
+I('heart_rate', t => /\b(heart ?rate|pulse)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'heart_rate' } }), 5);
+I('med_reminder', t => /\b(medicine (remind|alarm)|med reminder|dawai)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/(\d{1,2}\s*(am|pm)([\s,]+|\d{1,2}\s*(am|pm)){0,5})/i); return { say: null, action: { type: 'med_reminder', times: m ? m[1] : '' } }; }, 5);
+/* UI */
+I('amoled', t => /\b(amoled (mode|on|off)|pure black mode)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'amoled', on: !/\boff\b/.test(t) } }), 5);
+/* Security */
+I('biometric', t => /\b(biometric|fingerprint (lock|unlock)|face unlock)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'biometric', on: !/\boff\b/.test(t) } }), 5);
+I('backup_enc', t => /\b(encrypted backup|backup encrypted)\b/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:encrypted backup|backup encrypted)\s+([^\s]{6,})/i); return { say: null, action: { type: 'backup_encrypted', passphrase: m ? m[1] : '' } }; }, 5);
+/* Plugins */
+I('plugin_list', t => /\b(plugins?|plugin list|extensions?)\b/i.test(t) ? 1 : 0,
+  t => ({ say: null, action: { type: 'plugin_list' } }), 5);
+I('plugin_install', t => /\b(install plugin|plugin install)\s+([a-z0-9-]+)/i.test(t) ? 1 : 0,
+  t => { const m = t.match(/\b(?:install plugin|plugin install)\s+([a-z0-9-]+)/i); return { say: null, action: { type: 'plugin_install', id: m[1] } }; }, 5);
+
 /* image maker: "make an image of a cyberpunk city" */
 I('image_make', t => /\b(make|create|generate|draw|banao)\b.*\b(image|picture|photo|wallpaper|painting)\b|\bimage of\b/.test(t) ? 1 : 0,
   t => {

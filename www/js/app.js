@@ -36,6 +36,14 @@ import * as VISIONX from './visionx.js'; // v11.3 Phase 6: AI Vision System
 import * as AUTOX from './autox.js';  // v11.3 Phase 7: Intelligent Automation Engine
 import * as AIR from './airouter.js'; // v15 Phase 3: AI Router + Analytics
 import * as WF from './workflow.js';  // v15 Phase 3: AI Workflow Engine
+import * as NOTESX from './notesx.js';// v15 Phase 4: AI Notes
+import * as DOCAI from './docai.js';  // v15 Phase 4: AI Document Assistant
+import * as KNOW from './knowledge.js';// v15 Phase 4: Personal Knowledge Base
+import * as PLANX4 from './plannerx.js';// v15 Phase 4: Smart Planner
+import * as STUDYX from './studyx.js'; // v15 Phase 5: AI Study Assistant
+import * as GUARD from './guardian.js';// v15 Phase 6: Personal Guardian
+import * as PLUGINS from './plugins.js';// v15 pre-10: Plugin System
+import * as UIX from './uix.js';       // v15 Phase 8: Premium UI/UX
 import * as PLANX from './planx.js';  // v12.0 Phase 8: AI Planner & Reasoning Engine
 import * as INTELX from './intelx.js';// v12.1 Phase 9: Intelligence & Context Engine
 import * as DEVX from './devx.js';    // v12.2 Phase 10: Device Engine
@@ -91,6 +99,32 @@ const bootFridayCore = () => {
     });
     CORE.register('perfx', {
       health: () => probe('perfx', () => { const d = PERFX.dashboard(); return { ok: true, detail: (d.fps || '—') + ' fps · ' + (d.ram && d.ram.usedPct != null ? d.ram.usedPct + '% ram' : 'ram —') + ' · ' + (d.aiLatencyMs != null ? d.aiLatencyMs + 'ms ai' : 'ai —') }; })
+    });
+    /* v15 Phase 4: Smart Productivity engines report as services */
+    CORE.register('notesx', {
+      health: () => probe('notesx', () => { const s = NOTESX.noteStats(); return { ok: true, detail: s.total + ' notes · ' + s.folders + ' folders · ' + s.pinned + ' pinned' }; })
+    });
+    CORE.register('docai', {
+      health: () => probe('docai', () => { const s = DOCAI.docStats(); return { ok: true, detail: s.total + ' docs · ' + s.kinds.pdf + ' pdf' }; })
+    });
+    CORE.register('knowledge', {
+      health: () => probe('knowledge', () => { const s = KNOW.kbStats(); return { ok: true, detail: s.total + ' items · ' + s.bytesHuman }; })
+    });
+    CORE.register('plannerx', {
+      health: () => probe('plannerx', () => { const s = PLANX4.plannerStats(); return { ok: true, detail: s.openTasks + ' tasks · ' + s.pendingReminders + ' reminders · ' + s.today + ' today' }; })
+    });
+    /* v15 Phase 5-9: Study · Guardian · Plugins · UI report as services */
+    CORE.register('studyx', {
+      health: () => probe('studyx', () => { const p = STUDYX.progress(); return { ok: true, detail: p.sessions + ' sessions · ' + p.weekMin + 'm/wk · streak ' + p.streak }; })
+    });
+    CORE.register('guardian', {
+      health: () => probe('guardian', () => { const s = GUARD.guardianStats(); return { ok: true, detail: s.timers + ' timers · ' + s.confirmedToday + ' confirmed today' }; })
+    });
+    CORE.register('plugins', {
+      health: () => probe('plugins', () => { const s = PLUGINS.pluginStats(); return { ok: true, detail: s.installed + ' plugins · ' + s.enabled + ' enabled' }; })
+    });
+    CORE.register('uix', {
+      health: () => probe('uix', () => ({ ok: true, detail: UIX.isTablet() ? 'tablet layout' : 'phone · ' + UIX.layoutHint().mode }))
     });
     /* v15 Phase 3: AI router + workflow report as services */
     CORE.register('air', {
@@ -465,6 +499,17 @@ async function init() {
   bootPhase8to10();   // v12.0-12.2: Planner + Intelligence + Device engines (fire-and-forget)
   bootPhase11to14();  // v13-14: Security + Performance + Cinematic + release wiring
   AIR.init();         // v15 Phase 3: AI router online
+  PLUGINS.init();     // v15 pre-10: plugin system
+  UIX.init();         // v15 Phase 8: UI helpers apply (Material-You/AMOLED/tablet)
+  /* v15 Phase 7: dynamic shortcuts (APK) + plugin claim hook into chat */
+  try {
+    if (NAT.isNative()) NAT.setShortcuts([
+      { title: 'Voice', action: 'voice' },
+      { title: 'Study', action: 'study_doubt' },
+      { title: 'Notes', action: 'note_save' },
+      { title: 'SOS', action: 'sos' }
+    ]).catch(() => {});
+  } catch (_) {}
   /* v11.3 Phase 5: daily digest + cleanup of expired vision memories */
   setTimeout(() => { try {
     const s = MEMEX.dailyDigest(new Date().toDateString(), 'ke sessions me');
@@ -810,6 +855,16 @@ async function handleInput(text, opts = {}) {
     if (kind === 'password_check_text') return auditPassword(text.replace(/["']/g, '').trim());
     if (kind === 'phish_link') return judgeLink(text);
     if (kind === 'quiz_answer') return quizAnswer(text);
+    if (kind === 'mock_answer') return mockAnswer(text);
+    if (kind === 'safety_ok') {
+      if (/^(ok|sab theek|theek hai|yes|haan|good|safe)\b/i.test(text.trim())) {
+        GUARD.confirmSafetyTimer(state.safetyTimerId); reply('Theek hai. Main hoon yahan. 🛡'); return true;
+      }
+      if (/^(help|sos|emergency|madad)\b/i.test(text.trim())) {
+        GUARD.confirmSafetyTimer(state.safetyTimerId); return runAction({ type: 'sos' }, {});
+      }
+      state.expect = 'safety_ok'; return reply('Bolo "sab theek" ya "help".');
+    }
     if (kind === 'voice_note') {
       S.addItem(KEYS.NOTES, { text: '🎙 ' + text, created: Date.now() });
       refresh('notes');
@@ -2079,6 +2134,235 @@ async function runAction(a, hit) {
       else { D.copy(text); reply('Chat copied to clipboard — kahin bhi paste karo.'); }
       return true;
     }
+    /* ================= v15 Phase 4: SMART PRODUCTIVITY ================= */
+    /* ---- Notes ---- */
+    case 'note_save': {
+      const rec = NOTESX.addNote({ text: a.text, folder: a.folder || '', kind: a.kind || 'text', tags: a.tags ? NOTESX.autoTags(a.text) : [] });
+      refresh('notes');
+      if (rec) reply(a.folder ? `Note saved in "${a.folder}".` : 'Note saved.');
+      else reply('Note khali hai — kuch likh do.');
+      return true;
+    }
+    case 'note_summary': {
+      const q = (a.topic || '').trim();
+      const n = q ? NOTESX.searchNotes(q, 1)[0] : null;
+      if (!n) { reply(q ? `"${q}" se koi note nahi mila.` : 'Kis note ka summary? Bolo "summarize note <kuch>".'); return true; }
+      const sum = await NOTESX.summarizeNote(n.note.text, { ai: async (txt) => askViaRouter(txt, [], 'You are a summarizer. 4-6 plain lines.') }).catch(() => NOTESX.localSummary(n.note.text));
+      reply(`**${q}** — summary:\n${sum}`);
+      return true;
+    }
+    case 'note_flashcards': {
+      const q = (a.topic || '').trim();
+      const n = q ? NOTESX.searchNotes(q, 1)[0] : null;
+      const text = n ? n.note.text : (a.text || '');
+      const cards = NOTESX.flashcardsFrom(text, 6);
+      if (!cards.length) { reply('Flashcards nahi ban paye — note me Q/A ya "term: definition" pattern chahiye.'); return true; }
+      addMsg('ai', `**Flashcards** — ${cards.length}:\n` + cards.map((c, i) => `${i + 1}. **${c.q}**\n   ${c.a}`).join('\n'));
+      return true;
+    }
+    case 'note_mindmap': {
+      const q = (a.topic || '').trim();
+      const n = q ? NOTESX.searchNotes(q, 1)[0] : null;
+      const text = n ? n.note.text : (a.text || '');
+      const mm = NOTESX.mindmapFrom(text);
+      const lines = [`**Mind map: ${mm.topic}**`];
+      for (const e of mm.edges) { const node = mm.nodes.find(x => x.id === e.to); if (node) lines.push(`  ↳ ${node.label}`); }
+      reply(lines.join('\n'));
+      return true;
+    }
+    case 'note_folder': {
+      const name = (a.name || '').trim();
+      if (!name) { reply('Folder ka naam bolo — "move note <kuch> to <folder>".'); return true; }
+      const folders = NOTESX.folders();
+      reply(folders.length ? `Folders: ${folders.map(f => `${f.name} (${f.count})`).join(', ')}` : 'Abhi koi folder nahi — note save karo with folder.');
+      return true;
+    }
+    /* ---- Documents ---- */
+    case 'doc_summary': {
+      const d = (a.doc || '').trim();
+      const found = DOCAI.docs().find(x => x.name.toLowerCase().includes(d.toLowerCase())) || (d ? null : DOCAI.docs()[0]);
+      if (!found) { reply(d ? `"${d}" document nahi mila. Pehle "read pdf" se upload karo.` : 'Koi document nahi hai. Pehle "read pdf" se upload karo.'); return true; }
+      reply(`📄 **${found.name}** — summary:\n${found.summary || DOCAI.localDocSummary(found.text)}`);
+      return true;
+    }
+    case 'doc_ask': {
+      const q = (a.question || '').trim();
+      const d = (a.doc || '').trim();
+      const found = DOCAI.docs().find(x => x.name.toLowerCase().includes(d.toLowerCase())) || DOCAI.docs()[0];
+      if (!found) { reply('Pehle ek document upload karo ("read pdf").'); return true; }
+      const ans = DOCAI.answerFromDoc(found.text, q);
+      reply(ans ? `📄 From ${found.name}:\n${ans}` : 'Us document me iska answer nahi mila. Try a different question.');
+      return true;
+    }
+    /* ---- Knowledge base ---- */
+    case 'kb_search': {
+      const q = (a.query || '').trim();
+      if (!q) { reply('Kya search karun? "search all <kuch>".'); return true; }
+      const hits = KNOW.searchAll(q, 6);
+      if (!hits.length) { reply(`"${q}" kahi nahi mila (notes/docs/chat).`); return true; }
+      reply(`🔎 **"${q}"** — ${hits.length} results:\n` + hits.map(h => `• [${h.src}] ${String(h.text).slice(0, 70)}`).join('\n'));
+      return true;
+    }
+    case 'kb_stats': {
+      const s = KNOW.kbStats();
+      reply(`🧠 **Knowledge base** — ${s.notes} notes · ${s.docs} docs · ${s.chats} chat msgs\n• Size: ${s.bytesHuman}\n• Categories: ${Object.entries(s.categories).map(([k, v]) => `${k}: ${v}`).join(', ') || '—'}`);
+      return true;
+    }
+    /* ---- Planner ---- */
+    case 'plan_today': {
+      const ag = PLANX4.todayAgenda();
+      if (!ag.length) { reply('Aaj kuch schedule nahi hai. Enjoy!'); return true; }
+      reply(`📅 **Today** — ${ag.length} items:\n` + ag.map((x, i) => `${i + 1}. ${x.time ? x.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' : ''}[${x.type}] ${x.text}`).join('\n'));
+      return true;
+    }
+    case 'plan_week': {
+      const wk = PLANX4.weeklyPlan(7);
+      const lines = wk.map(d => `• ${d.label}: ${d.items.length ? d.items.slice(0, 3).map(i => i.text.slice(0, 30)).join(', ') + (d.items.length > 3 ? ' +' + (d.items.length - 3) : '') : 'free'}`);
+      reply(`🗓 **This week**\n` + lines.join('\n'));
+      return true;
+    }
+    case 'plan_priorities': {
+      const tops = PLANX4.topPriorities(new Date(), 4);
+      if (!tops.length) { reply('Aaj koi priority nahi — sab clear!'); return true; }
+      reply(`🎯 **Today's priorities**\n` + tops.map((t, i) => `${i + 1}. ${t.text} (${t.score}/100)`).join('\n'));
+      return true;
+    }
+    /* ---- Document read (file picker) + analysis ---- */
+    case 'doc_read': return pickAndReadDoc();
+    case 'doc_resume': return analyzeLastDoc('resume');
+    case 'doc_contract': return analyzeLastDoc('contract');
+
+    /* ================= v15 Phase 5: STUDY ASSISTANT ================= */
+    case 'study_doubt': {
+      const q = (a.query || '').trim();
+      if (!q) { reply('Kya doubt hai? Bolo "solve <question>" ya "doubt <question>".'); return true; }
+      const subj = STUDYX.subjectOf(q);
+      thinking(true);
+      const r = await AIR.route({ task: 'chat', messages: [{ role: 'user', content: STUDYX.doubtPrompt(q) }], exec: routerExec, opts: { maxTokens: 700 } });
+      thinking(false);
+      reply(r.ok ? `🎓 **${subj}** — ${r.text}` : `Doubt solver offline right now (${r.reason}). Try again ya later.`);
+      return true;
+    }
+    case 'study_pyq': {
+      const subj = (a.subject || '').trim();
+      const pyq = STUDYX.pyqFor(subj, 3);
+      reply(`📚 **PYQ — ${STUDYX.subjectOf(subj || 'general')}**\n` + pyq.map((p, i) => `${i + 1}. ${p.q}\n   *(${p.a})*`).join('\n'));
+      return true;
+    }
+    case 'study_formula': {
+      const subj = (a.subject || '').trim();
+      const sheet = STUDYX.formulaSheet(subj, 8);
+      reply(`🧮 **Formula sheet — ${STUDYX.subjectOf(subj || 'physics')}**\n` + sheet.map(([f, n]) => `\`${f}\` — ${n}`).join('\n'));
+      return true;
+    }
+    case 'study_revision': {
+      const subj = (a.subject || '').trim();
+      const days = Math.max(1, parseInt(a.days, 10) || 7);
+      const plan = STUDYX.revisionFor(subj || 'physics', days, 2);
+      reply(`🗓 **Revision plan — ${STUDYX.subjectOf(subj || 'physics')}** (${days}d)\n` + plan.map((d, i) => `• Day ${i + 1}: ${d.focus}`).join('\n'));
+      return true;
+    }
+    case 'study_progress': {
+      const subj = (a.subject || '').trim();
+      const p = STUDYX.progress(subj);
+      const chart = STUDYX.weekChart();
+      const bars = chart.map(d => `${d.day}: ${'█'.repeat(Math.min(12, Math.round(d.min / 10)))} ${d.min}m`).join('\n');
+      reply(`📊 **Study progress — ${p.subject}**\n• ${p.sessions} sessions · ${p.totalMin} min total\n• This week: ${p.weekMin} min · streak: ${p.streak}d\n${bars}`);
+      return true;
+    }
+    case 'study_mock': {
+      const subj = (a.subject || '').trim();
+      const test = STUDYX.mockTest(subj, 5);
+      state.mockTest = test;
+      state.mockIdx = 0; state.mockScore = 0;
+      reply(`📝 **Mock test — ${test.subject}** (5 questions)\n**Q1.** ${test.questions[0].q}`);
+      state.expect = 'mock_answer';
+      return true;
+    }
+
+    /* ================= v15 Phase 6: PERSONAL GUARDIAN ================= */
+    case 'safety_timer': {
+      const mins = Math.max(1, parseInt(a.minutes, 10) || 30);
+      const rec = GUARD.addSafetyTimer({ minutes: mins, escalate: S.getSetting('safetyTimerEscalate') === true });
+      state.safetyTimerId = rec.id;
+      reply(`🛡 Safety timer set — ${mins} min. Jab time ho, main poochunga "sab theek hai?" — bolo "ok" ya "sab theek".`);
+      setTimeout(() => runSafetyCheck(rec.id), mins * 60000);
+      return true;
+    }
+    case 'safety_cancel': { GUARD.disarmSafetyTimers(); reply('Safety timers off.'); return true; }
+    case 'breathe': {
+      const rounds = Math.max(1, parseInt(a.rounds, 10) || 4);
+      const cycle = GUARD.breathingCycle(rounds);
+      reply(`🌬 **Breathing exercise** — box breathing (4-4-4-4), ${rounds} rounds.\n` + cycle.map((p, i) => `${i + 1}. ${p.name} (${p.sec}s)`).join('\n') + `\n\nBolo "breathe done" jab khatam ho.`);
+      state.breatheCycle = cycle;
+      return true;
+    }
+    case 'heart_rate': return runHeartRate();
+    case 'med_reminder': {
+      const times = (a.times || '').split(/[\s,]+/).filter(Boolean).slice(0, 6);
+      if (!times.length) { state.expect = 'med_times'; reply('Kis time pe? "medicine 8am 2pm 8pm".'); return true; }
+      GUARD.setMedSchedule(times);
+      createMedAlarms(times.join(' '));
+      return true;
+    }
+
+    /* ================= v15 Phase 8: PREMIUM UI ================= */
+    case 'amoled': {
+      S.setSetting('amoled', a.on !== false);
+      UIX.init();
+      reply(a.on === false ? 'AMOLED mode off.' : 'AMOLED mode on — pure black, battery friendly.');
+      return true;
+    }
+    case 'ui_pref': {
+      const k = (a.key || '').trim(), v = a.value;
+      if (!k) { reply('UI pref set karne ke liye: "set ui <key> <value>".'); return true; }
+      S.setSetting(k, v);
+      UIX.init();
+      reply(`UI preference "${k}" = ${JSON.stringify(v)}.`);
+      return true;
+    }
+
+    /* ================= v15 Phase 9: SECURITY & PRIVACY ================= */
+    case 'biometric': {
+      S.setSetting('biometricLock', a.on !== false);
+      reply(a.on === false ? 'Biometric lock off.' : 'Biometric lock on — FRIDAY ko kholne ke liye fingerprint/face chahiye (APK me).');
+      return true;
+    }
+    case 'backup_encrypted': {
+      const pass = (a.passphrase || '').trim();
+      if (pass.length < 6) { reply('Encrypted backup ke liye 6+ char passphrase chahiye. Bolo "encrypted backup <passphrase>".'); return true; }
+      const r = await SECX.encryptedBackup(pass, { exportAll: () => S.exportAll() });
+      if (!r.ok) { reply('Backup encrypt nahi hua: ' + r.reason); return true; }
+      D.download(`friday-encrypted-${Date.now()}.json`, r.blob, 'application/json');
+      reply('🔐 **Encrypted backup** ready (AES-256-GCM). Passphrase yaad rakho — koi aur nahi khol sakta.');
+      return true;
+    }
+    case 'restore_encrypted': {
+      state.expect = 'restore_enc';
+      reply('Paste the encrypted backup JSON, phir passphrase bolo ("decrypt <passphrase>").');
+      return true;
+    }
+
+    /* ================= v15 pre-10: PLUGIN SYSTEM ================= */
+    case 'plugin_list': {
+      const s = PLUGINS.pluginStats();
+      reply(`🧩 **Plugins** — ${s.installed} installed · ${s.enabled} enabled\n` + (s.plugins.length ? s.plugins.map(p => `• ${p.name} (${p.id}) v${p.version} — ${p.enabled ? 'on' : 'off'}`).join('\n') : 'None installed. Registry: ' + PLUGINS.registry().map(p => p.id).join(', ')));
+      return true;
+    }
+    case 'plugin_install': {
+      const id = (a.id || '').trim();
+      const manifest = PLUGINS.registry().find(p => p.id === id);
+      if (!manifest) { reply(`Plugin "${id}" registry me nahi hai. Available: ${PLUGINS.registry().map(p => p.id).join(', ')}.`); return true; }
+      const r = PLUGINS.installPlugin(manifest);
+      reply(r.ok ? `🧩 Plugin "${manifest.name}" install ho gaya.` : 'Install fail: ' + r.reason);
+      return true;
+    }
+    case 'plugin_uninstall': {
+      PLUGINS.uninstallPlugin(a.id);
+      reply(`Plugin "${a.id}" uninstall ho gaya.`);
+      return true;
+    }
+
     /* ================= v15 Phase 3: AI ROUTER / WORKFLOW / ANALYTICS ================= */
     case 'ai_diag': {
       const d = AIR.aiDiagnostics();
@@ -2838,6 +3122,15 @@ async function workflowNode(tool, inputs, ctx) {
       refresh('events');
       return { ok: true, result: 'added ' + (Array.isArray(tasks) ? tasks.length : 1) + ' events' };
     }
+    /* v15 Phase 4: extract deadlines/dates from text → calendar events */
+    case 'extract_deadlines': {
+      const text = inputs.from || inputs.text || '';
+      const dates = DOCAI.analyzeContract(text).dates;
+      const events = dates.map((d, i) => ({ text: '📌 Deadline ' + (i + 1) + ': ' + d, created: Date.now() }));
+      events.forEach(e => S.addItem(KEYS.EVENTS, e));
+      refresh('events');
+      return { ok: true, result: 'extracted ' + events.length + ' deadlines' };
+    }
     default: return { ok: false, reason: 'unknown tool ' + tool };
   }
 }
@@ -2855,6 +3148,139 @@ async function runWorkflowFlow(name, ctx = {}) {
   } else {
     reply(`Workflow failed at "${r.failedAt || '?'}" — ${r.reason}.`);
   }
+  return true;
+}
+
+/* ---- Phase 4: read a document file (txt/md/pdf via FileReader) and store it ---- */
+function pickAndReadDoc() {
+  return new Promise(res => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.txt,.md,.pdf,.csv';
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0];
+      if (!f) { reply('Koi file select nahi hui.'); return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const raw = String(reader.result || '');
+        let text = raw;
+        /* if it looks like a real PDF (binary), try lazy pdfjs, else say so */
+        if (/\.pdf$/i.test(f.name) && raw.includes('%PDF')) {
+          try {
+            const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.mjs');
+            const doc = await pdfjs.getDocument({ data: new Uint8Array(raw.length) }).promise;
+            let out = '';
+            for (let p = 1; p <= Math.min(doc.numPages, 20); p++) {
+              const page = await doc.getPage(p);
+              const tc = await page.getTextContent();
+              out += tc.items.map(it => it.str).join(' ') + '\n';
+            }
+            text = out;
+          } catch (e) { text = ''; }
+        }
+        if (!text.trim()) { reply('Us file se text extract nahi hua (encrypted PDF ya image-based?). Screenshot pe "read text" use karo.'); return; }
+        const rec = DOCAI.addDoc({ name: f.name, kind: /\.pdf$/i.test(f.name) ? 'pdf' : 'text', text });
+        reply(`📄 **${f.name}** read kar liya — ${DOCAI.localDocSummary(text).slice(0, 140)}…\nAsk me: "ask pdf <question>" ya "pdf summary".`);
+      };
+      reader.readAsText(f);
+    };
+    inp.click();
+    res(true);
+  });
+}
+
+/* ---- Phase 4: analyze the most recent doc (resume / contract) ---- */
+async function analyzeLastDoc(kind) {
+  const d = DOCAI.docs()[0];
+  if (!d) { reply('Pehle ek document upload karo ("read pdf").'); return true; }
+  if (kind === 'resume') {
+    const r = DOCAI.analyzeResume(d.text);
+    const lines = [
+      `• Name: ${r.name || '—'}`,
+      `• Email: ${r.email || '—'}`,
+      `• Phone: ${r.phone || '—'}`,
+      `• Skills (${r.skills.length}): ${r.skills.join(', ') || '—'}`,
+      `• Experience mentions: ${r.experienceMentions} · Education: ${r.hasEducation ? 'yes' : 'no'}`,
+      `• Verdict: **${r.verdict}**`
+    ];
+    reply(`📄 **Resume analysis** (${d.name})\n` + lines.join('\n'));
+  } else {
+    const c = DOCAI.analyzeContract(d.text);
+    const lines = [
+      `• Amounts: ${c.money.length ? c.money.join(', ') : '—'}`,
+      `• Dates: ${c.dates.length ? c.dates.join(', ') : '—'}`,
+      `• Parties: ${c.parties.length ? c.parties.join('; ') : '—'}`,
+      ...c.risk.map(r => `⚠️ ${r}`)
+    ];
+    reply(`📄 **Contract review** (${d.name})\n` + lines.join('\n') + (c.risk.length ? '' : '\n• No obvious red flags.'));
+  }
+  return true;
+}
+
+/* ---- Phase 6: safety-timer check-in ---- */
+function runSafetyCheck(id) {
+  const t = GUARD.safetyTimers().find(x => x.id === id);
+  if (!t || !t.armed) return;
+  state.safetyTimerId = id;
+  state.expect = 'safety_ok';
+  addMsg('ai', `🛡 **Safety check** — sab theek hai? Bolo "sab theek" ya "help".`, { proactive: true });
+  V.speak('Safety check. Sab theek hai? Bol do ok ya help.');
+}
+
+/* ---- Phase 6: camera heart-rate estimation ---- */
+async function runHeartRate() {
+  if (!NAT.isNative()) { reply('Heart rate sirf installed app me (camera).'); return true; }
+  reply('Put your finger on the camera lens — 15 seconds, light on.');
+  U.openPanel('camera');
+  openCamera('photo');
+  // sample frames from the video feed
+  const frames = [];
+  const vid = $('#cameraFeed');
+  const canvas = $('#cameraCanvas');
+  const ctx = canvas.getContext('2d');
+  const sample = setInterval(() => {
+    if (!vid || vid.readyState < 2) return;
+    canvas.width = 32; canvas.height = 32;
+    ctx.drawImage(vid, 0, 0, 32, 32);
+    const d = ctx.getImageData(0, 0, 32, 32).data;
+    let r = 0, g = 0, b = 0, n = d.length / 4;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    frames.push(GUARD.frameAvg(r / n, g / n, b / n));
+  }, 66);   // ~15 fps
+  setTimeout(async () => {
+    clearInterval(sample);
+    closeCamera();
+    const hr = GUARD.heartRate(frames, { fps: 15 });
+    if (hr.bpm) {
+      reply(`❤️ Heart rate ~**${hr.bpm} bpm** (estimate, confidence ${Math.round(hr.confidence * 100)}%). Ye medical nahi hai — doctor se confirm karo agar doubt ho.`);
+    } else {
+      reply(`Heart rate nahi nikal paya (${hr.reason}). Better light + finger ko lens pe firmly rakho.`);
+    }
+  }, 16000);
+  return true;
+}
+
+/* ---- Phase 5: mock test answer grading ---- */
+function mockAnswer(text) {
+  const t = state.mockTest;
+  if (!t) return true;
+  const cur = t.questions[state.mockIdx];
+  const expected = String(cur.a || '').toLowerCase();
+  const got = text.toLowerCase();
+  const key = expected.split(/[,;(]/)[0].trim();
+  const words = key.split(/\s+/).filter(w => w.length > 3);
+  const hits = words.filter(w => got.includes(w)).length;
+  const good = (key && got.includes(key)) || (words.length && hits >= Math.max(1, Math.ceil(words.length * 0.6)));
+  if (good) state.mockScore++;
+  state.mockIdx++;
+  if (state.mockIdx >= t.questions.length) {
+    const g = STUDYX.gradeTest(t.questions.map(q => ({ user: true, correct: true })));   // placeholder
+    const pct = Math.round(100 * state.mockScore / t.questions.length);
+    state.mockTest = null;
+    reply(`🏁 **Mock test done** — ${state.mockScore}/${t.questions.length} (${pct}%)\n` + (pct >= 80 ? 'Excellent, Boss! NDA level 💪' : pct >= 60 ? 'Solid. Ek aur round?' : 'Practice karo — main yahan hoon.'));
+    return true;
+  }
+  reply(`${good ? '✅ Sahi!' : '❌ Answer: ' + cur.a}\n\n**Q${state.mockIdx + 1}.** ${t.questions[state.mockIdx].q}`);
   return true;
 }
 
