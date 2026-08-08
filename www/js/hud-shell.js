@@ -101,21 +101,34 @@
     setInterval(syncTelemetry, 1500);
     syncTelemetry();
 
-    /* ---------------- long-press core = reveal advanced telemetry ---- */
+    /* ---------------- core interaction: tap = talk, hold = advanced ---
+       Your app never had a tap target on the core itself — voice only
+       started from wake-word or the (now hidden) quick-command grid.
+       This forwards a real tap to that same existing, working button
+       instead of reimplementing listen() logic here. */
     var pressTimer = null;
     var EXPANDED = 'hud-expanded';
+    var longPressFired = false;
+    var HOLD_MS = 550;
+
     function openAdvanced() { dashboard.classList.add(EXPANDED); requestAnimationFrame(drawLinks); }
     function closeAdvanced() { dashboard.classList.remove(EXPANDED); requestAnimationFrame(drawLinks); }
     function toggleAdvanced() {
       if (dashboard.classList.contains(EXPANDED)) closeAdvanced();
       else openAdvanced();
     }
+    function tapToTalk() {
+      var voiceBtn = document.querySelector('.cmd-btn[data-action="voice"]');
+      if (voiceBtn) voiceBtn.click(); // reuses the real V.listen() wiring in app.js, nothing duplicated
+    }
 
     var startX = 0, startY = 0, moved = false;
     coreWrap.addEventListener('touchstart', function (e) {
-      moved = false;
+      moved = false; longPressFired = false;
       var t = e.touches[0]; startX = t.clientX; startY = t.clientY;
-      pressTimer = setTimeout(function () { if (!moved) toggleAdvanced(); }, 550);
+      pressTimer = setTimeout(function () {
+        if (!moved) { longPressFired = true; toggleAdvanced(); }
+      }, HOLD_MS);
     }, { passive: true });
     coreWrap.addEventListener('touchmove', function (e) {
       var t = e.touches[0];
@@ -123,13 +136,20 @@
         moved = true; clearTimeout(pressTimer);
       }
     }, { passive: true });
-    coreWrap.addEventListener('touchend', function () { clearTimeout(pressTimer); });
-
-    // desktop/testing fallback
-    coreWrap.addEventListener('mousedown', function () {
-      pressTimer = setTimeout(toggleAdvanced, 550);
+    coreWrap.addEventListener('touchend', function () {
+      clearTimeout(pressTimer);
+      if (!moved && !longPressFired) tapToTalk();
     });
-    coreWrap.addEventListener('mouseup', function () { clearTimeout(pressTimer); });
+
+    // desktop/testing fallback (mouse)
+    coreWrap.addEventListener('mousedown', function () {
+      longPressFired = false;
+      pressTimer = setTimeout(function () { longPressFired = true; toggleAdvanced(); }, HOLD_MS);
+    });
+    coreWrap.addEventListener('mouseup', function () {
+      clearTimeout(pressTimer);
+      if (!longPressFired) tapToTalk();
+    });
     coreWrap.addEventListener('mouseleave', function () { clearTimeout(pressTimer); });
 
     /* tap outside the expanded telemetry collapses it again */
