@@ -136,7 +136,7 @@ export async function lookAround(question, onProgress) {
     ok: true,
     via: 'local',
     text: (objects && objects.length)
-      ? 'I can see ' + scene + '. (Add a free Groq key in Settings and I can answer detailed questions about the scene.)'
-      : 'Nothing clear detected. (Add a free Groq key in Settings for real scene understanding.)'
+      ? 'I can see ' + scene + '. (Configure the optional FRIDAY Cloud backend and I can answer detailed questions about the scene.)'
+      : 'Nothing clear detected. (Configure the optional FRIDAY Cloud backend for real scene understanding.)'
   };
 }
