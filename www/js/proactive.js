@@ -132,7 +132,7 @@ const RULES = [
     check: ctx => {
       if (ctx.hasGroq) return null;
       if (stats().interactions < 25) return null;
-      return { text: `You've been using me a fair bit. If you want deeper conversation and real coding, a free Groq key in Settings unlocks it. Everything else already works offline.`, priority: 2 };
+      return { text: `You've been using me a fair bit. If you want deeper conversation and real coding, the optional server-configured FRIDAY Cloud backend unlocks it. Everything else already works offline.`, priority: 2 };
     }
   },
 
