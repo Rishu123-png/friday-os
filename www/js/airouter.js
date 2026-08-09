@@ -17,26 +17,24 @@ import { Bus, Logger } from './fridaycore.js';
 
 /* ---------------- Provider registry (pure) ---------------- */
 export const PROVIDERS = [
-  { id: 'server', label: 'FRIDAY Cloud', costs: false },
-  { id: 'groq',   label: 'Groq',         costs: true },
+  { id: 'server', label: 'Cloud gateway (Groq → optional Blackbox)', costs: true },
   { id: 'ollama', label: 'Ollama (local)', costs: false },
   { id: 'local',  label: 'On-device LLM', costs: false }
 ];
 
 /* Task → preferred providers (first available wins). (pure) */
 export const TASK_PROVIDERS = {
-  chat:     ['server', 'groq', 'ollama', 'local'],
-  code:     ['server', 'groq', 'ollama'],
-  vision:   ['server', 'groq'],
+  chat:     ['local', 'server', 'ollama'],
+  code:     ['local', 'server', 'ollama'],
+  vision:   ['server'],
   embedding: ['local'],
-  translate: ['server', 'groq']
+  translate: ['local', 'server']
 };
 
 /* Which providers are configured right now? (pure-ish, reads settings) */
 export function availableProviders() {
   const out = [];
   if ((getSetting('serverUrl') || '').trim()) out.push('server');
-  if ((getSetting('groqKey') || '').trim()) out.push('groq');
   if ((getSetting('ollamaUrl') || '').trim()) out.push('ollama');
   if ((getSetting('llmModelPath') || '').trim()) out.push('local');
   return out;
