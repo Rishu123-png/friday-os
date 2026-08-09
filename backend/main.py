@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from auth import require_token
 from config import settings
 from llm import run_tool_loop
+from cloud_providers import provider_status
 from memory import (get_facts, get_notes, memory_brief, put_fact, put_note, wipe)
 
 
@@ -58,9 +59,10 @@ async def health():
         engines["embed"] = "sentence-transformers"
     except ImportError:
         engines["embed"] = "not-installed"
-    engines["llm"] = "groq" if settings.GROQ_API_KEY else "no-key"
+    cloud = provider_status()
+    engines["llm"] = "configured" if any(v.get("configured") for v in cloud.values()) else "offline-only"
     return {"ok": True, "version": settings.VERSION, "engines": engines,
-            "serverMode": True, "model": settings.GROQ_MODEL}
+            "providers": cloud, "serverMode": True, "model": settings.GROQ_MODEL}
 
 
 # ---------------- /v1/chat (SSE) ----------------
