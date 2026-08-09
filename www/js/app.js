@@ -52,6 +52,8 @@ import * as SECX from './secx.js';    // v13.0 Phase 11: Security & Privacy Fram
 import * as PERFX from './perfx.js';  // v13.1 Phase 12: Performance & Optimization
 import * as CINEX from './cinex.js';  // v13.2 Phase 13: Cinematic UX
 import * as HUDV20 from './hud_v20.js'; // v20.0 HUD real-data engine
+/* v15.1 AGENT ORCHESTRATOR: unified agent loop wrapping intent engine + planner + AI */
+import { runAgentLoop, AGENT_CONFIG } from './agent/orchestrator.js';
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -919,6 +921,25 @@ async function handleInput(text, opts = {}) {
       state.mission = null;
       return reply('Mission complete, Boss.');
     }
+
+    /* v15.1 AGENT ORCHESTRATOR: handle agent confirmation response */
+    if (kind === 'agent_confirm' && state.agentConfirmQuestion) {
+      const go = /^(go|yes|haan|kar|karo|do|ok|okay|sure|send it|haan ji)\b/i.test(text.trim());
+      const skip = /^(skip|no|nahi|nope|cancel|rehne)\b/i.test(text.trim());
+      state.agentConfirmQuestion = null;
+      if (!go && !skip) {
+        state.expect = 'agent_confirm';
+        return reply('Bolo "go" to proceed, or "cancel" to drop it.');
+      }
+      if (skip) {
+        return reply('Action cancelled. Nothing was changed.');
+      }
+      // User confirmed — re-run the command via handleInput
+      state.expect = null;
+      state.pendingDanger = null;
+      VOX.vox.set('READY', 'confirmed');
+      return handleInput(text, { noChain: true, silentEcho: true, _confirmed: true });
+    }
   }
 
   /* v7.6.4: bare "send" after scheduling a WhatsApp = send it now via WhatsApp
@@ -998,6 +1019,65 @@ async function handleInput(text, opts = {}) {
      intent engine found no single command. Single commands are untouched. */
   if (!hit && S.getSetting('plannerEnabled') !== false && PLANX.shouldPlan(text)) {
     return runPlannerFlow(text, opts);
+  }
+
+  /* ================= v15.1 AGENT ORCHESTRATOR =================
+     When the intent engine found nothing AND AI is available,
+     run the unified agent loop: understand → context → decide →
+     execute → observe → verify → respond.
+
+     This wraps the existing intent engine, planner, and AI tools
+     into a single bounded multi-step loop (max AGENT_CONFIG.MAX_STEPS).
+
+     The agent loop calls runAction() for each action, so all existing
+     action handlers work exactly as before. The difference: after each
+     action, the verification layer checks real device state before
+     claiming success. */
+  if (!hit && (AI.hasGroq() || SERVER.isConfigured())) {
+    try {
+      const agentResult = await runAgentLoop(text, {
+        maxSteps: AGENT_CONFIG.MAX_STEPS,
+        onStep: (stepInfo) => {
+          // Update HUD/chat with agent progress
+          if (stepInfo.type === 'action') {
+            VOX.vox.set('EXECUTING', stepInfo.action);
+          } else if (stepInfo.type === 'respond') {
+            // Agent produced a response — add to chat
+            addMsg('ai', stepInfo.message, { source: 'live' });
+          } else if (stepInfo.type === 'clarify') {
+            reply(stepInfo.question);
+          } else if (stepInfo.type === 'confirm') {
+            // Dangerous action needs confirmation
+            state.pendingDanger = { text, at: Date.now(), agentQuestion: stepInfo.question };
+            VOX.vox.set('WAITING', 'awaiting confirmation');
+            Ui_confirmBadge();
+          }
+        },
+        onConfirm: async (question) => {
+          // Wait for user confirmation — set expect and return
+          state.expect = 'agent_confirm';
+          state.agentConfirmQuestion = question;
+          reply(question);
+          return null; // will be resolved when user responds
+        },
+        respond: (message) => {
+          reply(message);
+        },
+      });
+
+      // If the agent produced a final response, we're done
+      if (agentResult.done && agentResult.finalResponse) {
+        return;
+      }
+
+      // If the agent needs more input (clarification), it's handled via the callbacks
+      if (!agentResult.done && agentResult.pendingClarification) {
+        return;
+      }
+    } catch (e) {
+      Logger.error('agent', 'agent loop error: ' + (e && e.message));
+      // Fall through to existing cloud path
+    }
   }
 
   // 2) CLOUD (server mode or Groq key present)
