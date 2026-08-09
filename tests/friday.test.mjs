@@ -1896,16 +1896,16 @@ test('air: router falls back across providers and returns winner', async () => {
   const calls = [];
   const r = await AIR.route({
     task: 'chat', messages: [{ role: 'user', content: 'hi' }],
-    providers: ['server', 'groq', 'ollama', 'local'],
+    providers: ['local', 'server'],
     exec: async (provider) => {
       calls.push(provider);
-      if (provider === 'server') return { ok: false, reason: 'down' };
+      if (provider === 'local') return { ok: false, reason: 'not installed' };
       return { ok: true, text: 'from ' + provider };
     }
   });
   assert.equal(r.ok, true);
-  assert.equal(r.provider, 'groq');
-  assert.ok(calls.includes('server') && calls.includes('groq'));
+  assert.equal(r.provider, 'server');
+  assert.deepEqual(calls, ['local', 'server']);
 });
 
 test('air: router reports failure when all providers fail', async () => {
