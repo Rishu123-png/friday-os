@@ -75,7 +75,7 @@ export function wantLocal(text, actionish) {
   return shouldUseLocal(text, {
     offlineBrain: getSetting('offlineBrain'),
     native: NAT.isNative(),
-    hasKey: !!(getSetting('groqKey') || '').trim(),
+    hasKey: !!(getSetting('serverUrl') || '').trim(),
     actionish
   });
 }
