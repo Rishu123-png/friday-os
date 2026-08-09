@@ -16,6 +16,7 @@ import * as AUTO from './automation.js';
 import * as CORE from './fridaycore.js';
 import * as NAT from './native.js';
 import * as STORE from './store.js';
+import { agentState } from './agent/agentState.js';   // PHASE 2: agent-driven HUD
 
 /* ---------------- pure helpers (unit-tested) ---------------- */
 
@@ -315,7 +316,10 @@ async function updateBattery() {
 function updateVoice() {
   const st = VOX.vox.get();
   const coreStatus = $('#listeningText');
-  if (coreStatus) coreStatus.textContent = voiceStateLabel(st);
+  // PHASE 2: while the agent is actively working, the core label shows the
+  // REAL agent state (painted by hud-agent.js), not the voice engine — so the
+  // two stay synchronized and the label is never overwritten mid-action.
+  if (coreStatus && !agentState.isActive()) coreStatus.textContent = voiceStateLabel(st);
   const bars = document.querySelectorAll('#voiceWaveform .wave-bar');
   const live = st === 'LISTENING' || st === 'SPEAKING' || st === 'UNDERSTANDING' || st === 'THINKING' || st === 'EXECUTING';
   bars.forEach(b => b.classList.toggle('active', live));
