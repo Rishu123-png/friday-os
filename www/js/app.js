@@ -54,6 +54,8 @@ import * as CINEX from './cinex.js';  // v13.2 Phase 13: Cinematic UX
 import * as HUDV20 from './hud_v20.js'; // v20.0 HUD real-data engine
 /* v15.1 AGENT ORCHESTRATOR: unified agent loop wrapping intent engine + planner + AI */
 import { runAgentLoop, AGENT_CONFIG } from './agent/orchestrator.js';
+/* PHASE 2: REAL AGENT HUD STATE INTEGRATION — agent state → existing HUD */
+import { initAgentHUD } from './hud-agent.js';
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -537,6 +539,9 @@ async function init() {
 
   /* v20.0 HUD: connect every module to real device data */
   try { HUDV20.initHUDV20(); } catch (e) { Logger.error('hud', 'init: ' + (e && e.message)); }
+
+  /* PHASE 2: Agent HUD integration — paints REAL agent state onto the core */
+  try { initAgentHUD(); } catch (e) { Logger.error('hud', 'agent hud init: ' + (e && e.message)); }
 
   /* v7.7 HUD: arc-reactor rings (battery/steps) + systems status line */
   updateReactor();
