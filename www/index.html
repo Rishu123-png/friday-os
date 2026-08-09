@@ -434,27 +434,9 @@
           <h3>🧠 Brain</h3>
           <div class="brain-status" id="brainStatus">
             <div class="bs-row"><span class="bs-dot ok"></span><div><strong>Offline Engine</strong><div class="dim"><span id="intentCount">0</span> commands · always on · no key needed</div></div></div>
-            <div class="bs-row"><span class="bs-dot" id="cloudDot"></span><div><strong>Cloud Brain (optional)</strong><div class="dim">Add a Groq key for full conversation &amp; coding</div></div></div>
+            <div class="bs-row"><span class="bs-dot" id="cloudDot"></span><div><strong>Cloud Brain (optional)</strong><div class="dim">Server-side Groq; Blackbox fallback only when explicitly enabled</div></div></div>
           </div>
-          <div class="setting-item">
-            <label>Groq API Key</label>
-            <input type="password" id="groqKey" placeholder="gsk_... (optional)" autocomplete="off">
-          </div>
-          <div class="setting-item btn-row">
-            <button class="tool-add-btn" id="testKeyBtn">Test Key</button>
-            <button class="danger-btn" id="clearKeyBtn">Remove Key</button>
-          </div>
-          <p class="hint">Free key at <strong>console.groq.com</strong> — no card required. Without it FRIDAY still runs every offline feature.</p>
-          <div class="setting-item">
-            <label>Cloud Model</label>
-            <select id="groqModel">
-              <option value="llama-3.3-70b-versatile">Llama 3.3 70B — best all-round</option>
-              <option value="llama-3.1-8b-instant">Llama 3.1 8B — fastest</option>
-              <option value="openai/gpt-oss-120b">GPT-OSS 120B — strongest</option>
-              <option value="qwen/qwen3-32b">Qwen3 32B — best for code</option>
-              <option value="moonshotai/kimi-k2-instruct">Kimi K2 — long context</option>
-            </select>
-          </div>
+          <p class="hint"><b>API keys are server-side only.</b> Configure the backend environment; secrets are never stored in this WebView or APK.</p>
           <div class="setting-item">
             <label>Personality</label>
             <select id="aiPersonality">
@@ -476,16 +458,12 @@
             <label>Wake word (your choice)</label>
             <input type="text" id="wakeKeyword" placeholder="jarvis" autocomplete="off">
           </div>
-          <div class="setting-item llm-actions">
-            <button class="chip-btn" id="voskDownload" type="button">⬇️ Get wake brain (~36MB)</button>
-            <button class="chip-btn" id="voskScan" type="button">🔍 Scan</button>
-          </div>
-          <p class="hint" id="voskStatusChip">Wake brain: checking…</p>
+          <p class="hint" id="voskStatusChip">Wake word: optional model unavailable.</p>
           <div class="setting-item">
             <label>Porcupine wake-word key</label>
             <input type="password" id="porcupineKey" placeholder="Needs company email — optional" autocomplete="off">
           </div>
-          <p class="hint"><b>No key? No problem.</b> Tap "Get wake brain" once — FRIDAY then wakes on YOUR word ("jarvis", "friday", anything), 100% offline, no account, no email. The Porcupine key (if you have one) uses even less battery and wins when both are set.</p>
+          <p class="hint">Wake word remains optional. If no engine is bundled, use tap-to-speak or type; FRIDAY will not download a voice model.</p>
         </div>
         <div class="settings-group">
           <h3>☁️ FRIDAY Cloud (backend — recommended)</h3>
@@ -503,17 +481,6 @@
             <div class="toggle-switch"><input type="checkbox" id="serverMode" checked><span class="toggle-slider"></span></div>
           </div>
           <p class="hint" id="serverStatusChip">FRIDAY Cloud: check your URL…</p>
-        </div>
-        <div class="settings-group">
-          <h3>🦾 Suit Auto-Setup (JARVIS style — v10.2)</h3>
-          <p class="hint"><b>JARVIS kabhi nahi bolta "download this first".</b> WiFi milte hi suit apne systems khud up-to-date rakhta hai: memory (26MB) → wake (37MB) → voice (75MB) → ears (120MB). Ek baar, silently.</p>
-          <div class="setting-item">
-            <label>Suit auto-setup on WiFi</label>
-            <div class="toggle-switch"><input type="checkbox" id="autoSetup" checked><span class="toggle-slider"></span></div>
-          </div>
-          <div class="setting-item">
-            <button type="button" class="btn-secondary" id="autoSetupNow">Check suit systems now</button>
-          </div>
         </div>
         <div class="settings-group">
           <h3>📞 Call Guard (v10.3 — "FRIDAY sambhale")</h3>
@@ -630,34 +597,11 @@
           <p class="hint">Reduced motion follows your system setting automatically. Say <b>"performance stats"</b> or <b>"audit log"</b> anytime.</p>
         </div>
         <div class="settings-group">
-          <h3>🧠 AI Core (On-Device Brain)</h3>
-          <div class="setting-item">
-            <label>On-device brain (offline AI)</label>
-            <div class="toggle-switch"><input type="checkbox" id="offlineBrain"><span class="toggle-slider"></span></div>
-          </div>
-          <div class="setting-item">
-            <label>Model file (.gguf)</label>
-            <input type="text" id="llmModelPath" placeholder="/storage/emulated/0/Download/model.gguf" autocomplete="off">
-          </div>
-          <div class="setting-item llm-actions">
-            <button class="chip-btn" id="llmScan" type="button">🔍 Scan</button>
-            <button class="chip-btn" id="llmLoad" type="button">⬇️ Load</button>
-            <button class="chip-btn" id="llmUnload" type="button">✖ Unload</button>
-          </div>
-          <div class="setting-item" id="llmPickRow" style="display:none">
-            <select id="llmPick"></select>
-          </div>
-          <p class="hint" id="llmStatusChip">Engine status: checking…</p>
-          <p class="hint">2026 picks: <b>Gemma-3-4B-IT Q4</b> (best all-round, 6GB+ RAM) · <b>Qwen3-4B-Instruct-2507</b> (smartest) · <b>Qwen3-1.7B</b> (4GB phones) · Llama-3.2-1B (old faithful). The app auto-formats prompts per model family.</p>
-          <div class="setting-item llm-actions">
-            <button class="chip-btn" id="embedDownload" type="button">⬇️ Memory brain (~30MB)</button>
-          </div>
-          <p class="hint" id="embedStatusChip">Memory brain: not downloaded — meaning-recall off.</p>
-          <div class="setting-item">
-            <label>Embed model path</label>
-            <input type="text" id="embedModelPath" placeholder="auto-set after download" autocomplete="off">
-          </div>
-          <p class="hint">Memory brain lets FRIDAY remember facts by MEANING (on-device, local-only): "meri bike ka number kya tha?" works even without exact words.</p>
+          <h3>🧠 Local AI</h3>
+          <div class="brain-status"><div class="bs-row"><span class="bs-dot"></span><div>
+            <strong>NOT INSTALLED</strong><div class="dim">Optional model unavailable. Offline device commands and local memory still work.</div>
+          </div></div></div>
+          <p class="hint">FRIDAY never downloads models or AI packages. A model bundled by a future build may enable this optional feature.</p>
         </div>
 <div class="settings-group">
           <h3>🎙️ Voice Engine 2.0 (v11.2 VOX)</h3>
@@ -703,19 +647,12 @@
             <label>Neural voice (human-like) 🆕</label>
             <div class="toggle-switch"><input type="checkbox" id="neuralVoice"><span class="toggle-slider"></span></div>
           </div>
-          <div class="setting-item llm-actions">
-            <button class="chip-btn" id="voiceDownload" type="button">⬇️ Get neural voice (~75MB)</button>
-            <button class="chip-btn" id="voiceTest" type="button">🔊 Test</button>
-          </div>
-          <p class="hint" id="sherpaVoiceChip">Neural voice: using Android TTS (robotic).</p>
+          <p class="hint" id="sherpaVoiceChip">Neural voice: optional model unavailable; using system TTS when available.</p>
           <div class="setting-item">
             <label>Offline ears (works in basement/no-net) 🆕</label>
             <div class="toggle-switch"><input type="checkbox" id="offlineEars"><span class="toggle-slider"></span></div>
           </div>
-          <div class="setting-item llm-actions">
-            <button class="chip-btn" id="earsDownload" type="button">⬇️ Get offline ears (~120MB)</button>
-          </div>
-          <p class="hint" id="sherpaSttChip">Offline ears: using Google STT (needs internet).</p>
+          <p class="hint" id="sherpaSttChip">Offline ears: optional model unavailable; tap/type remains available.</p>
           <div class="setting-item">
             <label>Speak while thinking (streaming voice)</label>
             <div class="toggle-switch"><input type="checkbox" id="streamingTts" checked><span class="toggle-slider"></span></div>
@@ -777,21 +714,6 @@
             <div class="toggle-switch"><input type="checkbox" id="showWidgets" checked><span class="toggle-slider"></span></div>
           </div>
         </div>
-        <div class="settings-group">
-          <h3>⌨ Offline Coder</h3>
-          <div id="coderStatus" class="brain-status">
-            <div class="bs-row"><span class="bs-dot"></span><div><strong>Checking…</strong></div></div>
-          </div>
-          <div id="modelList" class="model-list"></div>
-          <div id="dlProgress" class="dl-progress" style="display:none">
-            <div class="dl-bar"><div class="dl-fill" id="dlFill"></div></div>
-            <div class="dim" id="dlText">Starting…</div>
-          </div>
-          <p class="hint">One-time download. After that FRIDAY writes code with
-          <strong>no internet and no API key</strong>. Runs on your CPU, so expect
-          10–30 seconds per answer.</p>
-        </div>
-
         <div class="settings-group">
           <h3>◉ Phone Integration</h3>
           <div class="setting-item">
@@ -1081,7 +1003,14 @@
     }
     try { localStorage.removeItem('friday_last_crash'); } catch (e) {}
     setTimeout(function () {
-      if (!window.__booted) show('Boot stuck at stage: ' + window.__stage + '\n(loading screen shown > 20 seconds)');
+      if (!window.__booted) {
+        window.dispatchEvent(new CustomEvent('friday:boot-slow', { detail: { stage: window.__stage } }));
+        var status = document.querySelector('.boot-status');
+        if (status) status.textContent = 'Initialization slow — continuing with optional services limited…';
+      }
+    }, 12000);
+    setTimeout(function () {
+      if (!window.__booted) window.dispatchEvent(new CustomEvent('friday:boot-timeout', { detail: { stage: window.__stage } }));
     }, 20000);
   })();
   </script>
@@ -1093,6 +1022,5 @@
 <!-- FRIDAY OS unified HUD redesign — additive, non-destructive (see js/hud-shell.js) -->
 <script src="js/hud-shell.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a26be577cc69a7d0',t:'MTc4NTk5NjgxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a26f687c7856f556',t:'MTc4NjAzMzYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
