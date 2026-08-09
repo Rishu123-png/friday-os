@@ -324,7 +324,7 @@ export function offlineCode(prompt) {
   if (!best) return null;
   return {
     title: best.title,
-    body: `**${best.title}**\n\n\`\`\`${best.lang}\n${best.code}\n\`\`\`\n\n_Offline template. Add a Groq key in Settings for code written specifically for your request._`
+    body: `**${best.title}**\n\n\`\`\`${best.lang}\n${best.code}\n\`\`\`\n\n_Offline template. Configure the optional FRIDAY Cloud backend for code written specifically for your request._`
   };
 }
 
@@ -508,7 +508,7 @@ _Add a Groq key and I'll write the piece itself._`;
 • Active voice
 • Read aloud — stumbles mark weak spots
 
-_Offline template. Add a Groq key in Settings and I'll write the actual piece._`;
+_Offline template. Configure the optional FRIDAY Cloud backend and I'll write the actual piece._`;
 }
 
 /* ---------- Password generator ---------- */
