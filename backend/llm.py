@@ -14,9 +14,9 @@ import json
 import time
 from typing import AsyncGenerator
 
-import httpx
 
 from config import settings
+from cloud_providers import complete
 from tools import TOOL_RUNNERS, TOOL_SCHEMAS
 from memory import memory_brief
 
@@ -131,46 +131,13 @@ def _system_prompt(brief: str) -> str:
     )
 
 
-async def _groq(
-    messages: list,
-    *,
-    tools=None,
-    stream: bool = False,
-    max_tokens: int = 900,
-    temperature: float = 0.6,
-    model: str | None = None,
-) -> dict:
-    """Call Groq API. Raises RuntimeError on failure with descriptive codes."""
-    if not settings.GROQ_API_KEY:
-        raise RuntimeError("SERVER_NO_KEY — set GROQ_API_KEY in .env")
-
-    body = {
-        "model": model or settings.GROQ_MODEL,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": stream,
-    }
-    if tools:
-        body["tools"] = tools
-        body["tool_choice"] = "auto"
-
-    headers = {
-        "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as c:
-        r = await c.post(GROQ_URL, json=body, headers=headers)
-
-    if r.status_code == 401:
-        raise RuntimeError("SERVER_BAD_KEY — GROQ_API_KEY is wrong in .env")
-    if r.status_code == 429:
-        raise RuntimeError("SERVER_RATE_LIMIT — Groq is busy, retry in a moment")
-    if r.status_code != 200:
-        raise RuntimeError(f"SERVER_HTTP_{r.status_code}: {r.text[:200]}")
-
-    return r.json()
+async def _groq(messages: list, *, tools=None, stream: bool = False,
+                max_tokens: int = 900, temperature: float = 0.6,
+                model: str | None = None) -> dict:
+    """Compatibility wrapper around the trusted Groq → Blackbox gateway."""
+    return await complete(messages, tools=tools, stream=stream,
+                          max_tokens=max_tokens, temperature=temperature,
+                          model=model)
 
 
 async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]:
