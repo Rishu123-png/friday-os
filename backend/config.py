@@ -26,6 +26,14 @@ class Settings:
     # Default LLM model served at /v1/chat
     GROQ_MODEL: str = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    # Optional Blackbox fallback. Disabled unless ALL of these are supplied.
+    # BLACKBOX_FREE_MODELS is an operator attestation; never list a model here
+    # unless the account dashboard confirms it is free for that account.
+    BLACKBOX_ENABLED: bool = _env("BLACKBOX_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    BLACKBOX_API_KEY: str = _env("BLACKBOX_API_KEY")
+    BLACKBOX_MODEL: str = _env("BLACKBOX_MODEL", "blackboxai/minimax/minimax-m2.5")
+    BLACKBOX_FREE_MODELS: str = _env("BLACKBOX_FREE_MODELS")
+
     # Vision (multimodal) model used by /v1/vision for image descriptions
     GROQ_VISION_MODEL: str = _env("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 
@@ -60,7 +68,7 @@ class Settings:
     MQTT_PASS: str = _env("MQTT_PASS")
     MQTT_PREFIX: str = _env("MQTT_PREFIX", "friday")
 
-    VERSION: str = "1.1.0"
+    VERSION: str = "1.2.0"
 
 
 settings = Settings()
