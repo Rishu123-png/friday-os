@@ -1,3 +1,4 @@
+
 /* ===== FRIDAY OS — Storage Layer =====
    Unified storage. Uses localStorage now; swap to SQLite in APK later.
    Every module talks to storage ONLY through this file. */
@@ -17,7 +18,6 @@ export const KEYS = {
 export const DEFAULTS = {
   // AI
   aiProvider: 'auto',        // auto | local | groq
-  groqKey: '',
   groqModel: 'llama-3.3-70b-versatile',
   // Persona
   personality: 'friday',
@@ -60,7 +60,7 @@ export const DEFAULTS = {
   serverMode: true,
   serverMemSyncedAt: 0,
   // v10.2 JARVIS zero-setup: suit keeps its own systems updated (WiFi, silent)
-  autoSetup: true,
+  autoSetup: false,
   // v10.3 HERALD: call guard (decline + explainer) + inbox drafts
   callGuard: false,
   callGuardTemplate: 'Boss is busy right now — bataiye kya kaam hai, main unhe bata dunga. — FRIDAY',
@@ -143,6 +143,8 @@ function write(key, value) {
 
 /* ---------- Settings ---------- */
 let _settings = read(KEYS.SETTINGS, {});
+// Phase 3 migration: remove legacy client-side cloud credentials.
+if (_settings.groqKey) { delete _settings.groqKey; write(KEYS.SETTINGS, _settings); }
 
 export function getSetting(key) {
   return key in _settings ? _settings[key] : DEFAULTS[key];
@@ -218,8 +220,7 @@ export function exportAll() {
   if (dump[KEYS.SETTINGS]) {
     dump[KEYS.SETTINGS] = {
       ...dump[KEYS.SETTINGS],
-      groqKey: '',
-      serverToken: '',        // v15: FRIDAY Cloud token is a secret too
+          serverToken: '',        // v15: FRIDAY Cloud token is a secret too
       porcupineKey: '',       // v15: wake-word access key is a secret too
       _note: 'API keys & tokens are intentionally not exported. Re-add them after import.'
     };
@@ -230,6 +231,7 @@ export function importAll(payload) {
   if (!payload || !payload.data) throw new Error('Invalid backup file');
   Object.entries(payload.data).forEach(([k, v]) => { if (v !== null) write(k, v); });
   _settings = read(KEYS.SETTINGS, {});
+  if (_settings.groqKey) { delete _settings.groqKey; write(KEYS.SETTINGS, _settings); }
   return true;
 }
 export function clearAll() {
