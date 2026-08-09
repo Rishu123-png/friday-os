@@ -77,73 +77,17 @@ COMPANION STYLE:
 
 /* ---------- Groq (OPTIONAL — only used if a key exists) ---------- */
 export function hasGroq() {
-  return !!(getSetting('groqKey') || '').trim();
+  // API credentials are server-side only. This means "cloud AI route exists".
+  return SERVER.isConfigured() && getSetting('serverMode') !== false;
 }
 
-/** True when the FRIDAY Cloud backend is configured (server mode). */
-export function hasServer() {
-  return SERVER.isConfigured();
+export function hasServer() { return SERVER.isConfigured(); }
+
+export async function callGroq(messages, { onToken = null } = {}) {
+  if (!hasGroq()) throw new Error('CLOUD_NOT_CONFIGURED');
+  return SERVER.chat(messages, { onToken });
 }
 
-export async function callGroq(messages, { stream = false, onToken = null, maxTokens = 1024, temperature = 0.7, model = null } = {}) {
-  /* v10.1 FRIDAY Cloud: server brain first — no API key in the app,
-     server runs its own tool loop + memory. */
-  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
-    const full = await SERVER.chat(messages, { onToken });
-    return full;
-  }
-  const key = (getSetting('groqKey') || '').trim();
-  if (!key) throw new Error('NO_KEY');
-
-  const body = {
-    model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
-    messages,
-    max_tokens: maxTokens,
-    temperature,
-    stream
-  };
-
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    if (res.status === 401) throw new Error('BAD_KEY');
-    if (res.status === 429) throw new Error('RATE_LIMIT');
-    throw new Error('GROQ_' + res.status + ' ' + txt.slice(0, 120));
-  }
-
-  if (!stream) {
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content?.trim() || '';
-  }
-
-  // streaming
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let full = '', buf = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) {
-      const s = line.trim();
-      if (!s.startsWith('data:')) continue;
-      const payload = s.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      try {
-        const tok = JSON.parse(payload).choices?.[0]?.delta?.content;
-        if (tok) { full += tok; onToken && onToken(tok, full); }
-      } catch (_) { /* partial chunk */ }
-    }
-  }
-  return full.trim();
-}
 
 /* ---------- Tool calling (function calling) ---------- */
 /* The cloud brain stops *talking about* actions and starts *doing* them.
@@ -194,51 +138,16 @@ export const TOOLS = [
 ];
 
 /** First-pass, non-streaming call that may return tool_calls. */
-export async function callGroqTools(messages, { model = null } = {}) {
-  /* v10.1 FRIDAY Cloud: the server runs the tool loop internally and
-     streams the final answer — so no client-side tool pass needed. */
-  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
-    return { content: '' };   // no tool_calls → pass 2 (callGroq) streams from server
-  }
-  const key = (getSetting('groqKey') || '').trim();
-  if (!key) throw new Error('NO_KEY');
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-    body: JSON.stringify({
-      model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
-      messages, tools: TOOLS, tool_choice: 'auto',
-      max_tokens: 600, temperature: 0.3
-    })
-  });
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('BAD_KEY');
-    if (res.status === 429) throw new Error('RATE_LIMIT');
-    const txt = await res.text().catch(() => '');
-    throw new Error('GROQ_' + res.status + ' ' + txt.slice(0, 120));
-  }
-  const data = await res.json();
-  return data.choices?.[0]?.message || null;
+export async function callGroqTools() {
+  if (!hasGroq()) throw new Error('CLOUD_NOT_CONFIGURED');
+  // The trusted backend owns provider selection and the bounded tool loop.
+  return { content: '' };
 }
 
-export async function testGroqKey(key) {
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key.trim()}` },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
-        max_tokens: 5
-      })
-    });
-    if (res.status === 401) return { ok: false, msg: 'Invalid key — check you copied it fully (starts with gsk_)' };
-    if (!res.ok) return { ok: false, msg: 'Error ' + res.status };
-    return { ok: true, msg: 'Key works. Cloud brain online.' };
-  } catch (e) {
-    return { ok: false, msg: 'No internet connection' };
-  }
+export async function testGroqKey() {
+  return { ok: false, msg: 'Client-side API keys are disabled. Configure GROQ_API_KEY on the backend.' };
 }
+
 
 /* ---------- Offline composer — the always-works fallback ---------- */
 /* This is NOT a language model. It is a large template engine with
@@ -299,55 +208,21 @@ export function offlineReply(text, context = {}) {
 
   if (isQuestion) {
     return pick([
-      `I don't have that offline, ${persona().address || 'Boss'}. I can look up facts, people and places via Wikipedia — try "who is <name>" or "what is <thing>". For open reasoning, add a Groq key in Settings (free tier available).`,
-      `That one needs the cloud brain. Wikipedia lookups work offline-ish — ask "what is <topic>". Otherwise add a free Groq key in Settings and I'll handle anything.`
+      `I don't have that offline, ${persona().address || 'Boss'}. I can look up facts, people and places via Wikipedia — try "who is <name>" or "what is <thing>". For open reasoning, configure the optional FRIDAY Cloud backend.`,
+      `That one needs the cloud brain. Wikipedia lookups work offline-ish — ask "what is <topic>". Otherwise configure the optional FRIDAY Cloud backend and I'll handle anything.`
     ]);
   }
 
   return pick([
-    `Noted. I'm running on the offline engine — commands, reminders, notes, weather, math and lookups all work. For open conversation, add a Groq key in Settings.`,
+    `Noted. I'm running on the offline engine — commands, reminders, notes, weather, math and lookups all work. For open conversation, configure the optional FRIDAY Cloud backend.`,
     `I hear you. Offline mode handles tasks and commands well. Say "help" to see what I can do right now.`
   ]);
 }
 
-/* ---------- v7.6: vision Q&A (Groq multimodal, llama-4-scout) ---------- */
-const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
-
-/**
- * Describe an image: FRIDAY Cloud server first (no key needed in the app),
- * then the local Groq key as fallback. (dataUrl or base64, question) -> {ok, text}.
- */
+/* ---------- Vision Q&A (trusted backend only) ---------- */
 export async function callGroqVision(base64Image, question) {
-  /* v14.1: server vision — the recommended FRIDAY Cloud path */
-  if (SERVER.isConfigured() && getSetting('serverMode') !== false) {
-    const r = await SERVER.vision(base64Image, question);
-    if (r && r.ok && r.text) return { ok: true, text: r.text };
-    if (r && r.ok === false && r.reason && r.reason !== 'network') return r;  // server answered — honest
-  }
-  if (!hasGroq()) return { ok: false, reason: 'no_key' };
-  try {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + getSetting('groqKey'),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: GROQ_VISION_MODEL,
-        max_tokens: 420,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: (question || 'Describe what you see') +
-                '. Answer in 3-5 short lines, plain words, practical.' },
-            { type: 'image_url', image_url: { url: base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image } }
-          ]
-        }]
-      })
-    });
-    if (!r.ok) return { ok: false, reason: 'http_' + r.status };
-    const j = await r.json();
-    const text = j.choices?.[0]?.message?.content;
-    return text ? { ok: true, text } : { ok: false, reason: 'empty' };
-  } catch (e) { return { ok: false, reason: 'network' }; }
+  if (!SERVER.isConfigured() || getSetting('serverMode') === false)
+    return { ok: false, reason: 'cloud_not_configured' };
+  return SERVER.vision(base64Image, question);
 }
+
