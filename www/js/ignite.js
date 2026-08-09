@@ -127,7 +127,7 @@ export async function runIgnition(o) {
           stepHit();
           await sleep(Math.max(120, plan.pace - 60));
           const svc = core && core.get ? core.get(n.dataset.svc) : null;
-          const ok = svc ? svc.state === 'running' : true;
+          const ok = !!svc && svc.state === 'running';
           n.classList.remove('b-node-off'); n.classList.add(ok ? 'b-node-on' : 'b-node-bad');
         }
         continue;
