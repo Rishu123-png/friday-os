@@ -21,9 +21,10 @@
    ============================================================================ */
 
 import { Bus, Logger, CORE } from '../fridaycore.js';
+import { agentState } from './agentState.js';
 import { resolve } from '../brain.js';
 import { runPlan, buildPlan, shouldPlan, planStats } from '../planx.js';
-import { hasGroq, hasServer, callGroq, callGroqTools, TOOLS } from '../ai.js';
+import { hasGroq, hasServer, callGroq, callGroqTools, TOOLS, systemPrompt } from '../ai.js';
 import { getSetting, KEYS, getList, saveList } from '../store.js';
 import { getForegroundApp, launchApp, mediaControl, setTorch, setVolume,
          setBrightness, setWifi, setBluetooth, setDND, placeCall,
@@ -39,7 +40,7 @@ import * as MEM from '../memory.js';
 import * as SEM from '../semantic.js';
 import * as V from '../voice.js';
 import { vox } from '../vox.js';
-import { person, persona } from '../ai.js';
+import { persona } from '../ai.js';
 
 /* ======================== CONFIGURATION ======================== */
 
@@ -76,6 +77,7 @@ export const AGENT_CONFIG = {
 export async function retrieveContext(text, opts = {}) {
   const maxFacts = opts.maxFacts || AGENT_CONFIG.CONTEXT_MAX_FACTS;
   const maxEpisodes = opts.maxEpisodes || AGENT_CONFIG.CONTEXT_MAX_EPISODES;
+  agentState.set('RETRIEVING_CONTEXT', { message: 'Retrieving context' });
 
   const context = {
     userFacts: [],
@@ -470,13 +472,23 @@ export async function runAgentLoop(text, opts = {}) {
   let pendingAction = null;
   let clarificationQuestion = null;
 
-  Logger.info('agent', `agent loop started: "${text.slice(0, 60)}" — max ${maxSteps} steps`);
+  const requestId = agentState.begin({});
+  Logger.info('agent', `agent loop started: "${text.slice(0, 60)}" — max ${maxSteps} steps (${requestId})`);
 
+  try {
   while (stepCount < maxSteps) {
     stepCount++;
     Logger.debug('agent', `step ${stepCount}/${maxSteps}`);
 
+    // ---- Cancellation: bail before starting a new step, never leave HUD stuck ----
+    if (agentState.isCancelled()) {
+      agentState.cancelled();
+      agentState.end();
+      return { done: false, steps, cancelled: true, finalResponse: 'Action cancelled.' };
+    }
+
     // ---- PHASE 1: UNDERSTAND ----
+    agentState.set('UNDERSTANDING', { step: stepCount, maxSteps, message: 'Understanding request' });
     // First try the existing intent engine
     const intentHit = resolve(currentState);
     const context = await retrieveContext(currentState);
@@ -496,6 +508,7 @@ export async function runAgentLoop(text, opts = {}) {
         say: intentHit.say,
         refresh: intentHit.refresh,
       };
+      agentState.set('SELECTING_TOOL', { step: stepCount, maxSteps, message: intentHit.intent });
       Logger.debug('agent', `step ${stepCount}: intent resolved → ${intentHit.intent}`);
     } else if (shouldPlan(text) || shouldPlan(currentState)) {
       // Multi-step goal — use PlanX
@@ -505,6 +518,7 @@ export async function runAgentLoop(text, opts = {}) {
         plan,
         source: 'planner',
       };
+      agentState.set('PLANNING', { step: stepCount, maxSteps, message: 'Creating execution plan' });
       Logger.debug('agent', `step ${stepCount}: planner engaged → ${plan.goal}`);
     } else if (hasGroq() || hasServer()) {
       // No deterministic match, AI available — use AI tool loop
@@ -516,18 +530,28 @@ export async function runAgentLoop(text, opts = {}) {
           Logger.debug('agent', `step ${stepCount}: AI decided → ${aiResult.action.type}`);
         } else if (aiResult.type === 'respond') {
           // AI gave a final response — deliver it
+          agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing response' });
           if (respond) respond(aiResult.message);
           if (onStep) onStep({ step: stepCount, type: 'respond', message: aiResult.message });
+          agentState.set('SUCCESS', { step: stepCount, message: 'Task complete' });
+          agentState.complete(true, aiResult.message, { steps });
+          agentState.end();
           return { done: true, steps, finalResponse: aiResult.message };
         } else if (aiResult.type === 'clarify') {
           clarificationQuestion = aiResult.question;
+          agentState.set('WAITING_CONFIRMATION', { step: stepCount, maxSteps, message: 'Need more input' });
           if (onStep) onStep({ step: stepCount, type: 'clarify', question: aiResult.question });
+          agentState.end();
           return { done: false, steps, pendingClarification: aiResult.question };
         } else {
           // AI returned something unexpected — fall through to reply
           const reply = aiResult.message || aiResult.say || 'I\'m not sure how to handle that.';
+          agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing response' });
           if (respond) respond(reply);
           if (onStep) onStep({ step: stepCount, type: 'respond', message: reply });
+          agentState.set('SUCCESS', { step: stepCount, message: 'Task complete' });
+          agentState.complete(true, reply, { steps });
+          agentState.end();
           return { done: true, steps, finalResponse: reply };
         }
       }
@@ -536,8 +560,12 @@ export async function runAgentLoop(text, opts = {}) {
     // No decision could be made
     if (!decision) {
       const reply = persona().greeting + ' I\'m not sure I understand. Try rephrasing, or say "help" to see what I can do.';
+      agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing response' });
       if (respond) respond(reply);
       if (onStep) onStep({ step: stepCount, type: 'respond', message: reply });
+      agentState.set('SUCCESS', { step: stepCount, message: 'Task complete' });
+      agentState.complete(true, reply, { steps });
+      agentState.end();
       return { done: true, steps, finalResponse: reply };
     }
 
@@ -547,26 +575,36 @@ export async function runAgentLoop(text, opts = {}) {
 
       // Safety check: dangerous actions need confirmation
       if (AGENT_CONFIG.ASK_CONFIRMATION && isDangerous(action)) {
+        agentState.set('CHECKING_PERMISSION', { step: stepCount, maxSteps, message: 'Checking permission' });
         const question = buildConfirmationQuestion(action);
         if (onStep) onStep({ step: stepCount, type: 'confirm', question });
         if (opts.onConfirm) {
+          agentState.set('WAITING_CONFIRMATION', { step: stepCount, maxSteps, message: 'Awaiting your confirmation' });
           const confirmed = await opts.onConfirm(question);
           if (!confirmed) {
             const msg = 'Action cancelled. Nothing was changed.';
+            agentState.set('CANCELLED', { step: stepCount, message: 'Action cancelled' });
             if (respond) respond(msg);
-            return { done: true, steps, finalResponse: msg };
+            agentState.complete(false, msg, { steps });
+            agentState.end();
+            return { done: true, steps, finalResponse: msg, cancelled: true };
           }
         } else {
           // No confirmation handler — skip risky actions and explain
           const msg = `I'd need confirmation for that. Say "go" to proceed.`;
+          agentState.set('WAITING_CONFIRMATION', { step: stepCount, maxSteps, message: 'Confirmation required' });
           if (respond) respond(msg);
+          agentState.end();
           return { done: true, steps, finalResponse: msg };
         }
       }
 
       // Execute the action
       vox.set('EXECUTING', action.type);
+      agentState.set('EXECUTING', { step: stepCount, maxSteps, message: humanActionLabel(action) });
+      agentState.toolStart(action.type, safeActionPayload(action), { step: stepCount });
       const execResult = await executeAction(action);
+      agentState.toolResult(action.type, !!(execResult && execResult.ok), { step: stepCount });
 
       const stepRecord = {
         step: stepCount,
@@ -582,7 +620,10 @@ export async function runAgentLoop(text, opts = {}) {
 
       // ---- PHASE 4: OBSERVE + VERIFY ----
       const observation = execResult.observation || '';
+      agentState.set('OBSERVING', { step: stepCount, maxSteps, message: 'Observing result' });
+      agentState.set('VERIFYING', { step: stepCount, maxSteps, message: 'Verifying result' });
       const verified = await verifyAction(action, execResult);
+      agentState.verification(!!verified.verified, verified.detail, { step: stepCount });
 
       const verifyRecord = {
         step: stepCount,
@@ -599,8 +640,12 @@ export async function runAgentLoop(text, opts = {}) {
         const response = buildSuccessResponse(action, observation, verified);
         if (decision.say) {
           const fullResponse = decision.say + (response ? ' ' + response : '');
+          agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing response' });
           if (respond) respond(fullResponse);
           if (onStep) onStep({ step: stepCount, type: 'respond', message: fullResponse });
+          agentState.set('SUCCESS', { step: stepCount, message: 'Task complete' });
+          agentState.complete(true, fullResponse, { steps });
+          agentState.end();
           return { done: true, steps, finalResponse: fullResponse };
         }
 
@@ -608,8 +653,12 @@ export async function runAgentLoop(text, opts = {}) {
         const hasMore = detectMoreActions(currentState, action);
         if (!hasMore) {
           const fallback = observation || 'Done.';
+          agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing response' });
           if (respond) respond(fallback);
           if (onStep) onStep({ step: stepCount, type: 'respond', message: fallback });
+          agentState.set('SUCCESS', { step: stepCount, message: 'Task complete' });
+          agentState.complete(true, fallback, { steps });
+          agentState.end();
           return { done: true, steps, finalResponse: fallback };
         }
 
@@ -617,6 +666,7 @@ export async function runAgentLoop(text, opts = {}) {
         currentState = implicitNextAction(text, action);
         lastResult = execResult;
         vox.set('READY', 'action done, checking for more');
+        agentState.set('SELECTING_TOOL', { step: stepCount, maxSteps, message: 'Next step' });
         continue;
       } else {
         // Verification failed — try to recover
@@ -625,19 +675,33 @@ export async function runAgentLoop(text, opts = {}) {
         // Retry once
         if (stepCount < maxSteps - 1) {
           vox.set('THINKING', 'retry');
+          agentState.set('RETRYING', { step: stepCount, maxSteps, message: 'Retrying action' });
+          agentState.retry(1, action.type, { step: stepCount });
+          agentState.set('EXECUTING', { step: stepCount, maxSteps, message: 'Retrying ' + humanActionLabel(action) });
           const retryResult = await executeAction(action);
+          agentState.toolResult(action.type, !!(retryResult && retryResult.ok), { step: stepCount });
+          agentState.set('VERIFYING', { step: stepCount, maxSteps, message: 'Verifying after retry' });
           const retryVerify = await verifyAction(action, retryResult);
+          agentState.verification(!!retryVerify.verified, retryVerify.detail, { step: stepCount });
           if (retryVerify.verified || retryResult.ok) {
             const msg = retryResult.observation || 'Done after retry.';
+            agentState.set('RESPONDING', { step: stepCount, message: 'Preparing response' });
             if (respond) respond(msg);
+            agentState.set('SUCCESS', { step: stepCount, message: 'Task complete after retry' });
+            agentState.complete(true, msg, { steps });
+            agentState.end();
             return { done: true, steps, finalResponse: msg };
           }
         }
 
         // Give up and explain honestly
         const msg = buildFailureResponse(action, verified.detail || execResult.error || 'unknown error');
+        agentState.set('RESPONDING', { step: stepCount, message: 'Explaining failure' });
         if (respond) respond(msg);
         if (onStep) onStep({ step: stepCount, type: 'fail', message: msg });
+        agentState.set('ERROR', { step: stepCount, message: 'Action failed after retries' });
+        agentState.complete(false, msg, { steps });
+        agentState.end();
         return { done: true, steps, finalResponse: msg, failed: true };
       }
     }
@@ -678,8 +742,12 @@ export async function runAgentLoop(text, opts = {}) {
         ? `Plan complete: ${plan.goal}.`
         : `Plan finished with issues: ${plan.goal}.`;
 
+      agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Preparing plan result' });
       if (respond) respond(planResponse);
       if (onStep) onStep({ step: stepCount, type: 'respond', message: planResponse });
+      agentState.set(ran.ok ? 'SUCCESS' : 'ERROR', { step: stepCount, message: plan.goal });
+      agentState.complete(!!ran.ok, planResponse, { steps });
+      agentState.end();
       return { done: true, steps, finalResponse: planResponse, plan: ran.plan };
     }
 
@@ -690,9 +758,27 @@ export async function runAgentLoop(text, opts = {}) {
 
   // Max steps reached without completion
   const msg = 'I\'m taking a bit long on this — let me sum up what I have. Some steps may need your help to finish.';
+  agentState.set('RESPONDING', { maxSteps, message: 'Summarizing progress' });
   if (respond) respond(msg);
   Logger.warn('agent', `agent loop hit max steps (${maxSteps})`);
+  agentState.set('ERROR', { message: 'Max steps reached' });
+  agentState.complete(false, msg, { steps });
+  agentState.end();
   return { done: false, steps, finalResponse: msg, maxStepsReached: true };
+  } catch (e) {
+    /* ---- ERROR RECOVERY (per phase spec):
+       1. Emit ERROR  2. log technical error internally  3. never expose
+       stack traces to the user  4. return a human-readable response
+       5. return the HUD to IDLE. ---- */
+    Logger.error('agent', 'agent loop error: ' + (e && e.stack || e && e.message || e));
+    const human = 'I hit a snag while doing that. Please try again, or rephrase.';
+    agentState.error(human);
+    agentState.set('ERROR', { message: 'Unhandled failure' });
+    if (respond) respond(human);
+    agentState.complete(false, human, { steps });
+    agentState.end();
+    return { done: true, steps, finalResponse: human, failed: true };
+  }
 }
 
 /* ======================== AI TOOL LOOP (bounded multi-round) ======================== */
@@ -720,6 +806,7 @@ export async function runAiToolLoop(text, context, previousSteps = []) {
       round++;
 
       // Call Groq with tools
+      agentState.set('SELECTING_TOOL', { message: 'Selecting tool' });
       const toolResult = await callGroqTools(messages, { model: getSetting('groqModel') });
       lastAiMessage = toolResult;
 
@@ -751,8 +838,11 @@ export async function runAiToolLoop(text, context, previousSteps = []) {
 
           Logger.debug('agent', `AI tool call: ${name} ${JSON.stringify(args).slice(0, 80)}`);
 
+          agentState.toolStart(name, args, { step: 1 });
           const result = await runToolByName(name, args);
           const resultStr = String(result).slice(0, 2000);  // don't overflow context
+          const toolOk = !/^(no |need |couldn't|could not|not |can't|cannot |unknown tool|unknown:|invalid)/i.test(String(resultStr || '').trim());
+          agentState.toolResult(name, toolOk, { step: 1 });
 
           messages.push({
             role: 'tool',
@@ -839,7 +929,7 @@ function buildAiMessages(text, context, previousSteps) {
     });
   }
 
-  const sysContent = person() + `
+  const sysContent = systemPrompt() + `
 IMPORTANT — TOOL RESULTS MUST BE USED:
 - You have access to tools. When you call a tool, you WILL get the real result in the next message.
 - NEVER invent tool results. Use ONLY what the tool returns.
@@ -1152,6 +1242,48 @@ function buildFailureResponse(action, reason) {
   return names[action.type] || `I couldn't do that. Reason: ${reason || 'unknown'}`;
 }
 
+/** Concise human description of an action for the HUD step line.
+    Never includes numbers, message bodies, or other sensitive content. */
+function humanActionLabel(action) {
+  if (!action || !action.type) return 'action';
+  const t = action.type;
+  const verbs = {
+    torch: on => (action.on === false ? 'Turning flashlight off' : 'Turning flashlight on'),
+    open_app: () => `Opening ${action.app || 'app'}`,
+    volume: () => 'Setting volume',
+    brightness: () => 'Setting brightness',
+    sys_toggle: () => 'Toggling system setting',
+    media: () => `Media ${action.action || 'control'}`,
+    call: () => 'Placing call',
+    sms: () => 'Sending message',
+    whatsapp: () => 'Opening WhatsApp',
+    screenshot: () => 'Taking screenshot',
+    screen_read: () => 'Reading screen',
+    alarm_add: () => 'Setting alarm',
+    read_notifications: () => 'Reading notifications',
+    reply_notif: () => 'Replying to notification',
+    theme: () => 'Applying theme',
+    open_panel: () => 'Opening panel',
+    stop_speech: () => 'Stopping speech',
+    clear_chat: () => 'Clearing chat',
+  };
+  if (verbs[t]) { try { return verbs[t](); } catch (_) {} }
+  return t.replace(/_/g, ' ');
+}
+
+/** Sanitized action payload for tool display — strips anything sensitive
+    (numbers, message bodies, contact names) so no secret leaks to the HUD. */
+function safeActionPayload(action) {
+  if (!action || typeof action !== 'object') return {};
+  const allowed = ['type'];
+  if (action.app != null) allowed.push('app');
+  if (action.action != null) allowed.push('action');
+  if (action.on != null) allowed.push('on');
+  const out = {};
+  for (const k of allowed) if (action[k] !== undefined) out[k] = action[k];
+  return out;
+}
+
 /** Detect if there's a follow-up action needed after this one */
 function detectMoreActions(originalText, completedAction) {
   const t = originalText.toLowerCase();
@@ -1283,12 +1415,6 @@ function humanTime(date) {
 /* ======================== EXPORTS ======================== */
 
 export {
-  retrieveContext,
-  executeAction,
-  runAiToolLoop,
-  runToolByName,
-  Verifiers,
-  AGENT_CONFIG,
   isDangerous,
   buildConfirmationQuestion,
 };
