@@ -1,6 +1,6 @@
 workflows:
   friday-android:
-    name: FRIDAY OS - Android APK
+    name: FRIDAY OS - Debug APK
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -23,88 +23,66 @@ workflows:
         - $CM_BUILD_DIR/node_modules
 
     scripts:
-      - name: Install npm dependencies
-        script: npm install
+      - name: Install locked dependencies
+        script: |
+          npm ci
+          python3 -m pip install --user --disable-pip-version-check "httpx>=0.27"
 
-      - name: Run unit tests (offline engine)
+      - name: Run complete Phase 3 test suite
         script: npm test
 
-      - name: Create Android platform
+      - name: Verify Java 17 and Android SDK 34
         script: |
-          if [ ! -d "android" ]; then npx cap add android; fi
-          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          if [ -z "$SDK" ]; then SDK="$HOME/programs/android-sdk-macosx"; fi
-          echo "Using Android SDK at: $SDK"
+          java -version
+          JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
+          test "$JAVA_MAJOR" = "17" || { echo "Java 17 required"; exit 1; }
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+          test -d "$SDK" || { echo "Android SDK not found: $SDK"; exit 1; }
+          SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
+          test -n "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "ANDROID_SDK=$SDK"
+
+      - name: Generate Capacitor Android project and sync Phase 3 assets
+        script: |
+          test "$(node -p "require('./capacitor.config.json').appId")" = "$PACKAGE_NAME"
+          if [ ! -d android ]; then npx cap add android; fi
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           echo "sdk.dir=$SDK" > android/local.properties
-          cat android/local.properties
+          npx cap sync android
 
-      - name: Copy web assets into native project
-        script: npx cap sync android
-
-      - name: Install native Java sources
+      - name: Install native sources, resources, and build dependencies
         script: |
           PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
-          mkdir -p "$PKG_DIR"
+          mkdir -p "$PKG_DIR" android/app/src/main/java/com
           cp native/*.java "$PKG_DIR/"
-          echo "Installed:"; ls -1 "$PKG_DIR"
-
-      - name: Install vendored sherpa-onnx Java sources
-        script: |
-          SRC="native/vendor/sherpa/com"
-          DST="android/app/src/main/java/com"
-          mkdir -p "$DST"
-          cp -r "$SRC/k2fsa" "$DST/"
-          echo "sherpa java files installed:"; ls -1 "$DST/k2fsa/sherpa/onnx" | wc -l
-
-      - name: Add accessibility service config
-        script: |
-          mkdir -p android/app/src/main/res/xml
+          cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
-          cat android/app/src/main/res/xml/friday_accessibility.xml
-
-      - name: Add widget + tile resources
-        script: |
-          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout
-          cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
-          cp native/res/xml/file_paths.xml android/app/src/main/res/xml/
+          cp native/res/xml/friday_widget_info.xml native/res/xml/file_paths.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
-          ls -1 android/app/src/main/res/xml android/app/src/main/res/layout
-
-      - name: Add notification icons (ic_stat_icon)
-        script: |
-          mkdir -p android/app/src/main/res/drawable
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
-          mkdir -p android/app/src/main/res/raw
           cp native/res/raw/keep.xml android/app/src/main/res/raw/
-          ls -1 android/app/src/main/res/drawable
+          cp native/proguard-rules.pro android/app/proguard-rules.pro
+          python3 native/register_plugin.py
+          python3 native/patch_manifest.py
+          python3 native/add_llama_dep.py
+          # Native JNI build dependency only; this does not package or download a user model.
+          python3 native/add_sherpa_dep.py
 
-      - name: Register plugin with Capacitor
-        script: python3 native/register_plugin.py
-
-      - name: Patch AndroidManifest
-        script: python3 native/patch_manifest.py
-
-      - name: Add native dependencies (llama.cpp, geofencing; Porcupine optional)
-        script: python3 native/add_llama_dep.py && python3 native/add_sherpa_dep.py
+      - name: Validate generated Android project
+        script: python3 native/validate_android.py
 
       - name: Build debug APK
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon > /tmp/gradle_build.log 2>&1 || {
-            echo ""
-            echo "====================== GRADLE ERROR DETAILS ======================"
-            grep -n -B2 -A25 "What went wrong" /tmp/gradle_build.log | head -80 || true
-            echo ""
-            echo "====================== COMPILER ERROR LINES ======================"
-            grep -nE "error:|error |Error:" /tmp/gradle_build.log | grep -v "error-prone\|--error" | head -30 || true
-            echo "=================================================================="
-            exit 1
-          }
-          tail -5 /tmp/gradle_build.log
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          test -f app/build/outputs/apk/debug/app-debug.apk
 
     artifacts:
-      - android/app/build/outputs/apk/**/*.apk
+      - android/app/build/outputs/apk/debug/app-debug.apk
 
     publishing:
       email:
@@ -114,27 +92,24 @@ workflows:
           success: true
           failure: true
 
-  # ===== v14 PHASE 14: RELEASE build (signed, R8-shrunk) =====
   friday-release:
-    name: FRIDAY OS - Release APK (signed)
+    name: FRIDAY OS - Signed Release APK
     max_build_duration: 60
     instance_type: mac_mini_m2
 
     environment:
       node: 20
       java: 17
+      android_signing:
+        - friday_keystore
       vars:
         PACKAGE_NAME: "com.rishu.fridayos"
-        CM_KEYSTORE_PATH: "/tmp/friday.keystore"
-        CM_KEYSTORE_PASSWORD: "$ANDROID_KEYSTORE_PASSWORD"
-        CM_KEY_ALIAS_PASSWORD: "$ANDROID_KEY_ALIAS_PASSWORD"
-        CM_KEY_ALIAS_USER_NAME: "$ANDROID_KEY_ALIAS"
 
     triggering:
       events:
         - tag
-      branch_patterns:
-        - pattern: "release/*"
+      tag_patterns:
+        - pattern: "v*"
           include: true
 
     cache:
@@ -143,62 +118,67 @@ workflows:
         - $CM_BUILD_DIR/node_modules
 
     scripts:
-      - name: Install + test
+      - name: Install locked dependencies
         script: |
-          npm install
-          npm test
+          npm ci
+          python3 -m pip install --user --disable-pip-version-check "httpx>=0.27"
 
-      - name: Android platform + web sync
+      - name: Run complete Phase 3 test suite
+        script: npm test
+
+      - name: Verify Java 17 and Android SDK 34
         script: |
-          if [ ! -d "android" ]; then npx cap add android; fi
-          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          [ -z "$SDK" ] && SDK="$HOME/programs/android-sdk-macosx"
+          java -version
+          JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
+          test "$JAVA_MAJOR" = "17" || { echo "Java 17 required"; exit 1; }
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+          test -d "$SDK" || { echo "Android SDK not found: $SDK"; exit 1; }
+          SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
+          test -n "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Generate Capacitor Android project and sync Phase 3 assets
+        script: |
+          test "$(node -p "require('./capacitor.config.json').appId")" = "$PACKAGE_NAME"
+          if [ ! -d android ]; then npx cap add android; fi
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           echo "sdk.dir=$SDK" > android/local.properties
           npx cap sync android
 
-      - name: Install native sources + resources
+      - name: Install native sources, resources, and build dependencies
         script: |
           PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
-          mkdir -p "$PKG_DIR"
+          mkdir -p "$PKG_DIR" android/app/src/main/java/com
           cp native/*.java "$PKG_DIR/"
-          mkdir -p android/app/src/main/java/com
           cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
-          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
-          cp native/res/xml/friday_widget_info.xml android/app/src/main/res/xml/
-          cp native/res/xml/file_paths.xml android/app/src/main/res/xml/
+          cp native/res/xml/friday_widget_info.xml native/res/xml/file_paths.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
-          mkdir -p android/app/src/main/res/raw
           cp native/res/raw/keep.xml android/app/src/main/res/raw/
           cp native/proguard-rules.pro android/app/proguard-rules.pro
-
-      - name: Register plugins + patch manifest + deps
-        script: |
           python3 native/register_plugin.py
           python3 native/patch_manifest.py
-          python3 native/add_llama_dep.py && python3 native/add_sherpa_dep.py
+          python3 native/add_llama_dep.py
+          # Native JNI build dependency only; this does not package or download a user model.
+          python3 native/add_sherpa_dep.py
 
-      - name: Enable R8 + signing in app/build.gradle
+      - name: Validate Phase 3 Android project and configure signing
         script: |
-          cd android/app
-          sed -i '' 's/buildTypes {/buildTypes {\n        release {\n            minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n            signingConfig signingConfigs.release\n        }/' build.gradle
-          sed -i '' 's/android {/android {\n    signingConfigs {\n        release {\n            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "")\n            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""\n            keyAlias System.getenv("CM_KEY_ALIAS_USER_NAME") ?: ""\n            keyPassword System.getenv("CM_KEY_ALIAS_PASSWORD") ?: ""\n        }\n    }/' build.gradle
+          python3 native/validate_android.py
+          python3 native/configure_release.py
 
       - name: Build signed release APK
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon > /tmp/gradle_release.log 2>&1 || {
-            echo "================ GRADLE RELEASE ERROR ================"
-            grep -n -B2 -A25 "What went wrong" /tmp/gradle_release.log | head -80 || true
-            grep -nE "error:" /tmp/gradle_release.log | grep -v "error-prone" | head -30 || true
-            exit 1
-          }
-          tail -5 /tmp/gradle_release.log
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
 
     artifacts:
-      - android/app/build/outputs/apk/release/**/*.apk
+      - android/app/build/outputs/apk/release/app-release.apk
 
     publishing:
       email:
