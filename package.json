@@ -5,10 +5,12 @@
   "private": true,
   "scripts": {
     "serve": "npx --yes http-server www -p 8080 -c-1",
-    "test": "node --experimental-vm-modules --test tests/",
+    "test": "npm run test:web && npm run test:backend",
     "sync": "npx cap sync android",
     "apk": "cd android && ./gradlew assembleDebug",
-    "build": "echo \"static app \u2014 nothing to compile\""
+    "build": "echo \"static app \u2014 nothing to compile\"",
+    "test:web": "node --experimental-vm-modules --test tests/",
+    "test:backend": "python3 -m unittest backend/test_cloud_providers.py -v"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
