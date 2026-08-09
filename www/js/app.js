@@ -56,6 +56,22 @@ import * as HUDV20 from './hud_v20.js'; // v20.0 HUD real-data engine
 import { runAgentLoop, AGENT_CONFIG } from './agent/orchestrator.js';
 /* PHASE 2: REAL AGENT HUD STATE INTEGRATION — agent state → existing HUD */
 import { initAgentHUD } from './hud-agent.js';
+import { BootDiagnostics, BOOT_STATE, settleOptional } from './boot-runtime.js';
+
+/* Phase 3 boot truth: mandatory shell/core, everything else degrades. */
+export const BOOT = new BootDiagnostics();
+BOOT.define('FRIDAY CORE', { mandatory: true });
+BOOT.define('HUD', { mandatory: true });
+BOOT.define('ANDROID BRIDGE');
+BOOT.define('MEMORY');
+BOOT.define('VOICE');
+BOOT.define('WAKE WORD');
+BOOT.define('VISION');
+BOOT.define('LOCAL AI');
+BOOT.define('GROQ');
+BOOT.define('BLACKBOX');
+BOOT.define('AUTOMATION');
+if (typeof window !== 'undefined') window.__fridayBoot = BOOT;
 
 /* ================= v11.0 Phase 1: FridayCore wiring =================
    PRESERVE-FIRST: modules are NOT rewritten — they register with the core
@@ -178,16 +194,17 @@ async function boot() {
   if (!plan.stages.length) {
     /* boot OFF: go straight to the HUD, but init() ALWAYS runs */
     await startApp();
-    try { await init(); window.__booted = true; window.__stage = 'idle'; }
-    catch (err) { window.__stage = 'init-failed'; setTimeout(() => { throw err; }); }
+    try { await init(); window.__stage = 'online'; }
+    catch (err) { BOOT.set('HUD', BOOT_STATE.FAILED, err && err.message); window.__stage = 'init-failed'; }
+    window.__booted = BOOT.finish();
     return;
   }
 
   /* app init starts IMMEDIATELY and runs in parallel with the movie */
   let initError = null;
   const initPromise = Promise.resolve().then(init)
-    .then(() => { window.__booted = true; window.__stage = 'idle'; })
-    .catch(err => { initError = err; window.__stage = 'init-failed'; Logger.error('boot', 'init failed: ' + (err && err.message || err)); });
+    .then(() => { window.__stage = 'online'; })
+    .catch(err => { initError = err; BOOT.set('HUD', BOOT_STATE.FAILED, err && err.message); window.__stage = 'init-failed'; Logger.error('boot', 'init failed: ' + (err && err.message || err)); });
   try {
     await IGN.runIgnition({
       root: $('#bootScreen'),
@@ -205,26 +222,24 @@ async function boot() {
   await startApp();
   S.setSetting('bootSeen', true);   // next boots: short version (skip-after-first-launch rule)
   await initPromise;
-  if (initError) setTimeout(() => { throw initError; });
+  window.__booted = BOOT.finish();
+  if (initError) Logger.error('boot', 'continuing in limited mode: ' + (initError && initError.message || initError));
 }
 
 /* v11.1: every boot line shows a REAL system truth (never invented). */
 function bootChecks() {
+  const row = (name, fallback = BOOT_STATE.PENDING) => ({
+    label: name,
+    run: async () => {
+      const r = BOOT.get(name) || { state: fallback, detail: '' };
+      const ok = r.state === BOOT_STATE.READY;
+      return { ok, detail: r.state + (r.detail ? ' · ' + r.detail : '') };
+    }
+  });
   return [
-    { label: 'Neural Core', run: async () => ({ ok: true, detail: intentCount() + ' skills' }) },
-    { label: 'Memory', run: async () => ({ ok: true, detail: (S.getList('friday_facts') || []).length + ' facts' }) },
-    { label: 'Semantic Memory', run: async () => ({ ok: true, detail: (S.getSetting('embedModelPath') || '').trim() ? 'bge-small ready' : 'pack pending (suit will fetch)' }) },
-    { label: 'AI Brain', run: async () => {
-        if (SERVER.isConfigured()) { const h = await SERVER.health(); return h && h.ok ? { ok: true, detail: 'FRIDAY Cloud ●' } : { ok: false, detail: 'server unreachable' }; }
-        if (AI.hasGroq()) return { ok: true, detail: 'Groq key set' };
-        return { ok: true, detail: 'offline brain (local)' };
-      } },
-    { label: 'Voice Engine', run: async () => ({ ok: true, detail: (S.getSetting('neuralVoiceCfg') || '').trim() ? 'neural voice armed' : 'system TTS' }) },
-    { label: 'Wake Word', run: async () => ({ ok: true, detail: (S.getSetting('porcupineKey') || '').trim() ? 'porcupine' : ((S.getSetting('voskModelPath') || '').trim() ? 'vosk (keyless)' : 'software loop') }) },
-    { label: 'Device Bridge', run: async () => ({ ok: NAT.isNative(), detail: NAT.isNative() ? 'native plugins live' : 'web mode' }) },
-    { label: 'Automation', run: async () => ({ ok: true, detail: (S.getList('friday_routines') || []).length + ' routines' }) },
-    { label: 'Security', run: async () => ({ ok: true, detail: 'local-only, no fake success' }) },
-    { label: 'System Integrity', run: async () => ({ ok: true, detail: 'PASSED' }) }
+    row('FRIDAY CORE'), row('ANDROID BRIDGE'), row('MEMORY'), row('VOICE'),
+    row('WAKE WORD'), row('VISION'), row('LOCAL AI'), row('GROQ'),
+    row('BLACKBOX'), row('AUTOMATION'), row('HUD')
   ];
 }
 
@@ -278,7 +293,7 @@ async function startApp() {
       }).catch(() => {});
     }
   }, 2500);
-  window.__stage = 'init';
+  window.__stage = 'hud-visible';
   /* v11.2 VOX: boot finished → the voice engine parks at READY (or SLEEPING
      if the wake word is armed — startWakeWord moves it there itself). */
   if (!S.getSetting('wakeWord')) VOX.vox.set('READY', 'boot complete');
@@ -426,16 +441,30 @@ function hudInit() {
 /* ================= INIT ================= */
 async function init() {
   state.booted = true;
+  window.__stage = 'init';
+  if (!$('#app') || !$('#bootScreen')) throw new Error('Mandatory application shell is missing');
+  BOOT.set('FRIDAY CORE', BOOT_STATE.READY, intentCount() + ' offline skills');
+  BOOT.set('HUD', BOOT_STATE.PENDING, 'initializing');
+  BOOT.set('MEMORY', BOOT_STATE.READY, 'local storage available');
+  BOOT.set('ANDROID BRIDGE', NAT.isNative() ? BOOT_STATE.READY : BOOT_STATE.UNAVAILABLE, NAT.isNative() ? 'Capacitor native' : 'web preview');
+  BOOT.set('LOCAL AI', (S.getSetting('llmModelPath') || '').trim() ? BOOT_STATE.READY : BOOT_STATE.NOT_INSTALLED, (S.getSetting('llmModelPath') || '').trim() ? 'configured' : 'Optional model unavailable.');
+  BOOT.set('GROQ', SERVER.isConfigured() ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED, SERVER.isConfigured() ? 'server configured; health not yet verified' : 'backend not configured');
+  BOOT.set('BLACKBOX', BOOT_STATE.DISABLED, 'server-controlled optional fallback');
 
   U.applyTheme(S.getSetting('uiTheme') || 'stark');
   U.initCore($('#coreCanvas'), state);
   U.initParticles($('#particleCanvas'));
   U.animateWaveform($('#voiceWaveform'), state);
 
-  await V.initSynthesis();
+  const voiceBoot = await settleOptional('VOICE', () => V.initSynthesis(), {
+    timeoutMs: 2500, diagnostics: BOOT, readyDetail: 'system speech available',
+    timeoutState: BOOT_STATE.LIMITED, timeoutDetail: 'TTS initialization slow; text input available',
+    failureState: BOOT_STATE.LIMITED
+  });
+  if (!voiceBoot.ok && !voiceBoot.timedOut) BOOT.set('VOICE', BOOT_STATE.LIMITED, 'speech unavailable; text input available');
   setTimeout(() => { V.armSherpaVoice(); V.armSherpaEars(); }, 3000);   // v10.0: pick up downloaded packs at boot
   setTimeout(syncCallGuardNative, 4000);   // v10.3: keep call-guard prefs alive (receiver reads even when app closed)
-  setTimeout(autoSetupSuit, 9000);   // v10.2: suit systems update THEMSELVES (WiFi, silent)
+  /* Phase 3: never auto-download optional models or packs. */
   V.initRecognition({
     onStart: () => { state.listening = true; setStatus('Listening...', true); $('#micButton').classList.add('listening'); $('#micContainer')?.classList.add('listening'); $('#inputWave')?.classList.add('on'); D.tap(); },
     onInterim: txt => { $('#listeningText').textContent = txt; },
@@ -503,7 +532,11 @@ async function init() {
   if (S.getSetting('wakeWord')) V.startWakeWord();
   D.startMicAnalyser().catch(() => {});
   if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
-  bootFridayCore();   // v11 Phase 1: central controller takes attendance (fire-and-forget)
+  bootFridayCore();
+  BOOT.set('AUTOMATION', BOOT_STATE.READY, 'local routines available');
+  BOOT.set('WAKE WORD', (S.getSetting('voskModelPath') || S.getSetting('porcupineKey')) ? BOOT_STATE.LIMITED : BOOT_STATE.NOT_INSTALLED, (S.getSetting('voskModelPath') || S.getSetting('porcupineKey')) ? 'configured; starts on demand' : 'Optional model unavailable.');
+  BOOT.set('VISION', BOOT_STATE.LIMITED, 'camera/basic OCR on demand; advanced model optional');
+  // v11 Phase 1: central controller takes attendance (fire-and-forget)
   hudInit();          // v11.1 Phase 3: living HUD (widgets, feed, dock, orb states)
   /* v11.3: Phase 7 engine rides existing events — zero new polling */
   try { AUTOX.start(async (action, meta) => {
@@ -588,6 +621,7 @@ async function init() {
     }
   }
 
+  BOOT.set('HUD', BOOT_STATE.READY, 'interactive');
   updateBrainBadge();
   MEM.learnPatterns();
   AUTO.start(execAction);
@@ -647,10 +681,21 @@ function updateBrainBadge() {
 async function serverHealthCheck() {
   const h = await SERVER.health().catch(() => null);
   const chip = $('#serverStatusChip');
+  if (h && h.ok) {
+    const gp = h.providers && h.providers.groq;
+    const bp = h.providers && h.providers.blackbox;
+    BOOT.set('GROQ', gp && gp.configured ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED,
+      gp && gp.configured ? 'configured server-side; validated on first request' : 'server key missing');
+    BOOT.set('BLACKBOX', bp && bp.configured ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED,
+      bp && bp.configured ? 'explicit fallback configured; validated on first request' : ((bp && bp.reason) || 'disabled'));
+  } else {
+    BOOT.set('GROQ', BOOT_STATE.UNAVAILABLE, 'backend unreachable');
+    BOOT.set('BLACKBOX', BOOT_STATE.DISABLED, 'backend unavailable');
+  }
   if (chip) {
     chip.textContent = h && h.ok
-      ? `FRIDAY Cloud: ● online (${h.engines?.llm === 'groq' ? 'Groq brain' : 'no key on server'})`
-      : 'FRIDAY Cloud: ○ unreachable — check URL & token';
+      ? `FRIDAY Cloud: ● online (${h.engines?.llm === 'configured' ? 'provider configured' : 'offline-only'})`
+      : 'FRIDAY Cloud: ○ unreachable — offline commands remain available';
     chip.classList.toggle('ok', !!(h && h.ok));
   }
 }
@@ -1231,9 +1276,9 @@ async function performScreenVision(question) {
   if (!AI.hasGroq()) {
     try {
       const t = await NAT.readScreenText();
-      if (t && t.ok && t.text) return { ok: true, text: 'No Groq key for visual analysis, but the screen shows: ' + String(t.text).slice(0, 500) };
+      if (t && t.ok && t.text) return { ok: true, text: 'Cloud vision unavailable, but the screen shows: ' + String(t.text).slice(0, 500) };
     } catch (e) {}
-    return { ok: false, text: 'Visual screen analysis needs a Groq key in Settings.' };
+    return { ok: false, text: 'Visual screen analysis needs the optional FRIDAY Cloud backend.' };
   }
   const v = await AI.callGroqVision('data:image/jpeg;base64,' + shot.b64,
     question || 'Describe what is on this phone screen: which app, what is happening, and which buttons or inputs are visible. Be brief and factual.');
@@ -2013,7 +2058,7 @@ async function runAction(a, hit) {
           reply('📝 **Summary:**\n' + String(g || '').trim());
         } else {
           const first = txt.split(/(?<=[.!?])\s+/).slice(0, 4).join(' ');
-          reply('📝 **Local summary:**\n' + first.slice(0, 700) + '\n\n(Add a free Groq key in Settings for smarter summaries.)');
+          reply('📝 **Local summary:**\n' + first.slice(0, 700) + '\n\n(Configure the optional FRIDAY Cloud backend for smarter summaries.)');
         }
       } catch (e) {
         reply('Could not read that link (blocked or offline). Open it once in the browser and try again.');
@@ -3564,7 +3609,7 @@ async function doWiki(q) {
   } catch (e) {
     thinking(false);
     if (AI.hasGroq()) return askGroq(q);
-    reply(`Couldn't find "${q}". Try rephrasing, or add a Groq key in Settings for open questions.`);
+    reply(`Couldn't find "${q}". Try rephrasing, or configure the optional FRIDAY Cloud backend for open questions.`);
   }
 }
 
@@ -3671,8 +3716,8 @@ async function doCode(prompt) {
       out.innerHTML = U.renderRich(tpl.body);
       reply(`No cloud key, so here's an offline template: ${tpl.title}. Check the Coder panel.`);
     } else {
-      out.innerHTML = U.renderRich(`I have offline templates for: **${T.codeTopics().join(', ')}**.\n\nFor code written specifically for your request, add a free Groq key in Settings (console.groq.com — no card needed), or install the offline coder (Settings → Offline Coder).`);
-      reply('No offline template matches that. Add a Groq key, or download the offline coder.');
+      out.innerHTML = U.renderRich(`I have offline templates for: **${T.codeTopics().join(', ')}**.\n\nFor code written specifically for your request, configure the optional FRIDAY Cloud backend (console.groq.com — no card needed), or install the offline coder (Settings → Offline Coder).`);
+      reply('No offline template matches that. Configure FRIDAY Cloud; offline templates remain available.');
     }
     return;
   }
@@ -4427,7 +4472,7 @@ function errMsg(e) {
   if (m.includes('SERVER_RATE_LIMIT')) return 'FRIDAY Cloud is rate-limited. Wait a moment and try again.';
   if (m.includes('SERVER_HTTP')) return 'FRIDAY Cloud answered with an error — check the server URL and that it is running.';
   if (m.includes('SERVER_')) return 'FRIDAY Cloud error: ' + m.slice(0, 140);
-  if (m.includes('BAD_KEY')) return 'That Groq key was rejected. Check it in Settings.';
+  if (m.includes('BAD_KEY')) return 'The server-side Groq key was rejected. Rotate GROQ_API_KEY in backend/.env.';
   if (m.includes('RATE_LIMIT')) return 'Groq rate limit hit. Wait a moment, or switch to offline mode.';
   if (m.includes('NO_KEY')) return 'No key set. Running offline.';
   return 'Connection failed. Offline engine still works — try a command.';
@@ -5613,7 +5658,7 @@ function rawFixedDeflate(data) {
 async function describeNativePhoto(dataUrl) {
   const out = $('#cameraAnalysis');
   if (!AI.hasGroq()) {
-    if (out) out.textContent = 'Photo captured. No Groq key for a spoken description - use Analyze (on-device objects) or Read text below.';
+    if (out) out.textContent = 'Photo captured. Cloud vision unavailable for a spoken description - use Analyze (on-device objects) or Read text below.';
     return;
   }
   if (out) out.textContent = 'Asking my vision model…';
@@ -5904,7 +5949,7 @@ function bindEvents() {
       if (!AI.hasGroq()) {
         const fb = offlineAgent(btnSel, v);
         out.innerHTML = fb ? U.renderRich(fb)
-          : U.emptyState('This needs a Groq key. Settings → Brain → paste key. Free at console.groq.com');
+          : U.emptyState('This needs the optional FRIDAY Cloud backend. API keys stay server-side.');
         return;
       }
       out.innerHTML = '<div class="agent-thinking">Working…</div>';
@@ -5991,7 +6036,6 @@ function bindEvents() {
     });
   };
   bind('#aiProvider', 'aiProvider');
-  bind('#groqKey', 'groqKey', 'input');
   bind('#groqModel', 'groqModel');
   bind('#aiPersonality', 'personality');
   bind('#userName', 'userName', 'input');
@@ -6040,7 +6084,6 @@ function bindEvents() {
   bind('#porcupineKey', 'porcupineKey', 'input');
   bind('#wakeKeyword', 'wakeKeyword', 'input');
   const voskDl = $('#voskDownload'), voskSc = $('#voskScan');
-  if (voskDl) voskDl.addEventListener('click', voskDownloadUI);
   if (voskSc) voskSc.addEventListener('click', voskScanUI);
   if (NAT.voskAddListener) NAT.voskAddListener('voskProgress', ev => {
     const chip = $('#voskStatusChip');
@@ -6052,14 +6095,11 @@ function bindEvents() {
     if (chip && (ev.percent || 0) < 100) chip.textContent = `${chip.dataset.base || 'Pack:'} downloading… ${ev.percent || 0}%`;
   });
   const vdl = $('#voiceDownload'), vtest = $('#voiceTest'), edl = $('#earsDownload'), mdl = $('#embedDownload');
-  if (vdl) vdl.addEventListener('click', sherpaVoiceDownloadUI);
   if (vtest) vtest.addEventListener('click', async () => {
     if (!NAT.isNative()) { U.toast('Only in the installed app', '⚠️'); return; }
     if (!V.isSherpaVoiceArmed()) { U.toast('Pehle voice pack download karo', '🔊'); return; }
     NAT.sherpaSpeak('Neural voice online, Boss. Ab main pehle se zyada insaan lagti hoon, hain na?').catch(() => {});
   });
-  if (edl) edl.addEventListener('click', sherpaEarsDownloadUI);
-  if (mdl) mdl.addEventListener('click', embedDownloadUI);
   bind('#neuralVoice', 'neuralVoice', 'change', 'checked');
   bind('#offlineEars', 'offlineEars', 'change', 'checked');
   bind('#embedModelPath', 'embedModelPath', 'input');
@@ -6086,9 +6126,6 @@ function bindEvents() {
     appPin.value = '';
   });
   /* v10.2: JARVIS zero-setup — suit keeps itself updated (WiFi, silent) */
-  bind('#autoSetup', 'autoSetup', 'change', 'checked');
-  const asRun = $('#autoSetupNow');
-  if (asRun) asRun.addEventListener('click', () => { U.toast('Suit systems check…', '🦾'); autoSetupSuit(); });
 
   /* v10.3 HERALD: call guard + inbox */
   bind('#callGuardTemplate', 'callGuardTemplate', 'input');
@@ -6128,23 +6165,6 @@ function bindEvents() {
     U.toast(`${list.length} contacts synced`, '\u2713');
   });
 
-  $('#testKeyBtn')?.addEventListener('click', async () => {
-    const k = $('#groqKey').value.trim();
-    const btn = $('#testKeyBtn');
-    if (!k) return U.toast('Paste a key first', '⚠️');
-    btn.textContent = 'Testing…';
-    const r = await AI.testGroqKey(k);
-    btn.textContent = 'Test Key';
-    U.toast(r.msg, r.ok ? '✅' : '❌', 3500);
-    updateBrainBadge();
-  });
-
-  $('#clearKeyBtn')?.addEventListener('click', () => {
-    S.setSetting('groqKey', '');
-    $('#groqKey').value = '';
-    updateBrainBadge();
-    U.toast('Key removed — offline mode', '🔒');
-  });
 
   $('#clearChat')?.addEventListener('click', () => {
     state.messages = []; $('#chatMessages').innerHTML = ''; S.saveList(KEYS.CHAT, []);
@@ -6188,7 +6208,6 @@ function bindEvents() {
 
 function onSettingChange(key, v) {
   if (key === 'uiTheme') U.applyTheme(v);
-  if (key === 'groqKey') updateBrainBadge();
   if (key === 'speechRate') $('#speechRateValue').textContent = v + 'x';
   if (key === 'wakeSensitivity') { const ws = $('#wakeSensValue'); if (ws) ws.textContent = v; }   // v11.2 VOX
   if (key === 'wakeWords') {                                                                      // v11.2 VOX: hot-reload wake list
@@ -6357,31 +6376,8 @@ async function syncCallGuardNative() {
 }
 
 async function autoSetupSuit() {
-  if (!NAT.isNative()) return;
-  if (S.getSetting('autoSetup') === false) return;              // user opted out in Settings
-  if (!SUIT.wifiOk(netFacts())) {
-    addEventListener('online', () => setTimeout(autoSetupSuit, 5000), { once: true }); // retry when net returns
-    return;
-  }
-  const queue = SUIT.planAutoSetup(k => S.getSetting(k));
-  if (!queue.length) return;                                     // suit already up-to-date — say nothing
-  state.autoSetupRunning = true;
-  suitChip(true); state.hfChip = '#suitChip';
-  const chip = $('#suitChip'); if (chip) chip.dataset.base = 'Suit:';
-  const runners = {
-    memory: embedDownloadUI, wake: voskDownloadUI,
-    voice: sherpaVoiceDownloadUI, ears: sherpaEarsDownloadUI
-  };
-  let n = 0;
-  for (const pack of queue) {
-    n++;
-    suitChip(true, SUIT.suitLine(n, queue.length, pack.label));
-    try { await runners[pack.id](true); } catch (_) { /* failed pack: skip quietly, honest reason stays in Settings chips */ }
-    refreshSherpaChips(); refreshEmbedChip(); refreshVoskStatus();
-  }
-  suitChip(true, SUIT.suitDoneLine());
-  state.autoSetupRunning = false;
-  setTimeout(() => suitChip(false), 6000);
+  /* Disabled by Phase 3 policy: no background or Settings-triggered model downloads. */
+  return { ok: false, reason: 'downloads_disabled' };
 }
 
 async function voskDownloadUI(quiet) {
@@ -6533,7 +6529,6 @@ async function embedDownloadUI(quiet) {
 function syncSettingsUI() {
   const set = (sel, val, prop = 'value') => { const e = $(sel); if (e) e[prop] = val; };
   set('#aiProvider', S.getSetting('aiProvider'));
-  set('#groqKey', S.getSetting('groqKey'));
   set('#groqModel', S.getSetting('groqModel'));
   set('#aiPersonality', S.getSetting('personality'));
   set('#userName', S.getSetting('userName'));
@@ -6655,6 +6650,17 @@ if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 
+/* Last-resort watchdog recovery. Optional initialization may be slow, but the
+   shell must remain usable. This never marks a failed component READY. */
+addEventListener('friday:boot-timeout', () => {
+  const fatal = BOOT.mandatoryFailure();
+  if (fatal) { Logger.error('boot', 'mandatory failure: ' + fatal.name + ' — ' + fatal.detail); return; }
+  Logger.warn('boot', 'watchdog recovery: revealing offline HUD');
+  for (const row of BOOT.all()) if (row.state === BOOT_STATE.PENDING && !row.mandatory)
+    BOOT.set(row.name, BOOT_STATE.LIMITED, 'initialization slow; continuing offline');
+  startApp().then(() => { window.__booted = BOOT.finish(); window.__stage = 'online-limited'; }).catch(() => {});
+});
+
 /* Robust boot: module scripts normally run before DOMContentLoaded, but if
    the WebView already fired it (cache race) we must not wait forever. */
 window.__stage = 'module-loaded';
@@ -6667,7 +6673,7 @@ window.FRIDAY = { state, handleInput, S, API, AI };
 /* ================= v7.6 QUIZ ENGINE ================= */
 async function startQuiz(topic) {
   if (!AI.hasGroq()) {
-    reply('Quiz master needs the cloud brain - paste the free Groq key in Settings once, then ask again.');
+    reply('Quiz master needs the cloud brain - configure FRIDAY Cloud on the server, then ask again.');
     return;
   }
   thinking(true);
