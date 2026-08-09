@@ -1284,6 +1284,39 @@ html[data-hc="1"] .nav-btn, html[data-hc="1"] .quick-action { min-height:44px; }
 .core-status { font-family: var(--font-mono); font-size: 0.6rem; color: #fff; opacity: 0.8; margin-bottom: 10px; }
 .core-quote { font-size: 0.55rem; color: var(--text-dim); font-style: italic; margin-top: 10px; }
 
+/* PHASE 2: Agent HUD state panel — real agent state painted by hud-agent.js.
+   Purely additive overlay on the existing core; hidden unless the agent works. */
+.agent-panel {
+  position: absolute; top: 58%; left: 50%; transform: translateX(-50%); z-index: 6;
+  min-width: 188px; max-width: 92%;
+  background: rgba(2, 10, 20, .74);
+  border: 1px solid rgba(0, 212, 255, .25);
+  border-radius: 10px; padding: 7px 12px 6px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-family: 'Share Tech Mono', 'Roboto Mono', monospace;
+  text-align: center; pointer-events: none;
+  box-shadow: 0 0 18px rgba(0, 212, 255, .12);
+}
+.agent-row { line-height: 1.45; }
+.agent-main { position: relative; display: flex; align-items: center; justify-content: center; }
+.agent-state {
+  font-size: 11px; letter-spacing: .24em; color: #fff; font-weight: 700;
+  text-shadow: 0 0 9px rgba(0, 212, 255, .55);
+}
+.agent-cancel {
+  display: none; position: absolute; top: 0; right: -6px;
+  pointer-events: auto; background: transparent; border: none;
+  color: #ffd166; cursor: pointer; font-size: 12px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px;
+}
+.agent-cancel:hover { background: rgba(255, 209, 102, .16); }
+.agent-step { font-size: 9px; color: var(--primary); letter-spacing: .12em; }
+.agent-tool { font-size: 9px; color: #cfd8ff; letter-spacing: .06em; }
+.agent-verify { font-size: 9px; letter-spacing: .05em; }
+.agent-tool.ok, .agent-verify.ok { color: #2effa1; }
+.agent-tool.bad, .agent-verify.bad { color: #ff5252; }
+.agent-verify.warn { color: #ffd166; }
+
 /* Quick Commands Grid */
 .quick-commands-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; width: 100%;
