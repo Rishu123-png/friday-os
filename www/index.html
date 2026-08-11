@@ -329,6 +329,17 @@
           <span style="--i:9"></span><span style="--i:10"></span><span style="--i:11"></span>
         </div>
         <div class="input-wrapper" id="inputWrapper">
+          <div class="mic-container" id="micContainer" aria-hidden="false">
+            <span class="reactor-ticks" aria-hidden="true"></span>
+            <span class="reactor-ring ring-outer" id="ringOuter" aria-hidden="true" style="--p:0"></span>
+            <span class="reactor-ring ring-mid" id="ringMid" aria-hidden="true" style="--p:0"></span>
+            <button class="mic-button" id="micButton" aria-label="Speak">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <span class="mic-pulse" aria-hidden="true"></span>
+            <span class="mic-pulse delay" aria-hidden="true"></span>
+            <span id="micDot" class="mic-dot" hidden></span>
+          </div>
           <button class="attach-btn" id="attachBtn" aria-label="Attach">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
           </button>
@@ -1022,5 +1033,5 @@
 <!-- FRIDAY OS unified HUD redesign — additive, non-destructive (see js/hud-shell.js) -->
 <script src="js/hud-shell.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a298241dbf78251f',t:'MTc4NjQ2MDc1Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
