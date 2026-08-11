@@ -117,7 +117,7 @@ export function parseTime(text) {
     return { date: d, matched: bits.join(' ') || 'hindi-time' };
   }
 
-  const rel = t.match(/\b(?:in|for|after)?\s*(\d+|[a-z]+)\s*(sec|second|min|minute|hour|hr|day|week)s?\b/);
+  const rel = t.match(/\b(?:in|after)\s+(\d+|[a-z]+)\s*(sec|second|min|minute|hour|hr|day|week)s?\b/);
   if (rel) {
     const n = wordToNum(rel[1]);
     if (n !== null) {
