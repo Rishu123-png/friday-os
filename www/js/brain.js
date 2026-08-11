@@ -62,6 +62,7 @@ I('reminder_add', t => {
     const when = parseTime(t);
     let task = t
       .replace(/\b(remind me to|remind me|set a reminder to|set a reminder|reminder to|alarm to|wake me up|alert me to|alert me)\b/gi, '')
+      .replace(/\b(call|message|text|whatsapp|email)\s+(me\s+)?(to\s+)?/i, '$1 ')
       .replace(/\bat\b\s*$/i, '');
     if (when) task = task.replace(when.matched, '');
     task = cleanSubject(task, ['to', 'at', 'in', 'on']);

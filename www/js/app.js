@@ -159,7 +159,7 @@ const bootFridayCore = () => {
       health: () => probe('workflow', () => ({ ok: true, detail: WF.workflowLog().length + ' runs' }))
     });
     CORE.register('cinex', {
-      health: () => probe('cinex', () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; })
+      health: () => probe('cinex', () => { const a = CINEX.a11ySettings(); return { ok: true, detail: 'fx ' + (S.getSetting('cinematic') !== false ? 'on' : 'off') + (a.highContrast ? ' · hc' : '') + (a.reducedMotion.particles === false ? ' · rm' : '') }; })
     });
     CORE.register('vision', { health: () => probe('vision', () => ({ ok: true, detail: 'camera on demand' })) });
     CORE.register('automation', { health: () => probe('automation', () => ({ ok: true, detail: 'routines+alarms' })) });
@@ -531,7 +531,7 @@ async function init() {
   scheduleAllReminders();
   if (S.getSetting('wakeWord')) V.startWakeWord();
   D.startMicAnalyser().catch(() => {});
-  if (!S.getSetting('showWidgets')) $('#dashWidgets').style.display = 'none';
+  if (!S.getSetting('showWidgets')) { const dw = $('#dashWidgets'); if (dw) dw.style.display = 'none'; }
   bootFridayCore();
   BOOT.set('AUTOMATION', BOOT_STATE.READY, 'local routines available');
   BOOT.set('WAKE WORD', (S.getSetting('voskModelPath') || S.getSetting('porcupineKey')) ? BOOT_STATE.LIMITED : BOOT_STATE.NOT_INSTALLED, (S.getSetting('voskModelPath') || S.getSetting('porcupineKey')) ? 'configured; starts on demand' : 'Optional model unavailable.');
@@ -1082,8 +1082,18 @@ async function handleInput(text, opts = {}) {
      The agent loop calls runAction() for each action, so all existing
      action handlers work exactly as before. The difference: after each
      action, the verification layer checks real device state before
-     claiming success. */
-  if (!hit && (AI.hasGroq() || SERVER.isConfigured())) {
+     claiming success.
+
+     vFIX: in FRIDAY Cloud mode the backend already runs its own bounded
+     tool loop (server-side tools + memory). The on-device orchestrator's
+     client-side tool call (callGroqTools) is a stub, so running it for
+     plain chat made FRIDAY reply "I'm not sure I understand" instead of
+     reaching the LLM. For non-action conversation, stream straight from
+     the server. Device-action phrasing still goes through the orchestrator
+     so reminders/calls/etc. execute on-device. */
+  const wantsAgent = ACTIONISH.test(text);
+  if (!hit && (AI.hasGroq() || SERVER.isConfigured()) &&
+      !(SERVER.isConfigured() && S.getSetting('serverMode') !== false && !wantsAgent)) {
     try {
       const agentResult = await runAgentLoop(text, {
         maxSteps: AGENT_CONFIG.MAX_STEPS,
@@ -3163,9 +3173,9 @@ async function routerExec(provider, messages, opts = {}) {
       return { ok: true, text: full, tokens: Math.round(full.length / 4) };
     }
     case 'ollama': {
-      const base = (getSetting('ollamaUrl') || '').trim().replace(/\/+$/, '');
+      const base = (S.getSetting('ollamaUrl') || '').trim().replace(/\/+$/, '');
       if (!base) return { ok: false, reason: 'not configured' };
-      const model = getSetting('ollamaModel') || 'llama3';
+      const model = S.getSetting('ollamaModel') || 'llama3';
       const ctl = new AbortController();
       const to = setTimeout(() => ctl.abort(), 60000);
       try {
@@ -3697,7 +3707,7 @@ async function doBriefing() {
 async function doCode(prompt) {
   if (CODER.ready()) return streamLocalCode(prompt);
   /* v10.1: FRIDAY Cloud generates code server-side — no 1GB download */
-  if (SERVER.isConfigured() && getSetting('serverMode') !== false) return streamServerCode(prompt);
+  if (SERVER.isConfigured() && S.getSetting('serverMode') !== false) return streamServerCode(prompt);
   if (CODER.engineAvailable() && !CODER.installedModelId()) {
     U.openPanel('sub-coder');
     $('#codeResult').innerHTML = U.renderRich(
@@ -4374,7 +4384,7 @@ async function askGroq(text) {
   }
   /* v10.1 FRIDAY Cloud: server brain first — no key in the app,
      server runs its own tools + memory and streams the answer. */
-  if (SERVER.isConfigured() && getSetting('serverMode') !== false) return streamServerChat(text);
+  if (SERVER.isConfigured() && S.getSetting('serverMode') !== false) return streamServerChat(text);
   thinking(true);
   const history = state.messages.slice(-10).map(m => ({
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -6223,7 +6233,7 @@ function onSettingChange(key, v) {
     }
     refreshVoskStatus();
   }
-  if (key === 'showWidgets') $('#dashWidgets').style.display = v ? 'grid' : 'none';
+  if (key === 'showWidgets') { const dw = $('#dashWidgets'); if (dw) dw.style.display = v ? 'grid' : 'none'; }
   if (key === 'backgroundService' && NAT.isNative()) {
     v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
     if (v && !S.getSetting('batOptAsked')) {
