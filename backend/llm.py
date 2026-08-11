@@ -11,6 +11,7 @@
 # Docs: GET /docs
 
 import json
+import re
 import time
 from typing import AsyncGenerator
 
@@ -140,6 +141,35 @@ async def _groq(messages: list, *, tools=None, stream: bool = False,
                           model=model)
 
 
+def _wants_tools(history: list) -> bool:
+    """Heuristic: only advertise tools when the latest user message actually
+    asks for live data or an action. Some Groq models occasionally emit a
+    malformed tool call (name+args glued together, e.g.
+    `search_knowledge{"query": ...}`) on open-ended chat, which Groq rejects
+    with HTTP 400 and kills the whole reply. Plain conversation doesn't need
+    tools, so routing it tool-free removes that whole failure class while
+    weather/time/knowledge/translate/web/smart-home still call tools."""
+    last = ""
+    for m in reversed(history):
+        if m.get("role") == "user":
+            last = str(m.get("content") or "").lower()
+            break
+    if not last:
+        return False
+    patterns = [
+        r"\bweather\b", r"\bforecast\b", r"\brain\b", r"\btemperature\b",
+        r"\bwhat(?:'s| is)? the time\b", r"\bwhat time\b", r"\bcurrent time\b",
+        r"\bdate (today|now)\b", r"\btoday'?s? date\b",
+        r"\bwho is\b", r"\bwhat is\b", r"\bwho (was|are)\b",
+        r"\btell me about\b", r"\blook up\b", r"\bwikipedia\b",
+        r"\btranslate\b", r"\bin (hindi|english|spanish|french|german)\b",
+        r"\bhttps?://\b", r"\bfetch\b", r"\bopen (the |that )?(url|website|site|page)\b",
+        r"\bturn (on|off)\b", r"\bsmart home\b", r"\bswitch (on|off)\b",
+        r"\b(lights?|fan|ac|air conditioner)\b.*\b(on|off)\b",
+    ]
+    return any(re.search(p, last) for p in patterns)
+
+
 async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]:
     """
     Bounded multi-round agent tool loop.
@@ -157,20 +187,39 @@ async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]
         {'type': 'error',  'message': ...} — error events
     """
     messages = [{"role": "system", "content": _system_prompt(brief)}, *history]
+    use_tools = _wants_tools(history)
 
     for round_num in range(1, MAX_TOOL_ROUNDS + 1):
-        # --- Pass: get model response (with tools) ---
+        # --- Pass: get model response (with tools only when relevant) ---
         try:
             data = await _groq(
                 messages,
-                tools=SERVER_TOOL_SCHEMAS,
+                tools=SERVER_TOOL_SCHEMAS if use_tools else None,
                 stream=False,
                 max_tokens=500,
                 temperature=0.3,
             )
         except RuntimeError as e:
-            yield {"type": "error", "message": str(e)}
-            return
+            # If a malformed tool call 400s on a tool-enabled request, retry
+            # once without tools so the user still gets an answer instead of
+            # a dead "connection failed".
+            msg = str(e)
+            if use_tools and "400" in msg:
+                use_tools = False
+                try:
+                    data = await _groq(
+                        messages,
+                        tools=None,
+                        stream=False,
+                        max_tokens=500,
+                        temperature=0.3,
+                    )
+                except RuntimeError as e2:
+                    yield {"type": "error", "message": str(e2)}
+                    return
+            else:
+                yield {"type": "error", "message": msg}
+                return
 
         first = data["choices"][0]["message"]
 
