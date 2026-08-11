@@ -1,0 +1,341 @@
+/* =========================================================================
+   FRIDAY OS — ANTIGRAVITY HUD
+   Load AFTER hud-redesign.css. Purely additive: no element is renamed or
+   removed, so app.js / voice.js / hud-shell.js keep working untouched.
+
+   WHY THIS EXISTS
+   The old HUD positioned every node with magic percentages (top:4%,
+   bottom:15%) against a full-screen stage. Percentages collide at different
+   screen heights, so on a real phone four separate layers landed in the same
+   200px band at the bottom and the send button was pushed off-screen.
+
+   THE FIX
+   1. A real layout contract: the stage is split into named bands that cannot
+      overlap, using a grid + reserved safe zones instead of percentages.
+   2. Antigravity: nodes float on GPU-only transforms (translate3d/opacity),
+      staggered so they never drift in lockstep. Depth comes from blur and
+      scale, not from more boxes.
+   3. One motion system, one type scale, one spacing scale.
+   ========================================================================= */
+
+html[data-hud="on"]{
+  /* ---- spacing scale (never hand-type a pixel again) ---- */
+  --ag-1:4px;  --ag-2:8px;  --ag-3:12px; --ag-4:16px;
+  --ag-5:24px; --ag-6:32px; --ag-7:48px;
+
+  /* ---- reserved vertical bands. Nothing may cross these. ---- */
+  --ag-header:34px;                                   /* telemetry header   */
+  --ag-dock:calc(46px + env(safe-area-inset-bottom)); /* nav dock           */
+  --ag-console:64px;                                  /* command pill       */
+  --ag-tele:14px;                                     /* telemetry strip    */
+  --ag-band-top:32px;                                 /* status banner row  */
+  /* everything the core + floating nodes may use: */
+  --ag-stage-bottom:calc(var(--ag-dock) + var(--ag-console) + var(--ag-tele) + var(--ag-3));
+
+  --ag-ease:cubic-bezier(.22,.61,.36,1);
+  --ag-cyan:#4fe3ff;
+}
+
+/* ============================ 1. THE STAGE ==============================
+   KEY INSIGHT: .chat-view and .nav-bar are SIBLINGS of .dashboard inside
+   .app (a flex column) — they were never children of it. The old CSS
+   absolutely-positioned all three against .app with hand-tuned bottom
+   offsets, so they had no idea how tall each other were and piled up.
+
+   The fix is to stop absolutely positioning them at all. .app is already
+   `display:flex; flex-direction:column`, so we simply let the bottom stack
+   flow: the dashboard takes the remaining space, and the console + dock
+   claim exactly the height they need. Overlap becomes impossible because
+   flex layout reserves the space for real.                               */
+html[data-hud="on"] .app{
+  display:flex; flex-direction:column;
+  height:100dvh; overflow:hidden;
+}
+
+/* the float field: everything HUD-ish is absolute INSIDE this box only */
+html[data-hud="on"] .dashboard{
+  flex:1 1 auto;
+  min-height:0;                      /* lets it actually shrink in flex   */
+  display:block !important;
+  position:relative !important;
+  overflow:hidden !important;
+  padding:0 !important;
+  contain:layout paint;              /* children can't leak out           */
+}
+
+html[data-hud="on"] .hud-top-row,
+html[data-hud="on"] .hud-mid-row{ display:contents !important; }
+
+/* The status line rides at the top of the field, out of the flow.
+   It is clamped to ONE line: the web-preview string is long enough to wrap
+   to two rows, and the second row was landing on the LOCATION / NETWORK
+   nodes. Single line + ellipsis keeps the top band permanently clear. */
+html[data-hud="on"] .systems-optimal-line{
+  position:absolute; top:var(--ag-1); left:50%;
+  transform:translateX(-50%);
+  max-width:min(78%,300px);
+  justify-content:center; margin:0 !important;
+  font-size:.46rem !important; letter-spacing:1px; opacity:.6;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  z-index:7; pointer-events:none;
+}
+
+/* ====================== 2. ANTIGRAVITY FLOAT ============================
+   Six-second drift, unique phase + distance per node so the field breathes
+   organically instead of pulsing as one block. transform/opacity only —
+   these run on the compositor and never trigger layout.                  */
+@keyframes agFloat{
+  0%   { transform:var(--ag-anchor) translate3d(0,0,0); }
+  50%  { transform:var(--ag-anchor) translate3d(var(--ag-dx,3px),var(--ag-dy,-7px),0); }
+  100% { transform:var(--ag-anchor) translate3d(0,0,0); }
+}
+@keyframes agRise{
+  from{ opacity:0; transform:var(--ag-anchor) translate3d(0,18px,0) scale(.96); }
+  to  { opacity:1; transform:var(--ag-anchor) translate3d(0,0,0) scale(1); }
+}
+
+html[data-hud="on"] .hud-module,
+html[data-hud="on"] .hud-vision-node{
+  --ag-anchor:translate3d(0,0,0);
+  will-change:transform;
+  animation:
+    agRise .7s var(--ag-ease) both,
+    agFloat var(--ag-dur,6s) ease-in-out var(--ag-delay,0s) infinite;
+  transition:border-color .35s, box-shadow .35s, backdrop-filter .35s;
+}
+
+/* Per-node personality: distance, duration, phase, entrance order. */
+html[data-hud="on"] .module-location { --ag-dx:4px;  --ag-dy:-8px; --ag-dur:6.4s; --ag-delay:.0s;  animation-delay:0s,   .05s; }
+html[data-hud="on"] .module-network  { --ag-dx:-5px; --ag-dy:-6px; --ag-dur:7.1s; --ag-delay:.4s;  animation-delay:.08s, .45s; }
+html[data-hud="on"] .module-weather  { --ag-dx:0px;  --ag-dy:-9px; --ag-dur:5.8s; --ag-delay:.8s;  animation-delay:.16s, .85s; }
+html[data-hud="on"] .module-bluetooth{ --ag-dx:5px;  --ag-dy:-5px; --ag-dur:6.9s; --ag-delay:.2s;  animation-delay:.24s, .25s; }
+html[data-hud="on"] .hud-vision-node { --ag-dx:-4px; --ag-dy:-7px; --ag-dur:6.2s; --ag-delay:.6s;  animation-delay:.32s, .65s; }
+
+/* ==================== 3. NODE PLACEMENT (collision-free) ================
+   Anchored to the field's own corners with fixed insets, not percentages of
+   the whole screen. The weather node is centred with its anchor baked into
+   --ag-anchor so the float animation can't fight the centring transform.  */
+html[data-hud="on"] .hud-module{
+  position:absolute !important;
+  width:124px;
+  padding:var(--ag-2) 9px !important;
+  border-radius:12px !important;
+  background:linear-gradient(160deg,rgba(8,26,40,.62),rgba(3,12,20,.52)) !important;
+  border:1px solid rgba(79,227,255,.20) !important;
+  backdrop-filter:blur(6px) saturate(1.15);
+  box-shadow:0 8px 26px rgba(0,0,0,.45), inset 0 0 18px rgba(79,227,255,.05);
+  z-index:5;
+}
+/* --ag-band-top reserves the single-line status banner so the top pair can
+   never sit under it, at any screen width. */
+html[data-hud="on"] .module-location { top:var(--ag-band-top); left:var(--ag-3);  bottom:auto; }
+html[data-hud="on"] .module-network  { top:var(--ag-band-top); right:var(--ag-3); bottom:auto; }
+/* Weather sits BELOW the core, not on top of it: the core occupies the
+   optical centre, so the third node moves to the lower band where there
+   was dead space. */
+html[data-hud="on"] .module-weather  {
+  top:auto; bottom:calc(var(--ag-tele) + 62px);
+  left:50%; width:150px;
+  --ag-anchor:translate3d(-50%,0,0);
+  transform:var(--ag-anchor);
+}
+/* lower pair sits ABOVE the reserved band, anchored to the field bottom */
+html[data-hud="on"] .module-bluetooth{ bottom:var(--ag-3); left:var(--ag-3);  top:auto; }
+html[data-hud="on"] .hud-vision-node {
+  position:absolute; bottom:var(--ag-4); right:var(--ag-3); top:auto;
+  width:118px; text-align:right; z-index:5;
+}
+
+/* subtle lift when touched */
+html[data-hud="on"] .hud-module:active{
+  border-color:rgba(79,227,255,.5) !important;
+  box-shadow:0 12px 34px rgba(0,0,0,.55), 0 0 22px rgba(79,227,255,.25);
+}
+
+/* ======================= 4. THE CORE (hero) =============================
+   The core owns the visual centre of the field. It gets a slow counter-drift
+   so it feels anchored while the nodes orbit it.                          */
+/* The core fills the whole float field and centres itself in it. It must be
+   absolute: the field is display:block, so a relative box would drop into
+   the flow and land in the top-left corner. */
+html[data-hud="on"] .module-ai-core{
+  position:absolute !important;
+  inset:0 !important;
+  /* .module-ai-core ALSO carries .hud-module, which sets width:124px and a
+     card background. Must override all of it or the core renders as a
+     124px-wide card pinned to the left edge. */
+  width:auto !important; height:auto !important;
+  padding:0 !important; border-radius:0 !important;
+  border:none !important; background:none !important;
+  box-shadow:none !important; backdrop-filter:none !important;
+  animation:none !important;                 /* the container floats, not this */
+  display:flex; align-items:center; justify-content:center;
+  z-index:4; pointer-events:none;
+}
+html[data-hud="on"] .ai-core-container{
+  pointer-events:auto;
+  width:min(52vw,208px); height:min(52vw,208px);
+  margin-top:-4vh;              /* optical centre sits above true centre */
+  animation:agFloat 9s ease-in-out infinite;
+  --ag-dx:0px; --ag-dy:-5px;
+}
+html[data-hud="on"] .core-status{
+  bottom:-26px; font-size:.6rem; letter-spacing:3px;
+}
+html[data-hud="on"] .core-quote{ display:none; } /* freed a whole collision row */
+
+/* ================= 5. RESERVED BAND — console + dock ====================
+   Now a real flex sibling: it occupies genuine space, so nothing can be
+   drawn underneath it. This is what removed the bottom pile-up.          */
+html[data-hud="on"] .chat-view{
+  position:relative !important; inset:auto !important;
+  flex:0 0 auto;                     /* claims exactly its own height     */
+  display:flex !important; flex-direction:column;
+  height:auto !important; background:transparent !important;
+  z-index:20; pointer-events:none;
+}
+/* transcript sits in the flow above the pill and is height-capped, so a
+   long reply scrolls instead of growing over the HUD. */
+html[data-hud="on"] .chat-view .chat-messages{
+  position:relative; order:-1;
+  max-height:24vh; overflow-y:auto; pointer-events:auto;
+  padding:0 var(--ag-4) var(--ag-1);
+  -webkit-mask-image:linear-gradient(to top,#000 62%,transparent 100%);
+          mask-image:linear-gradient(to top,#000 62%,transparent 100%);
+}
+
+/* ---- the command pill: THE SEND-BUTTON FIX ----
+   Old rule let three fixed-width controls + an auto input exceed 100%, so
+   the send button overflowed 32-84px off-screen and was unclickable.
+   Grid with a 1fr input column makes overflow mathematically impossible. */
+html[data-hud="on"] .chat-view .input-wrapper{
+  pointer-events:auto;
+  display:grid !important;
+  grid-template-columns:auto auto minmax(0,1fr) auto; /* minmax(0,1fr) = may shrink */
+  align-items:center;
+  gap:var(--ag-2);
+  box-sizing:border-box;
+  width:auto !important;
+  margin:0 var(--ag-3) var(--ag-2) !important;
+  padding:var(--ag-2) var(--ag-2) var(--ag-2) var(--ag-3) !important;
+  background:linear-gradient(180deg,rgba(6,20,30,.88),rgba(3,10,16,.92)) !important;
+  border:1px solid rgba(79,227,255,.26) !important;
+  border-radius:26px !important;
+  box-shadow:0 10px 30px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04);
+  transition:border-color .3s var(--ag-ease), box-shadow .3s var(--ag-ease);
+}
+html[data-hud="on"] .chat-view .input-wrapper:focus-within{
+  border-color:rgba(79,227,255,.6) !important;
+  box-shadow:0 10px 34px rgba(0,0,0,.55), 0 0 26px rgba(79,227,255,.22);
+}
+html[data-hud="on"] .chat-view #textInput{
+  min-width:0;                       /* lets the 1fr column actually shrink */
+  width:100% !important;
+  background:transparent; border:none;
+}
+html[data-hud="on"] .chat-view .send-button,
+html[data-hud="on"] .chat-view .attach-btn{
+  position:static !important;        /* was escaping the flow */
+  flex:none;
+  width:38px !important; height:38px !important;
+  min-width:38px; border-radius:50% !important;
+  display:grid; place-items:center;
+  transition:transform .2s var(--ag-ease), background .2s;
+}
+html[data-hud="on"] .chat-view .send-button:active{ transform:scale(.9); }
+/* mic keeps its reactor rings but stops inflating the row height */
+html[data-hud="on"] .chat-view .mic-container{
+  width:44px; height:44px; flex:none;
+}
+
+/* ---- telemetry strip: pinned to the BOTTOM of the float field, so it sits
+   just above the console without needing to know the dock's height ---- */
+html[data-hud="on"] #hudTeleStrip{
+  position:absolute !important;
+  left:0; right:0;
+  top:auto !important; bottom:var(--ag-1) !important;
+  height:var(--ag-tele);
+  display:flex; align-items:center; justify-content:space-around;
+  font-size:.5rem; letter-spacing:1px;
+  z-index:6; pointer-events:none;
+}
+
+/* ---- dock: a real flex row at the end of .app ---- */
+html[data-hud="on"] .nav-bar{
+  position:relative !important;
+  flex:0 0 auto;
+  bottom:auto !important; left:auto !important;
+  transform:none !important;
+  align-self:center;
+  width:auto !important;
+  margin:0 auto calc(var(--ag-2) + env(safe-area-inset-bottom)) !important;
+  gap:var(--ag-5) !important;
+  padding:var(--ag-2) var(--ag-5) !important;
+  border-radius:22px !important;
+  background:rgba(4,14,22,.72) !important;
+  backdrop-filter:blur(10px);
+  border:1px solid rgba(79,227,255,.18) !important;
+  z-index:25;
+}
+/* 44px minimum touch target — was 32px, below the accessibility floor */
+html[data-hud="on"] .nav-bar .nav-btn{
+  min-width:44px; min-height:44px;
+  display:grid; place-items:center;
+  transition:transform .22s var(--ag-ease);
+}
+html[data-hud="on"] .nav-bar .nav-btn:active{ transform:translateY(2px) scale(.94); }
+html[data-hud="on"] .nav-bar .nav-btn svg{ width:19px; height:19px; }
+
+/* ============ 6. PROACTIVE CARD — was landing on top of the dock ========
+   Becomes a transient toast in the field, never in the reserved band.    */
+html[data-hud="on"] .proactive-card,
+html[data-hud="on"] #proactiveCard{
+  position:absolute !important;
+  left:var(--ag-3); right:var(--ag-3);
+  bottom:calc(var(--ag-tele) + var(--ag-4)) !important;
+  top:auto !important;
+  z-index:18;
+  border-radius:14px;
+  background:linear-gradient(160deg,rgba(10,28,42,.92),rgba(4,14,22,.92));
+  border:1px solid rgba(79,227,255,.24);
+  backdrop-filter:blur(8px);
+  animation:agRise .5s var(--ag-ease) both;
+}
+
+/* ===================== 7. DEPTH & ATMOSPHERE ============================ */
+html[data-hud="on"] #hudLinks line{
+  stroke:rgba(79,227,255,.13);
+  stroke-dasharray:3 5;
+  animation:agDash 22s linear infinite;
+}
+@keyframes agDash{ to{ stroke-dashoffset:-160; } }
+
+/* one calm vignette instead of stacked scanline/radar layers */
+html[data-hud="on"] .scanlines,
+html[data-hud="on"] .radar-sweep{ opacity:.02 !important; }
+
+/* ======================== 8. ACCESSIBILITY ============================== */
+@media (prefers-reduced-motion:reduce){
+  html[data-hud="on"] .hud-module,
+  html[data-hud="on"] .hud-vision-node,
+  html[data-hud="on"] .ai-core-container,
+  html[data-hud="on"] #hudLinks line,
+  html[data-hud="on"] .proactive-card{
+    animation:none !important;
+  }
+}
+
+/* ================= 9. SMALL PHONES (360px and below) ==================== */
+@media (max-width:380px){
+  html[data-hud="on"] .hud-module{ width:112px; }
+  /* must NOT set `top` here — the base rule anchors this node by `bottom`,
+     and setting both stretches the card to fill the gap. */
+  html[data-hud="on"] .module-weather{ width:138px; }
+  html[data-hud="on"] .ai-core-container{ width:min(50vw,180px); height:min(50vw,180px); }
+  html[data-hud="on"] .nav-bar{ gap:var(--ag-4) !important; padding:var(--ag-2) var(--ag-4) !important; }
+}
+/* ================= 10. SHORT SCREENS (landscape / small) ================ */
+@media (max-height:680px){
+  html[data-hud="on"] .module-weather{ display:none; }   /* least critical node */
+  html[data-hud="on"] .ai-core-container{ width:min(38vw,140px); height:min(38vw,140px); }
+}
