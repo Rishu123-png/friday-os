@@ -29,8 +29,11 @@ import android.provider.ContactsContract;
 import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.provider.Telephony;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.telephony.SmsManager;
 import android.text.TextUtils;
+import android.util.Base64;
 import android.view.KeyEvent;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -54,6 +57,8 @@ import org.json.JSONObject;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +66,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 @CapacitorPlugin(name = "FridayNative")
 public class FridayNative extends Plugin {
@@ -70,6 +80,93 @@ public class FridayNative extends Plugin {
     private JSObject fail(String why) { JSObject o = new JSObject(); o.put("ok", false); o.put("reason", why); return o; }
     private boolean granted(String perm) {
         return ContextCompat.checkSelfPermission(getContext(), perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /* ============ ENCRYPTED APP SECRETS ============
+       Groq credentials are entered at runtime and are never shipped in the APK.
+       Values are encrypted with a non-exportable AES key in Android Keystore;
+       SharedPreferences contains ciphertext + IV only. */
+    private static final String SECRET_PREFS = "friday_secure_secrets";
+    private static final String SECRET_KEY_ALIAS = "friday_runtime_secrets_v1";
+
+    private boolean allowedSecretName(String name) {
+        return "groq_primary".equals(name) || "groq_standby".equals(name);
+    }
+
+    private SecretKey secretKey() throws Exception {
+        KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+        store.load(null);
+        if (store.containsAlias(SECRET_KEY_ALIAS)) {
+            KeyStore.SecretKeyEntry entry = (KeyStore.SecretKeyEntry) store.getEntry(SECRET_KEY_ALIAS, null);
+            return entry.getSecretKey();
+        }
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(
+                SECRET_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build());
+        return generator.generateKey();
+    }
+
+    @PluginMethod
+    public void setSecureSecret(PluginCall call) {
+        String name = call.getString("name", "");
+        String value = call.getString("value", "");
+        if (!allowedSecretName(name)) { call.resolve(fail("secret_not_allowed")); return; }
+        if (value.length() > 512) { call.resolve(fail("secret_too_long")); return; }
+        try {
+            SharedPreferences.Editor edit = getContext()
+                    .getSharedPreferences(SECRET_PREFS, Context.MODE_PRIVATE).edit();
+            if (value.isEmpty()) {
+                edit.remove(name + ".iv").remove(name + ".ct").apply();
+                call.resolve(ok());
+                return;
+            }
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey());
+            cipher.updateAAD(name.getBytes(StandardCharsets.UTF_8));
+            byte[] ciphertext = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+            edit.putString(name + ".iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP));
+            edit.putString(name + ".ct", Base64.encodeToString(ciphertext, Base64.NO_WRAP));
+            if (!edit.commit()) { call.resolve(fail("secure_store_write_failed")); return; }
+            call.resolve(ok());
+        } catch (Exception e) {
+            call.resolve(fail("secure_store_unavailable"));
+        }
+    }
+
+    @PluginMethod
+    public void getSecureSecret(PluginCall call) {
+        String name = call.getString("name", "");
+        if (!allowedSecretName(name)) { call.resolve(fail("secret_not_allowed")); return; }
+        try {
+            SharedPreferences prefs = getContext().getSharedPreferences(SECRET_PREFS, Context.MODE_PRIVATE);
+            String iv64 = prefs.getString(name + ".iv", "");
+            String ct64 = prefs.getString(name + ".ct", "");
+            if (iv64.isEmpty() || ct64.isEmpty()) { call.resolve(fail("not_found")); return; }
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey(),
+                    new GCMParameterSpec(128, Base64.decode(iv64, Base64.NO_WRAP)));
+            cipher.updateAAD(name.getBytes(StandardCharsets.UTF_8));
+            String value = new String(cipher.doFinal(Base64.decode(ct64, Base64.NO_WRAP)), StandardCharsets.UTF_8);
+            JSObject result = ok();
+            result.put("value", value);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.resolve(fail("secure_store_unavailable"));
+        }
+    }
+
+    @PluginMethod
+    public void deleteSecureSecret(PluginCall call) {
+        String name = call.getString("name", "");
+        if (!allowedSecretName(name)) { call.resolve(fail("secret_not_allowed")); return; }
+        boolean saved = getContext().getSharedPreferences(SECRET_PREFS, Context.MODE_PRIVATE).edit()
+                .remove(name + ".iv").remove(name + ".ct").commit();
+        call.resolve(saved ? ok() : fail("secure_store_write_failed"));
     }
 
     /* Static handle for broadcast receivers (geofences) to reach the JS app. */
