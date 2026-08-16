@@ -16,14 +16,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONArray;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.lang.reflect.Proxy;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.Locale;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /** Keyless always-on wake-word engine (Vosk), fully reflection-based.
  *
@@ -44,8 +38,6 @@ import java.util.zip.ZipInputStream;
 @CapacitorPlugin(name = "FridayVosk")
 public class FridayVosk extends Plugin {
 
-    private static final String MODEL_URL =
-        "https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip";
     private static final int WAKE_DEBOUNCE_MS = 1500;
 
     private Object service;       // org.vosk.android.SpeechService (reflection handle)
@@ -54,7 +46,6 @@ public class FridayVosk extends Plugin {
     private String activeModelDir = "";
     private String[] grammar = new String[0];
     private boolean starting = false;
-    private boolean downloading = false;
     private long lastWakeAt = 0;
 
     private JSObject ok() { JSObject o = new JSObject(); o.put("ok", true); return o; }
@@ -238,98 +229,19 @@ public class FridayVosk extends Plugin {
         return total;
     }
 
+    /**
+     * Disabled legacy Activity-owned downloader. The web layer now queues Vosk
+     * through FridayDownloads/WorkManager, which survives Activity and process
+     * recreation, resumes .part files, validates the archive, and extracts it
+     * into a staging directory before publishing the model path.
+     */
     @PluginMethod
     public void downloadModel(final PluginCall call) {
-        if (downloading) { call.resolve(fail("busy")); return; }
-        String url = call.getString("url", MODEL_URL);
-        if (url == null || url.trim().isEmpty()) url = MODEL_URL;
-        final String finalUrl = url.trim();
-        downloading = true;
-        new Thread(() -> {
-            File tmp = new File(getContext().getCacheDir(), "wake-model.zip");
-            try {
-                /* ---- download ---- */
-                HttpURLConnection c = (HttpURLConnection) new URL(finalUrl).openConnection();
-                c.setInstanceFollowRedirects(true);
-                c.setConnectTimeout(20000);
-                c.setReadTimeout(30000);
-                long total = c.getContentLengthLong();
-                try (InputStream in = c.getInputStream();
-                     FileOutputStream out = new FileOutputStream(tmp)) {
-                    byte[] buf = new byte[65536];
-                    long got = 0; int n; int lastPct = -1;
-                    while ((n = in.read(buf)) != -1) {
-                        out.write(buf, 0, n);
-                        got += n;
-                        if (total > 0) {
-                            int pct = (int) (got * 99 / total);
-                            if (pct != lastPct) { lastPct = pct; emit("voskProgress", pct(pct)); }
-                        }
-                    }
-                }
-                c.disconnect();
-
-                /* ---- unzip (strip the single top-level folder) ---- */
-                File dest = defaultModelDir();
-                deleteRecursive(dest);
-                dest.mkdirs();
-                String destCanon = dest.getCanonicalPath() + File.separator;
-                try (ZipInputStream zin = new ZipInputStream(new java.io.FileInputStream(tmp))) {
-                    ZipEntry ze;
-                    byte[] buf = new byte[65536];
-                    while ((ze = zin.getNextEntry()) != null) {
-                        String name = ze.getName().replace('\\', '/');
-                        int slash = name.indexOf('/');
-                        if (slash < 0) { zin.closeEntry(); continue; }
-                        String rel = name.substring(slash + 1);
-                        if (rel.isEmpty()) { zin.closeEntry(); continue; }
-                        File out = new File(dest, rel);
-                        if (!out.getCanonicalPath().startsWith(destCanon)) {
-                            zin.closeEntry(); continue;   // zip-slip guard
-                        }
-                        if (ze.isDirectory()) { out.mkdirs(); zin.closeEntry(); continue; }
-                        File parent = out.getParentFile();
-                        if (parent != null) parent.mkdirs();
-                        try (FileOutputStream fos = new FileOutputStream(out)) {
-                            int n;
-                            while ((n = zin.read(buf)) != -1) fos.write(buf, 0, n);
-                        }
-                        zin.closeEntry();
-                    }
-                }
-                tmp.delete();
-                downloading = false;
-                if (!looksLikeModel(dest)) { post(() -> call.resolve(fail("bad_model"))); return; }
-                JSObject done = ok();
-                done.put("path", dest.getAbsolutePath());
-                done.put("mb", Math.round(dirSize(dest) / 1048576.0));
-                emit("voskProgress", pct(100));
-                post(() -> call.resolve(done));
-            } catch (Throwable t) {
-                tmp.delete();
-                downloading = false;
-                post(() -> call.resolve(fail("download_failed")));
-            }
-        }, "friday-vosk-dl").start();
-    }
-
-    private JSObject pct(int p) {
-        JSObject o = new JSObject();
-        o.put("percent", Math.min(100, Math.max(0, p)));
-        return o;
+        call.resolve(fail("use_persistent_downloads"));
     }
 
     private void emit(String event, JSObject data) {
         post(() -> notifyListeners(event, data));
-    }
-
-    private static void deleteRecursive(File f) {
-        if (f == null || !f.exists()) return;
-        if (f.isDirectory()) {
-            File[] kids = f.listFiles();
-            if (kids != null) for (File k : kids) deleteRecursive(k);
-        }
-        f.delete();
     }
 
     private void stopInternal() {
