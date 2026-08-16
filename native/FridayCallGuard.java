@@ -393,4 +393,58 @@ public class FridayCallGuard extends BroadcastReceiver {
         }
         if (!declineOnly(ctx, number)) return;   // never lie or send after a failed decline
 
-     
+        /* ONE explainer per caller per 10min */
+        if (!spamGuard(ctx, number, 10 * 60 * 1000)) {
+            log(ctx, number, "declined_skipped_explainer");
+            FridayNative.emitCallHandled(number, "message_guard_blocked");
+            Toast.makeText(ctx, "Call declined; the duplicate-message guard blocked this SMS", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final String msg = exactMessage == null ? "" : exactMessage;
+        final String mode = "whatsapp".equals(exactMode) ? "whatsapp" : "sms";
+        if (msg.isEmpty()) {
+            log(ctx, number, "declined_empty_message");
+            return;
+        }
+
+        if ("whatsapp".equals(mode)) {
+            try {
+                String digits = number.replaceAll("[^0-9]", "");
+                if (digits.length() == 10) digits = "91" + digits;
+                Intent wa = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://wa.me/" + digits + "?text=" + Uri.encode(msg)));
+                wa.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(wa);
+                log(ctx, number, "declined_whatsapp_draft");
+                FridayNative.emitCallHandled(number, "whatsapp_draft");
+            } catch (Exception e) {
+                /* Never change a confirmed WhatsApp action into a direct SMS send. */
+                log(ctx, number, "declined_whatsapp_unavailable");
+                FridayNative.emitCallHandled(number, "whatsapp_unavailable");
+                Toast.makeText(ctx, "WhatsApp draft unavailable; no SMS was sent", Toast.LENGTH_LONG).show();
+            }
+        } else {
+            try {
+                SmsManager sm = SmsManager.getDefault();
+                long requestAt = System.currentTimeMillis();
+                Intent resultIntent = new Intent(ctx, FridayCallGuard.class)
+                        .setAction(ACTION_SMS_RESULT)
+                        .setData(Uri.parse("friday://call-sms/" + Uri.encode(number)
+                                + "/" + requestAt))
+                        .putExtra("number", number);
+                PendingIntent sentResult = PendingIntent.getBroadcast(ctx,
+                        (int) (requestAt & 0x7fffffff), resultIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                sm.sendTextMessage(number, null, msg, sentResult, null);
+                log(ctx, number, "declined_sms_requested");
+                FridayNative.emitCallHandled(number, "sms_requested");
+                Toast.makeText(ctx, "Call declined; waiting for Android's SMS result", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                log(ctx, number, "declined_sms_failed");
+                FridayNative.emitCallHandled(number, "sms_failed");
+                Toast.makeText(ctx, "Call declined, but Android rejected the SMS request", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+}

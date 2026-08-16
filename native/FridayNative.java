@@ -56,6 +56,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,6 +74,21 @@ public class FridayNative extends Plugin {
 
     /* Static handle for broadcast receivers (geofences) to reach the JS app. */
     private static FridayNative activePlugin;
+
+    private static final long REPLY_AUTH_TTL_MS = 2 * 60_000L;
+    private static final Map<String, ReplyAuthorization> REPLY_AUTHORIZATIONS = new ConcurrentHashMap<>();
+
+    private static final class ReplyAuthorization {
+        final String eventKey;
+        final String app;
+        final String recipient;
+        final String text;
+        final long expiresAt;
+        ReplyAuthorization(String eventKey, String app, String recipient, String text, long expiresAt) {
+            this.eventKey = eventKey; this.app = app; this.recipient = recipient;
+            this.text = text; this.expiresAt = expiresAt;
+        }
+    }
 
     @Override
     public void load() {
@@ -102,6 +120,9 @@ public class FridayNative extends Plugin {
     public void requestAllPermissions(PluginCall call) {
         String[] perms = {
             Manifest.permission.READ_CONTACTS,
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.CALL_PHONE,
             Manifest.permission.SEND_SMS,
             Manifest.permission.READ_SMS,
@@ -338,10 +359,21 @@ public class FridayNative extends Plugin {
     }
 
     public void emitNotification(String pkg, String title, String text) {
+        emitNotification("", pkg, title, text, "OTHER", false, false, false);
+    }
+
+    public void emitNotification(String key, String pkg, String title, String text, String category,
+                                 boolean sensitive, boolean replyable, boolean nativeAnnounced) {
         JSObject o = new JSObject();
-        o.put("pkg", pkg);
+        o.put("key", key == null ? "" : key);
+        o.put("pkg", pkg == null ? "" : pkg);
         o.put("title", title == null ? "" : title);
         o.put("text", text == null ? "" : text);
+        o.put("category", category == null ? "OTHER" : category);
+        o.put("sensitive", sensitive);
+        o.put("replyable", replyable);
+        o.put("nativeAnnounced", nativeAnnounced);
+        o.put("canReveal", FridayAssistantSpeech.canReveal(getContext()));
         o.put("time", System.currentTimeMillis());
         notifyListeners("notificationPosted", o);
     }
@@ -352,6 +384,9 @@ public class FridayNative extends Plugin {
     @PluginMethod
     public void getActiveNotifications(PluginCall call) {
         try {
+            if (!FridayAssistantSpeech.canDisplayPrivateContent(getContext())) {
+                call.resolve(fail("private_or_locked")); return;
+            }
             if (!FridayNotificationService.isEnabled()) { call.resolve(fail("listener_off")); return; }
             android.service.notification.StatusBarNotification[] all = FridayNotificationService.active();
             java.util.Arrays.sort(all, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
@@ -499,11 +534,19 @@ public class FridayNative extends Plugin {
     public void startForegroundService(PluginCall call) {
         try {
             Intent i = new Intent(getContext(), FridayService.class);
-            i.putExtra("title", call.getString("title", "FRIDAY is listening"));
-            i.putExtra("text", call.getString("text", "Say \"Hey Friday\""));
+            i.putExtra("title", FridayAssistantPolicy.boundedText(
+                    call.getString("title", "FRIDAY always-on mode"), 80));
+            i.putExtra("text", FridayAssistantPolicy.boundedText(
+                    call.getString("text", "Smart prompts, reminders and call assistance active"), 180));
             if (Build.VERSION.SDK_INT >= 26) getContext().startForegroundService(i);
             else getContext().startService(i);
-            call.resolve(ok());
+            /* Starting an FGS is asynchronous. Resolve only after the service has
+               actually promoted itself, rather than equating an accepted request
+               with a running always-on notification. */
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (FridayService.isForegroundRunning()) call.resolve(ok());
+                else call.resolve(fail("foreground_service_not_running"));
+            }, 1500L);
         } catch (Exception e) { call.resolve(fail(e.getMessage())); }
     }
 
@@ -518,9 +561,9 @@ public class FridayNative extends Plugin {
     @PluginMethod
     public void setBootStart(PluginCall call) {
         boolean on = call.getBoolean("enabled", true);
-        getContext().getSharedPreferences("friday", Context.MODE_PRIVATE)
-                .edit().putBoolean("boot_start", on).apply();
-        call.resolve(ok());
+        boolean persisted = getContext().getSharedPreferences("friday", Context.MODE_PRIVATE)
+                .edit().putBoolean("boot_start", on).commit();
+        call.resolve(persisted ? ok() : fail("boot_setting_persist_failed"));
     }
 
     /* ============ SYSTEM TOGGLES ============ */
@@ -1308,6 +1351,9 @@ public class FridayNative extends Plugin {
     /** Notification history ring (A3: history, digest, deleted keeper). */
     @PluginMethod
     public void getNotifLog(PluginCall call) {
+        if (!FridayAssistantSpeech.canDisplayPrivateContent(getContext())) {
+            call.resolve(fail("private_or_locked")); return;
+        }
         String app = call.getString("app", "");
         int limit = Math.max(1, Math.min(200, call.getInt("limit", 40)));
         org.json.JSONArray raw = FridayNotificationService.readLog(getContext(), app, limit);
@@ -1316,9 +1362,13 @@ public class FridayNative extends Plugin {
             org.json.JSONObject o = raw.optJSONObject(i);
             if (o == null) continue;
             JSObject m = new JSObject();
+            m.put("key", o.optString("key", ""));
             m.put("pkg", o.optString("pkg", ""));
             m.put("title", o.optString("title", ""));
             m.put("text", o.optString("text", ""));
+            m.put("category", o.optString("category", "OTHER"));
+            m.put("sensitive", o.optBoolean("sensitive", false));
+            m.put("replyable", o.optBoolean("replyable", false));
             m.put("when", o.optLong("when", 0));
             items.put(m);
         }
@@ -1546,27 +1596,194 @@ public class FridayNative extends Plugin {
     }
 
     /* ============ NOTIFICATION REPLY (RemoteInput) ============ */
-    /** Answers a real notification (WhatsApp/Telegram/...) through its own
-        quick-reply action - the posted reply originates from the target app. */
+    private static String cleanReplyField(String value, int max) {
+        if (value == null) return "";
+        String cleaned = value.replaceAll("[\\p{Cntrl}]+", " ").replaceAll("\\s+", " ").trim();
+        return max > 0 && cleaned.length() > max ? cleaned.substring(0, max) : cleaned;
+    }
+
+    /** Mint a short-lived native capability only after an explicit confirmation.
+        It is bound to one live event key, exact package, recipient and reply text. */
     @PluginMethod
-    public void replyNotification(PluginCall call) {
-        String app = call.getString("app", "");
-        String text = call.getString("text", "");
-        if (text.isEmpty()) { call.resolve(fail("empty")); return; }
+    public void authorizeNotificationReply(PluginCall call) {
+        String eventKey = cleanReplyField(call.getString("eventKey", ""), 512);
+        String app = cleanReplyField(call.getString("app", ""), 256);
+        String recipient = cleanReplyField(call.getString("recipient", ""), 160);
+        String text = cleanReplyField(call.getString("text", ""), 0);
+        String confirmation = cleanReplyField(call.getString("confirmation", ""), 40)
+                .toLowerCase(java.util.Locale.ROOT);
+        if (eventKey.isEmpty() || app.isEmpty() || recipient.isEmpty() || text.isEmpty()) {
+            call.resolve(fail("bad_args")); return;
+        }
+        if (text.length() > 1200) { call.resolve(fail("reply_too_long")); return; }
+        if (!confirmation.matches("^(send it|send now|bhejo|haan bhejo|ab bhejo)$")) {
+            call.resolve(fail("explicit_confirmation_required")); return;
+        }
+        if (!FridayAssistantSpeech.canReveal(getContext())) {
+            call.resolve(fail("private_or_locked")); return;
+        }
         if (!FridayNotificationService.isEnabled()) {
-            call.resolve(fail("no_listener"));
+            call.resolve(fail("no_listener")); return;
+        }
+        if (!FridayNotificationService.matchesReplyTarget(eventKey, app, recipient)) {
+            call.resolve(fail("reply_target_changed")); return;
+        }
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, ReplyAuthorization> entry : REPLY_AUTHORIZATIONS.entrySet()) {
+            if (entry.getValue().expiresAt < now) REPLY_AUTHORIZATIONS.remove(entry.getKey(), entry.getValue());
+        }
+        /* Bound in-memory capabilities even if a compromised WebView repeatedly
+           requests valid-looking drafts during the two-minute validity window. */
+        if (REPLY_AUTHORIZATIONS.size() >= 64) {
+            call.resolve(fail("too_many_pending_authorizations"));
             return;
         }
-        int res = FridayNotificationService.reply(getContext(), app, text);
-        if (res == 1) {
-            JSObject r = ok();
-            r.put("app", app);
-            call.resolve(r);
-        } else if (res == 0) {
-            call.resolve(fail("not_found"));
-        } else {
-            call.resolve(fail("cannot_reply"));
+        String token = UUID.randomUUID().toString();
+        REPLY_AUTHORIZATIONS.put(token,
+                new ReplyAuthorization(eventKey, app, recipient, text, now + REPLY_AUTH_TTL_MS));
+        JSObject result = ok();
+        result.put("authorizationToken", token);
+        result.put("expiresAt", now + REPLY_AUTH_TTL_MS);
+        call.resolve(result);
+    }
+
+    /** Answers a real notification through its own quick-reply action. The native
+        capability is removed before the attempt, so success and failure are one-use. */
+    @PluginMethod
+    public void replyNotification(PluginCall call) {
+        String token = call.getString("authorizationToken", "");
+        String eventKey = cleanReplyField(call.getString("eventKey", ""), 512);
+        String app = cleanReplyField(call.getString("app", ""), 256);
+        String text = cleanReplyField(call.getString("text", ""), 0);
+        ReplyAuthorization authorization = token.isEmpty() ? null : REPLY_AUTHORIZATIONS.remove(token);
+        if (authorization == null) { call.resolve(fail("authorization_required")); return; }
+        long now = System.currentTimeMillis();
+        if (now > authorization.expiresAt) { call.resolve(fail("authorization_expired")); return; }
+        if (!authorization.eventKey.equals(eventKey) || !authorization.app.equals(app)
+                || !authorization.text.equals(text)) {
+            call.resolve(fail("authorization_mismatch")); return;
         }
+        /* Re-check every volatile condition at the actual native send boundary. */
+        if (!FridayAssistantSpeech.canReveal(getContext())) {
+            call.resolve(fail("private_or_locked")); return;
+        }
+        if (!FridayNotificationService.isEnabled()) {
+            call.resolve(fail("no_listener")); return;
+        }
+        if (!FridayNotificationService.matchesReplyTarget(
+                authorization.eventKey, authorization.app, authorization.recipient)) {
+            call.resolve(fail("reply_target_changed")); return;
+        }
+        try {
+            boolean sent = FridayNotificationService.reply(getContext(), eventKey, app, text);
+            if (sent) {
+                JSObject r = ok(); r.put("app", app); r.put("eventKey", eventKey); call.resolve(r);
+            } else {
+                JSObject r = fail("not_found");
+                r.put("reason", "The exact notification nnot_reply"); r.put("reason", e.getMessage()); call.resolve(r);
+        }
+    }
+
+    /* ============ STEP 5: ALWAYS-ON ASSISTANT + DURABLE REMINDERS ============ */
+    @PluginMethod
+    public void configureAssistant(PluginCall call) {
+        SharedPreferences.Editor edit = getContext()
+                .getSharedPreferences(FridayAssistantSpeech.PREFS, Context.MODE_PRIVATE).edit();
+        edit.putBoolean("proactive_enabled", call.getBoolean("enabled", false));
+        edit.putBoolean("notifications_enabled", call.getBoolean("notificationsEnabled", true));
+        edit.putBoolean("private_mode", call.getBoolean("privateMode", false));
+        edit.putBoolean("private_on_lock", call.getBoolean("privateOnLock", true));
+        edit.putBoolean("quiet_enabled", call.getBoolean("quietEnabled", true));
+        edit.putInt("quiet_start", Math.max(0, Math.min(1439, call.getInt("quietStart", 22 * 60))));
+        edit.putInt("quiet_end", Math.max(0, Math.min(1439, call.getInt("quietEnd", 7 * 60))));
+        edit.putInt("rate_limit_seconds", Math.max(5, Math.min(3600,
+                call.getInt("rateLimitSeconds", 20))));
+        edit.putInt("max_per_hour", Math.max(1, Math.min(60, call.getInt("maxPerHour", 12))));
+        edit.putString("address", FridayAssistantPolicy.boundedText(
+                call.getString("address", "Boss"), 40));
+        String requestedCategories = "," + call.getString("categories",
+                "MESSAGE,EMAIL,CALENDAR,DELIVERY,MISSED_CALL,SENSITIVE") + ",";
+        StringBuilder acceptedCategories = new StringBuilder();
+        for (FridayAssistantPolicy.Category category : FridayAssistantPolicy.Category.values()) {
+            if (category == FridayAssistantPolicy.Category.OTHER
+                    || category == FridayAssistantPolicy.Category.SYSTEM) continue;
+            if (requestedCategories.contains("," + category.name() + ",")) {
+                if (acceptedCategories.length() > 0) acceptedCategories.append(',');
+                acceptedCategories.append(category.name());
+            }
+        }
+        edit.putString("categories", acceptedCategories.toString());
+        edit.putString("blocked_packages", FridayAssistantPolicy.boundedText(
+                call.getString("blockedPackages", ""), 4000));
+        edit.putString("blocked_contacts", FridayAssistantPolicy.boundedText(
+                call.getString("blockedContacts", ""), 4000));
+        edit.putBoolean("call_announcements", call.getBoolean("callAnnouncements", true));
+        boolean persisted = edit.commit();
+        boolean enabled = call.getBoolean("enabled", false);
+        if (!persisted) {
+            call.resolve(fail("assistant_settings_persist_failed"));
+            return;
+        }
+        boolean privateMode = call.getBoolean("privateMode", false);
+        if (!enabled || privateMode) FridayAssistantSpeech.silence();
+        if (enabled) FridayAssistantSpeech.initialize(getContext());
+        FridayService.refreshNotificationIfRunning(getContext());
+        JSObject r = ok(); r.put("enabled", enabled); call.resolve(r);
+    }
+
+    @PluginMethod
+    public void getAssistantStatus(PluginCall call) {
+        SharedPreferences p = getContext().getSharedPreferences(FridayAssistantSpeech.PREFS, Context.MODE_PRIVATE);
+        JSObject r = ok();
+        r.put("enabled", p.getBoolean("proactive_enabled", false));
+        r.put("privateMode", p.getBoolean("private_mode", false));
+        r.put("privateOnLock", p.getBoolean("private_on_lock", true));
+        r.put("quietNow", FridayAssistantSpeech.isQuietNow(p));
+        if (FridayAssistantSpeech.canDisplayPrivateContent(getContext())) {
+            r.put("reminders", FridayReminderScheduler.list(getContext()));
+        } else {
+            r.put("reminders", new JSONArray());
+            r.put("remindersWithheld", true);
+        }
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void consumeAssistantEvent(PluginCall call) {
+        if (!FridayAssistantSpeech.canDisplayPrivateContent(getContext())) {
+            call.resolve(fail("private_or_locked"));
+            return;
+        }
+        SharedPreferences p = getContext().getSharedPreferences(FridayAssistantSpeech.PREFS, Context.MODE_PRIVATE);
+        String raw = p.getString("pending_event", "");
+        p.edit().remove("pending_event").apply();
+        JSObject r = ok();
+        if (!raw.isEmpty()) {
+            try { r.put("event", new JSONObject(raw)); } catch (Exception ignored) {}
+        }
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void scheduleAssistantReminder(PluginCall call) {
+        try {
+            JSONObject item = FridayReminderScheduler.schedule(getContext(),
+                    call.getString("id", ""), call.getString("text", ""), call.getLong("dueAt", 0L),
+                    call.getString("actionType", ""), call.getString("target", ""), call.getString("message", ""));
+            JSObject r = ok(); r.put("item", item); call.resolve(r);
+        } catch (Exception e) { call.resolve(fail(e.getMessage())); }
+    }
+
+    @PluginMethod
+    public void cancelAssistantReminder(PluginCall call) {
+        boolean cancelled = FridayReminderScheduler.cancel(getContext(), call.getString("id", ""));
+        call.resolve(cancelled ? ok() : fail("not_found_or_persist_failed"));
+    }
+
+    @PluginMethod
+    public void restoreAssistantReminders(PluginCall call) {
+        FridayReminderScheduler.rescheduleAll(getContext());
+        JSObject r = ok(); r.put("items", FridayReminderScheduler.list(getContext())); call.resolve(r);
     }
 
     /* ============ v10.3 HERALD: CALL GUARD ============ */
@@ -1578,7 +1795,10 @@ public class FridayNative extends Plugin {
         final boolean enabled = en != null && en;
         final String template = call.getString("template", "");
         final String mode = call.getString("mode", "sms");
-        FridayCallGuard.configure(getContext(), enabled, template, mode);
+        if (!FridayCallGuard.configure(getContext(), enabled, template, mode)) {
+            call.resolve(fail("call_guard_settings_persist_failed"));
+            return;
+        }
         JSObject r = ok();
         r.put("enabled", enabled);
         call.resolve(r);
@@ -1596,6 +1816,9 @@ public class FridayNative extends Plugin {
 
     @PluginMethod
     public void getCallGuardLog(PluginCall call) {
+        if (!FridayAssistantSpeech.canDisplayPrivateContent(getContext())) {
+            call.resolve(fail("private_or_locked")); return;
+        }
         JSObject r = ok();
         try { r.put("items", FridayCallGuard.readLog(getContext())); } catch (Exception ignored) {}
         call.resolve(r);
@@ -1608,7 +1831,9 @@ public class FridayNative extends Plugin {
         if (p == null) return;
         try {
             JSObject o = new JSObject();
-            o.put("number", number);
+            String safeNumber = FridayAssistantSpeech.canReveal(p.getContext())
+                    ? number : "private caller";
+            o.put("number", safeNumber);
             o.put("action", action);
             p.notifyListeners(FridayCallGuard.EVT, o);
         } catch (Exception ignored) {}
