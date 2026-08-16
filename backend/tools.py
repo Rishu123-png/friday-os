@@ -1,6 +1,11 @@
 # FRIDAY OS — Server-side tools the LLM can call.
 # Each tool returns a plain string the model summarizes (mirrors the
 # on-device tool loop in www/js/app.js runToolByName).
+import asyncio
+import ipaddress
+import socket
+from urllib.parse import urljoin, urlsplit
+
 import httpx
 
 WMO = {
@@ -13,6 +18,73 @@ WMO = {
 }
 
 CLIENT_TIMEOUT = httpx.Timeout(20.0)
+MAX_FETCH_BYTES = 2_000_000
+MAX_REDIRECTS = 4
+
+
+def _validate_public_url_sync(url: str) -> str:
+    """Reject local/private/link-local targets before every network hop.
+
+    The check covers literal IPs and all addresses returned by DNS. Redirects are
+    revalidated by ``_safe_get`` so a public URL cannot bounce into localhost or
+    cloud metadata endpoints.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Only http/https URLs are allowed")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Credentials in URLs are not allowed")
+    host = (parsed.hostname or "").rstrip(".")
+    if not host:
+        raise ValueError("URL host is required")
+    if parsed.port not in (None, 80, 443):
+        raise ValueError("Only standard web ports are allowed")
+
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ValueError("URL host did not resolve") from exc
+        addresses = {ipaddress.ip_address(item[4][0]) for item in infos}
+
+    if not addresses or any(not addr.is_global for addr in addresses):
+        raise ValueError("Private, local, reserved, and link-local hosts are blocked")
+    return parsed.geturl()
+
+
+async def validate_public_url(url: str) -> str:
+    return await asyncio.to_thread(_validate_public_url_sync, url)
+
+
+async def _safe_get(url: str, max_bytes: int = MAX_FETCH_BYTES) -> tuple[bytes, str]:
+    """Bounded server-side GET with per-hop SSRF validation."""
+    current = url
+    async with httpx.AsyncClient(timeout=CLIENT_TIMEOUT, follow_redirects=False) as client:
+        for hop in range(MAX_REDIRECTS + 1):
+            current = await validate_public_url(current)
+            async with client.stream(
+                "GET", current, headers={"User-Agent": "FRIDAY-OS/1.3"}
+            ) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if not location or hop >= MAX_REDIRECTS:
+                        raise ValueError("Too many or invalid redirects")
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                announced = int(response.headers.get("content-length") or 0)
+                if announced > max_bytes:
+                    raise ValueError("Remote response is too large")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise ValueError("Remote response exceeded the size limit")
+                encoding = response.encoding or "utf-8"
+                return bytes(data), encoding
+    raise ValueError("Fetch failed")
 
 
 async def get_weather(args: dict) -> str:
@@ -81,15 +153,12 @@ async def translate_text(args: dict) -> str:
 
 
 async def fetch_web(args: dict) -> str:
-    """Server-side reader — replaces the flaky r.jina.ai / allorigins path."""
+    """Server-side page reader with SSRF and response-size protection."""
     url = str(args.get("url") or "").strip()
-    if not url.startswith(("http://", "https://")):
-        return "Bad URL."
     try:
-        async with httpx.AsyncClient(timeout=CLIENT_TIMEOUT, follow_redirects=True) as c:
-            r = await c.get(url, headers={"User-Agent": "FRIDAY-OS/1.0"})
-        txt = r.text or ""
-        # crude HTML→text
+        body, encoding = await _safe_get(url)
+        txt = body.decode(encoding, errors="replace")
+        # Lightweight HTML→text; this is a reader, not a browser.
         import re
         txt = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", txt, flags=re.I)
         txt = re.sub(r"<[^>]+>", " ", txt)
@@ -100,14 +169,11 @@ async def fetch_web(args: dict) -> str:
 
 
 async def fetch_raw(args: dict) -> str:
-    """Raw page body (for RSS feeds the app parses itself)."""
+    """Bounded raw page body (for RSS feeds the app parses itself)."""
     url = str(args.get("url") or "").strip()
-    if not url.startswith(("http://", "https://")):
-        return "Bad URL."
     try:
-        async with httpx.AsyncClient(timeout=CLIENT_TIMEOUT, follow_redirects=True) as c:
-            r = await c.get(url, headers={"User-Agent": "FRIDAY-OS/1.0"})
-        return r.text[:20000]
+        body, encoding = await _safe_get(url)
+        return body.decode(encoding, errors="replace")[:20000]
     except Exception as e:
         return f"Fetch failed: {e}"
 
