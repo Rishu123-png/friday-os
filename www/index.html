@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0a0a1a">
+  <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="FRIDAY OS - Your Personal AI Assistant">
@@ -17,8 +17,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@500;600&family=JetBrains+Mono:wght@500&display=swap">
   <link rel="stylesheet" href="styles.css">
-  <!-- FRIDAY OS unified HUD redesign — additive, non-destructive (see css/hud-redesign.css) -->
-  <link rel="stylesheet" href="css/hud-redesign.css">
+  <!-- FRIDAY OS standalone portrait core HUD -->
+  <link rel="stylesheet" href="css/hud-v21.css">
 </head>
 <body>
   <!-- Boot Screen -->
@@ -53,29 +53,31 @@
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left"><span class="status-time" id="statusTime">00:00</span></div>
-      <div class="status-center"><span class="status-label">FRIDAY OS v20.0</span></div>
+      <div class="status-center"><span class="status-label">FRIDAY OS</span></div>
       <div id="suitChip" class="suit-chip" hidden>Suit:</div>
       <div class="status-right">
         <div class="battery-status">
           <span class="label">BATTERY</span>
-          <span class="value" id="statusBattery">70%</span>
-          <span class="charging-label" id="statusCharging">CHARGING</span>
+          <span class="value" id="statusBattery">—</span>
+          <span class="charging-label" id="statusCharging" style="display:none">CHARGING</span>
         </div>
       </div>
     </div>
 
-    <!-- Dashboard View (v20.0 HUD) -->
+    <!-- Dashboard View: reference-shaped FRIDAY HUD -->
     <div class="dashboard" id="dashboard">
-      <!-- Systems Optimal Line -->
-      <div class="systems-optimal-line">
-        <span class="dot"></span>
-        <span id="systemsLine">SYSTEMS OPTIMAL</span>
-      </div>
+      <header class="hud-identity" aria-label="FRIDAY system identity">
+        <div class="hud-wordmark">FRIDAY <span class="hud-ready-dot" aria-hidden="true"></span></div>
+        <div class="systems-optimal-line">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="systemsLine">SYSTEMS INITIALIZING</span>
+        </div>
+      </header>
 
       <!-- Top Section: Location, Compass, Network -->
       <div class="hud-row hud-top-row">
         <div class="hud-module module-location">
-          <div class="module-header"><span class="icon">📍</span> LOCATION</div>
+          <div class="module-header">LOCATION:</div>
           <div class="location-content">
             <div class="location-name" id="locCity">—</div>
             <div class="location-sub" id="locRegion">—</div>
@@ -100,7 +102,7 @@
               <div class="compass-pointer"></div>
             </div>
             <div class="gps-signal">
-              <div class="signal-bars"><span class="bar on"></span><span class="bar on"></span><span class="bar on"></span><span class="bar"></span></div>
+              <div class="signal-bars"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>
               <div class="signal-label">—</div>
             </div>
             <div class="compass-value" id="compassValue">—</div>
@@ -108,8 +110,9 @@
         </div>
 
         <div class="hud-module module-network">
-          <div class="module-header"><span class="icon">📡</span> NETWORK</div>
+          <div class="module-header">NETWORK:</div>
           <div class="network-content">
+            <div class="net-primary" id="netStatus">CHECKING...</div>
             <div class="net-item">
               <span class="label">Wi-Fi</span>
               <span class="value highlight" id="netSsid">—</span>
@@ -141,22 +144,22 @@
       <!-- Mid Section: Weather, AI Core, Bluetooth -->
       <div class="hud-row hud-mid-row">
         <div class="hud-module module-weather">
-          <div class="module-header"><span class="icon">☁️</span> WEATHER</div>
+          <div class="module-header">WEATHER:</div>
           <div class="weather-content">
             <div class="weather-main">
-              <span class="weather-icon">🌧️</span>
+              <span class="weather-icon" aria-hidden="true"></span>
               <span class="temp">—</span>
             </div>
             <div class="weather-desc">—</div>
             <div class="weather-stats">
               <div class="stat"><span>HUMIDITY</span><span>—</span></div>
               <div class="stat"><span>WIND</span><span>—</span></div>
-              <div class="stat"><span>UV INDEX</span><span>—</span></div>
+              <div class="stat"><span>UV MAX</span><span>—</span></div>
             </div>
             <div class="weather-forecast">
-              <div class="f-day"><span>FRI</span><span>28°/24°</span></div>
-              <div class="f-day"><span>SAT</span><span>31°/25°</span></div>
-              <div class="f-day"><span>SUN</span><span>32°/26°</span></div>
+              <div class="f-day"><span>—</span><span>—</span></div>
+              <div class="f-day"><span>—</span><span>—</span></div>
+              <div class="f-day"><span>—</span><span>—</span></div>
             </div>
           </div>
         </div>
@@ -166,7 +169,7 @@
             <div class="core-glow-bg"></div>
             <canvas id="coreCanvas"></canvas>
             <div class="core-label">AI CORE</div>
-            <div class="core-status" id="listeningText">LISTENING...</div>
+            <div class="core-status" id="listeningText">INITIALIZING</div>
             <div class="voice-waveform" id="voiceWaveform">
               <div class="wave-bar" style="--i:0"></div><div class="wave-bar" style="--i:1"></div>
               <div class="wave-bar" style="--i:2"></div><div class="wave-bar" style="--i:3"></div>
@@ -189,39 +192,39 @@
         </div>
 
         <div class="hud-module module-bluetooth">
-          <div class="module-header"><span class="icon"></span> BLUETOOTH</div>
+          <div class="module-header">BLUETOOTH:</div>
           <div class="bluetooth-content">
             <div class="bt-status">—</div>
             <div class="bt-count">—</div>
             <div class="bt-list">
-              <div class="bt-device connected">
-                <span class="bt-icon">🎧</span>
-                <div class="bt-info"><span>—</span><span>—</span></div>
-              </div>
               <div class="bt-device">
-                <span class="bt-icon">🎧</span>
-                <div class="bt-info"><span>—</span><span>—</span></div>
-              </div>
-              <div class="bt-device">
-                <span class="bt-icon">⌚</span>
-                <div class="bt-info"><span>—</span><span>—</span></div>
+                <div class="bt-info"><span>WAITING FOR DEVICE BRIDGE</span><span>NO DEVICE INFORMATION REPORTED</span></div>
               </div>
             </div>
-            <button class="bt-scan-btn">SCAN AGAIN</button>
           </div>
         </div>
       </div>
 
-      <!-- Quick Commands Section -->
-      <div class="quick-commands-grid">
-        <button class="cmd-btn" data-action="voice"><div class="cmd-icon">🎙️</div><span>VOICE</span></button>
-        <button class="cmd-btn" data-action="vision"><div class="cmd-icon">👁️</div><span>VISION</span></button>
-        <button class="cmd-btn" data-action="memory"><div class="cmd-icon">🧠</div><span>MEMORY</span></button>
-        <button class="cmd-btn" data-action="automation"><div class="cmd-icon">⚙️</div><span>AUTOMATION</span></button>
-        <button class="cmd-btn" data-action="notes"><div class="cmd-icon">📝</div><span>NOTES</span></button>
-        <button class="cmd-btn" data-action="music"><div class="cmd-icon">🎵</div><span>MUSIC</span></button>
-        <button class="cmd-btn" data-action="calls"><div class="cmd-icon">📞</div><span>CALLS</span></button>
-        <button class="cmd-btn" data-action="more"><div class="cmd-icon">⋮</div><span>MORE</span></button>
+      <!-- Six quick actions; every button reuses a real app handler. -->
+      <div class="quick-commands-grid" aria-label="Quick actions">
+        <button class="cmd-btn" data-action="voice" aria-label="Talk to FRIDAY">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></svg></div><span>VOICE</span>
+        </button>
+        <button class="cmd-btn" data-action="chat" aria-label="Open FRIDAY chat">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 12h5"/></svg></div><span>CHAT</span>
+        </button>
+        <button class="cmd-btn" data-action="vision" aria-label="Open vision">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3"/><rect x="7" y="8" width="10" height="8" rx="2"/><circle cx="12" cy="12" r="2.2"/></svg></div><span>VISION</span>
+        </button>
+        <button class="cmd-btn" data-action="reminder" aria-label="Open reminders">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v5L6 17zM10 20h4"/></svg></div><span>REMINDERS</span>
+        </button>
+        <button class="cmd-btn" data-action="notes" aria-label="Open notes">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 3.5-.8L19 7.7 16.3 5 5.8 15.5 5 19zM14.8 6.5l2.7 2.7"/></svg></div><span>NOTES</span>
+        </button>
+        <button class="cmd-btn" data-action="more" aria-label="Open app settings">
+          <div class="cmd-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.6a7 7 0 0 0-.7-1.7l1-1.8-2.1-2.1-1.8 1A7 7 0 0 0 11.5 5l-.6-2h-3l-.6 2a7 7 0 0 0-1.7.7l-1.8-1-2.1 2.1 1 1.8a7 7 0 0 0-.7 1.7l-2 .6v3l2 .6a7 7 0 0 0 .7 1.7l-1 1.8 2.1 2.1 1.8-1a7 7 0 0 0 1.7.7l.6 2h3l.6-2a7 7 0 0 0 1.7-.7l1.8 1 2.1-2.1-1-1.8a7 7 0 0 0 .7-1.7l2-.6z" transform="translate(2.1 0) scale(.82)"/></svg></div><span>SETTINGS</span>
+        </button>
       </div>
 
       <!-- Bottom Section: Telemetry, Modules, Agenda -->
@@ -231,15 +234,15 @@
           <div class="telemetry-content">
             <div class="tel-stats">
               <div class="tel-stat">
-                <div class="tel-circle" style="--p:22"><span>0%</span></div>
-                <span>CPU</span>
+                <div class="tel-circle" style="--p:0"><span>—</span></div>
+                <span>BATTERY</span>
               </div>
               <div class="tel-stat">
-                <div class="tel-circle" style="--p:48"><span>0%</span></div>
-                <span>RAM</span>
+                <div class="tel-circle" style="--p:0"><span>—</span></div>
+                <span>JS HEAP</span>
               </div>
               <div class="tel-stat">
-                <div class="tel-circle" style="--p:62"><span>0%</span></div>
+                <div class="tel-circle" style="--p:0"><span>—</span></div>
                 <span>STORAGE</span>
               </div>
             </div>
@@ -257,12 +260,12 @@
         <div class="hud-module module-active-modules">
           <div class="module-header">ACTIVE MODULES</div>
           <div class="modules-list">
-            <div class="mod-item"><span>🎙️ VOICE ENGINE</span><span class="mod-dot on"></span></div>
-            <div class="mod-item"><span>👁️ VISION ENGINE</span><span class="mod-dot standby"></span></div>
-            <div class="mod-item"><span>🧠 MEMORY ENGINE</span><span class="mod-dot on"></span></div>
-            <div class="mod-item"><span>⚙️ AUTOMATION</span><span class="mod-val">3 Active</span></div>
-            <div class="mod-item"><span>🔔 NOTIFICATIONS</span><span class="mod-val">Listening</span></div>
-            <div class="mod-item"><span>🌐 AI ROUTER</span><span class="mod-dot on"></span></div>
+            <div class="mod-item"><span>VOICE ENGINE</span><span class="mod-dot standby"></span></div>
+            <div class="mod-item"><span>VISION ENGINE</span><span class="mod-dot standby"></span></div>
+            <div class="mod-item"><span>MEMORY ENGINE</span><span class="mod-dot standby"></span></div>
+            <div class="mod-item"><span>AUTOMATION</span><span class="mod-val">—</span></div>
+            <div class="mod-item"><span>NOTIFICATIONS</span><span class="mod-val">—</span></div>
+            <div class="mod-item"><span>AI ROUTER</span><span class="mod-dot standby"></span></div>
           </div>
         </div>
 
@@ -270,19 +273,11 @@
           <div class="module-header">TODAY'S AGENDA</div>
           <div class="agenda-list">
             <div class="agenda-item">
-              <span class="time">21:00</span>
-              <div class="details"><span>—</span><span>—</span></div>
-            </div>
-            <div class="agenda-item">
-              <span class="time">22:30</span>
-              <div class="details"><span>—</span><span>—</span></div>
-            </div>
-            <div class="agenda-item">
-              <span class="time">23:00</span>
-              <div class="details"><span>—</span><span>—</span></div>
+              <span class="time">—</span>
+              <div class="details"><span>Loading your agenda</span><span>LOCAL DATA</span></div>
             </div>
           </div>
-          <button class="view-calendar-btn">VIEW CALENDAR</button>
+
         </div>
       </div>
 
@@ -294,7 +289,7 @@
             <span class="icon">💡</span>
             <p>—</p>
           </div>
-          <button class="suggestion-btn">VIEW DETAILS</button>
+
         </div>
 
         <div class="hud-module module-alarm">
@@ -303,7 +298,7 @@
             <div class="alarm-time">—</div>
             <div class="alarm-days">—</div>
           </div>
-          <button class="alarm-dismiss">DISMISS</button>
+
         </div>
 
         <div class="hud-module module-wake">
@@ -313,7 +308,7 @@
             <div class="wake-text">HEY FRIDAY</div>
             <div class="wake-sub">Tap to change wake word</div>
           </div>
-          <button class="wake-change">CHANGE</button>
+
         </div>
       </div>
     </div>
@@ -445,9 +440,9 @@
           <h3>🧠 Brain</h3>
           <div class="brain-status" id="brainStatus">
             <div class="bs-row"><span class="bs-dot ok"></span><div><strong>Offline Engine</strong><div class="dim"><span id="intentCount">0</span> commands · always on · no key needed</div></div></div>
-            <div class="bs-row"><span class="bs-dot" id="cloudDot"></span><div><strong>Cloud Brain (optional)</strong><div class="dim">Server-side Groq; Blackbox fallback only when explicitly enabled</div></div></div>
+            <div class="bs-row"><span class="bs-dot" id="cloudDot"></span><div><strong>Cloud Brain (optional)</strong><div class="dim">Your Groq primary/standby keys, or the existing server route</div></div></div>
           </div>
-          <p class="hint"><b>API keys are server-side only.</b> Configure the backend environment; secrets are never stored in this WebView or APK.</p>
+          <p class="hint">Groq keys are added by you at runtime below. They are never embedded or prefilled in the source or APK.</p>
           <div class="setting-item">
             <label>Personality</label>
             <select id="aiPersonality">
@@ -476,8 +471,26 @@
           </div>
           <p class="hint">Wake word remains optional. If no engine is bundled, use tap-to-speak or type; FRIDAY will not download a voice model.</p>
         </div>
+        <div class="settings-group groq-key-settings" id="groqKeySettings">
+          <h3>⚡ Groq Keys</h3>
+          <p class="hint">Add fresh keys from your phone. The first key is primary; the second is used automatically only when the primary is rejected, rate-limited, unreachable, or temporarily unavailable.</p>
+          <div class="groq-key-field">
+            <label for="groqPrimaryKey">Primary key</label>
+            <input type="password" id="groqPrimaryKey" placeholder="gsk_… primary key" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="512">
+          </div>
+          <div class="groq-key-field">
+            <label for="groqStandbyKey">Standby key</label>
+            <input type="password" id="groqStandbyKey" placeholder="gsk_… standby key" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="512">
+          </div>
+          <div class="groq-key-actions">
+            <button type="button" class="btn-primary" id="saveGroqKeys">Save keys</button>
+            <button type="button" class="btn-secondary" id="clearGroqKeys">Clear both</button>
+          </div>
+          <p class="hint groq-key-status" id="groqKeysStatus" aria-live="polite">Checking secure key slots…</p>
+          <p class="hint"><b>Stored encrypted with Android Keystore.</b> Saved values are never shown again or included in FRIDAY data exports. When cloud AI runs, the active key is sent directly to Groq over HTTPS.</p>
+        </div>
         <div class="settings-group">
-          <h3>☁️ FRIDAY Cloud (backend — recommended)</h3>
+          <h3>☁️ FRIDAY Cloud (existing backend route)</h3>
           <p class="hint"><b>One URL and everything works — no model downloads, no API key in the app.</b> The server does conversation, speech, memory &amp; code. Host it yourself (see FRIDAY-BACKEND.md) or use a free host like Railway.</p>
           <div class="setting-item">
             <label>Server URL</label>
@@ -1087,7 +1100,8 @@
   import { initHUDV20 } from './js/hud_v20.js';
   window.initHUDV20 = initHUDV20;
 </script>
-<!-- FRIDAY OS unified HUD redesign — additive, non-destructive (see js/hud-shell.js) -->
+<!-- FRIDAY OS portrait HUD interactions and live service rail -->
 <script src="js/hud-shell.js"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
 </body>
 </html>
