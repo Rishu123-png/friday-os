@@ -445,12 +445,26 @@ async function init() {
   state.booted = true;
   window.__stage = 'init';
   if (!$('#app') || !$('#bootScreen')) throw new Error('Mandatory application shell is missing');
+  /* Runtime Groq credentials are decrypted from Android Keystore into memory.
+     No key value is ever written to localStorage or bundled source. This is
+     optional boot work: a slow plugin must never hold the offline HUD hostage. */
+  const groqBoot = await settleOptional('GROQ', () => AI.refreshGroqKeys(), {
+    timeoutMs: 1200, diagnostics: BOOT,
+    readyDetail: 'secure key slots checked',
+    timeoutState: BOOT_STATE.LIMITED,
+    timeoutDetail: 'secure key check slow; continuing offline',
+    failureState: BOOT_STATE.LIMITED
+  });
+  const directGroq = groqBoot.ok && AI.hasDirectGroq();
   BOOT.set('FRIDAY CORE', BOOT_STATE.READY, intentCount() + ' offline skills');
   BOOT.set('HUD', BOOT_STATE.PENDING, 'initializing');
   BOOT.set('MEMORY', BOOT_STATE.READY, 'local storage available');
   BOOT.set('ANDROID BRIDGE', NAT.isNative() ? BOOT_STATE.READY : BOOT_STATE.UNAVAILABLE, NAT.isNative() ? 'Capacitor native' : 'web preview');
   BOOT.set('LOCAL AI', (S.getSetting('llmModelPath') || '').trim() ? BOOT_STATE.READY : BOOT_STATE.NOT_INSTALLED, (S.getSetting('llmModelPath') || '').trim() ? 'configured' : 'Optional model unavailable.');
-  BOOT.set('GROQ', SERVER.isConfigured() ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED, SERVER.isConfigured() ? 'server configured; health not yet verified' : 'backend not configured');
+  BOOT.set('GROQ', !groqBoot.ok ? BOOT_STATE.LIMITED : directGroq || SERVER.isConfigured() ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED,
+    !groqBoot.ok ? (groqBoot.timedOut ? 'secure key check slow; offline ready' : 'secure key store unavailable; offline ready')
+      : directGroq ? 'runtime key configured; validated on first request'
+      : SERVER.isConfigured() ? 'server configured; health not yet verified' : 'not configured');
   BOOT.set('BLACKBOX', BOOT_STATE.DISABLED, 'server-controlled optional fallback');
 
   U.applyTheme(S.getSetting('uiTheme') || 'stark');
@@ -677,7 +691,32 @@ function updateBrainBadge() {
   const on = AI.hasGroq() || SERVER.isConfigured();
   el.innerHTML = `<span class="dot ${on ? 'cloud' : ''}"></span> ${on ? 'Cloud' : 'Offline'}`;
   const sp = $('#sysProvider');
-  if (sp) sp.textContent = SERVER.isConfigured() ? 'FRIDAY Cloud' : on ? 'Groq' : 'Local';
+  if (sp) sp.textContent = AI.hasDirectGroq() ? 'Groq · secure' : SERVER.isConfigured() ? 'FRIDAY Cloud' : 'Local';
+}
+
+async function refreshGroqSettingsUI(reload = true) {
+  const chip = $('#groqKeysStatus');
+  if (chip) chip.textContent = 'Checking secure key slots…';
+  let status;
+  try { status = reload ? await AI.refreshGroqKeys() : AI.groqKeyStatus(); }
+  catch (_) { status = AI.groqKeyStatus(); }
+  const primary = !!status.primary, standby = !!status.standby;
+  const unavailable = status.reason === 'secure_store_unavailable';
+  const p = $('#groqPrimaryKey'), s = $('#groqStandbyKey');
+  if (p) { p.value = ''; p.placeholder = primary ? 'Saved securely · enter only to replace' : 'gsk_… primary key'; }
+  if (s) { s.value = ''; s.placeholder = standby ? 'Saved securely · enter only to replace' : 'gsk_… standby key'; }
+  if (chip) {
+    chip.classList.toggle('ready', primary && !unavailable);
+    chip.classList.toggle('warn', unavailable || (primary && !standby));
+    chip.textContent = !NAT.isNative()
+      ? 'Secure key entry is available in the installed Android app.'
+      : unavailable ? 'Android secure storage is not responding · try again shortly'
+      : primary && standby ? 'Primary ready · standby ready'
+      : primary ? 'Primary ready · standby not set'
+      : 'No Groq keys saved';
+  }
+  updateBrainBadge();
+  return { primary, standby };
 }
 
 /* ---------- v10.1 FRIDAY Cloud helpers ---------- */
@@ -1211,13 +1250,12 @@ async function handleInput(text, opts = {}) {
      action, the verification layer checks real device state before
      claiming success.
 
-     vFIX: in FRIDAY Cloud mode the backend already runs its own bounded
-     tool loop (server-side tools + memory). The on-device orchestrator's
-     client-side tool call (callGroqTools) is a stub, so running it for
-     plain chat made FRIDAY reply "I'm not sure I understand" instead of
-     reaching the LLM. For non-action conversation, stream straight from
-     the server. Device-action phrasing still goes through the orchestrator
-     so reminders/calls/etc. execute on-device. */
+     vFIX: the existing FRIDAY Cloud backend already runs its own bounded
+     tool loop (server-side tools + memory), while direct runtime Groq keys
+     use the on-device tool dispatcher. Non-action conversation falls through
+     to askGroq(), which selects direct Groq first and the server route when no
+     runtime key is available. Device-action phrasing still uses the local
+     orchestrator so reminders/calls/etc. execute on-device. */
   const wantsAgent = ACTIONISH.test(text);
   if (!hit && (AI.hasGroq() || SERVER.isConfigured()) &&
       !(SERVER.isConfigured() && S.getSetting('serverMode') !== false && !wantsAgent)) {
@@ -1468,7 +1506,16 @@ async function buildDailyBrief() {
 
 async function runAction(a, hit) {
   switch (a.type) {
-    case 'open_panel': U.openPanel(a.panel); if (a.prefill) prefillPanel(a.panel, a.prefill); return true;
+    case 'open_panel': {
+      U.openPanel(a.panel);
+      if (a.prefill) prefillPanel(a.panel, a.prefill);
+      if (a.panel === 'settings') {
+        renderCaps();
+        renderCoder();
+        refreshGroqSettingsUI();
+      }
+      return true;
+    }
     case 'stop_speech': V.cancelSpeech(); state.speaking = false; setStatus('Tap to speak'); return true;
     case 'clear_chat': state.messages = []; $('#chatMessages').innerHTML = ''; S.saveList(KEYS.CHAT, []); return true;
     case 'theme': S.setSetting('uiTheme', a.theme); U.applyTheme(a.theme); syncSettingsUI(); return true;
@@ -4528,9 +4575,10 @@ async function askGroq(text) {
     const done = await askLocalFirst(text);
     if (done) return;
   }
-  /* v10.1 FRIDAY Cloud: server brain first — no key in the app,
-     server runs its own tools + memory and streams the answer. */
-  if (SERVER.isConfigured() && S.getSetting('serverMode') !== false) return streamServerChat(text);
+  /* A runtime Groq primary/standby pair takes precedence when the owner has
+     configured it. Otherwise preserve the existing FRIDAY Cloud route. */
+  if (!AI.hasDirectGroq() && SERVER.isConfigured() && S.getSetting('serverMode') !== false)
+    return streamServerChat(text);
   thinking(true);
   const history = state.messages.slice(-10).map(m => ({
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -4628,9 +4676,9 @@ function errMsg(e) {
   if (m.includes('SERVER_RATE_LIMIT')) return 'FRIDAY Cloud is rate-limited. Wait a moment and try again.';
   if (m.includes('SERVER_HTTP')) return 'FRIDAY Cloud answered with an error — check the server URL and that it is running.';
   if (m.includes('SERVER_')) return 'FRIDAY Cloud error: ' + m.slice(0, 140);
-  if (m.includes('BAD_KEY')) return 'The server-side Groq key was rejected. Rotate GROQ_API_KEY in backend/.env.';
-  if (m.includes('RATE_LIMIT')) return 'Groq rate limit hit. Wait a moment, or switch to offline mode.';
-  if (m.includes('NO_KEY')) return 'No key set. Running offline.';
+  if (m.includes('BAD_KEY')) return 'Groq rejected the available key. Open app settings and replace it, Boss.';
+  if (m.includes('RATE_LIMIT')) return 'Groq is rate-limited. I tried the standby key when available; wait a moment or use offline mode.';
+  if (m.includes('NO_KEY')) return 'No Groq key is set. Open app settings to add one; offline mode still works.';
   return 'Connection failed. Offline engine still works — try a command.';
 }
 
@@ -6020,7 +6068,7 @@ function bindEvents() {
     else {
       U.openPanel(p);
       if (p === 'activity') refresh('activity');
-      if (p === 'settings') { renderCaps(); renderCoder(); }
+      if (p === 'settings') { renderCaps(); renderCoder(); refreshGroqSettingsUI(); }
       $$('.nav-btn').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
     }
@@ -6118,8 +6166,9 @@ function bindEvents() {
       search: () => U.openPanel('sub-search'),
       reminder: () => { U.closeAllPanels(); U.openPanel('activity'); refresh('activity'); },
       translate: () => U.openPanel('sub-translate'),
-      /* v20 HUD quick commands (cmd-btn) */
+      /* HUD quick commands (cmd-btn) */
       voice: () => { if (!state.listening && !state.speaking) V.listen(); },
+      chat: () => { U.closeAllPanels(); U.showView('chat'); $('#textInput')?.focus({ preventScroll: true }); },
       vision: () => openCamera('photo'),
       memory: () => { U.openPanel('activity'); refresh('activity'); },
       automation: () => { U.openPanel('activity'); refresh('activity'); },
@@ -6131,13 +6180,15 @@ function bindEvents() {
     (acts[a] || (() => {}))();
   }));
 
-  /* v20 HUD: .cmd-btn quick commands share the same action map */
+  /* HUD quick commands share the same real app handlers. */
   $$('.cmd-btn').forEach(b => b.addEventListener('click', () => {
     D.tap();
     const a = b.dataset.action;
     const acts = {
       voice: () => { if (!state.listening && !state.speaking) V.listen(); },
+      chat: () => { U.closeAllPanels(); U.showView('chat'); $('#textInput')?.focus({ preventScroll: true }); },
       vision: () => openCamera('photo'),
+      reminder: () => { U.openPanel('activity'); refresh('reminders'); },
       memory: () => { U.openPanel('activity'); refresh('activity'); },
       automation: () => { U.openPanel('activity'); refresh('activity'); },
       notes: () => { U.openPanel('activity'); refresh('notes'); },
@@ -6386,6 +6437,56 @@ function bindEvents() {
   bind('#neuralVoice', 'neuralVoice', 'change', 'checked');
   bind('#offlineEars', 'offlineEars', 'change', 'checked');
   bind('#embedModelPath', 'embedModelPath', 'input');
+
+  /* Runtime Groq keys: values go only to Android Keystore, never Store. */
+  $('#saveGroqKeys')?.addEventListener('click', async () => {
+    const button = $('#saveGroqKeys');
+    const p = $('#groqPrimaryKey')?.value || '';
+    const s = $('#groqStandbyKey')?.value || '';
+    if (button) button.disabled = true;
+    const chip = $('#groqKeysStatus');
+    if (chip) chip.textContent = 'Saving to Android Keystore…';
+    try {
+      const r = await AI.saveGroqKeys(p, s);
+      if (!r.ok) {
+        const msg = {
+          apk_only: 'Open this setting in the installed Android app.',
+          empty: 'Enter a primary or standby key first.',
+          invalid_format: 'That does not look like a complete Groq gsk_ key.',
+          same_key: 'Primary and standby must be different keys.',
+          primary_required: 'Add the primary key first.',
+          secure_store_failed: 'Android secure storage could not save the key.'
+        }[r.reason] || 'Could not save the keys.';
+        U.toast(msg, '⚠️', 3600);
+      } else {
+        S.setSetting('cloudConsent', true);
+        S.setSetting('cloudConsentSet', true);
+        const consent = $('#cloudConsent'); if (consent) consent.checked = true;
+        await refreshGroqSettingsUI(false);
+        BOOT.set('GROQ', BOOT_STATE.LIMITED, 'runtime keys configured; validated on first request');
+        U.toast(r.standby ? 'Groq primary + standby saved securely' : 'Groq primary saved securely', '🔐', 2600);
+      }
+    } finally {
+      if (button) button.disabled = false;
+      await refreshGroqSettingsUI(false);
+    }
+  });
+  $('#clearGroqKeys')?.addEventListener('click', async () => {
+    const button = $('#clearGroqKeys');
+    if (button) button.disabled = true;
+    const r = await AI.clearGroqKeys();
+    if (button) button.disabled = false;
+    if (r.ok) {
+      await refreshGroqSettingsUI(false);
+      BOOT.set('GROQ', SERVER.isConfigured() ? BOOT_STATE.LIMITED : BOOT_STATE.DISABLED,
+        SERVER.isConfigured() ? 'server configured; health not yet verified' : 'not configured');
+      U.toast('Groq keys cleared from secure storage', '🗑️', 2400);
+    } else {
+      U.toast(r.reason === 'apk_only' ? 'Use the installed Android app.' : 'Could not clear secure storage.', '⚠️');
+    }
+  });
+  refreshGroqSettingsUI(false);
+
   /* v10.1 FRIDAY Cloud (backend server mode) */
   bind('#serverUrl', 'serverUrl', 'input');
   bind('#serverToken', 'serverToken', 'input');

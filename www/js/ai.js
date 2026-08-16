@@ -7,9 +7,10 @@
 
    NOTHING here is required for the app to run. No key = still works. */
 
-import { getSetting } from './store.js';
+import { getSetting, setSetting } from './store.js';
 import { pick } from './nlp.js';
 import * as SERVER from './server.js';
+import * as NAT from './native.js';
 
 export const GROQ_MODELS = [
   { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B — best all-round', ctx: '128k' },
@@ -75,17 +76,238 @@ COMPANION STYLE:
 - When it fits naturally, end with ONE short follow-up question and let them answer — a real conversation. Never stack multiple questions.`;
 }
 
-/* ---------- Groq (OPTIONAL — only used if a key exists) ---------- */
+/* ---------- Groq (OPTIONAL — runtime keys, Android Keystore) ---------- */
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_PRIMARY = 'groq_primary';
+const GROQ_STANDBY = 'groq_standby';
+let groqKeys = { loaded: false, primary: '', standby: '' };
+let groqLoad = null;
+
+function configuredFlags() {
+  return !!(getSetting('groqPrimaryConfigured') || getSetting('groqStandbyConfigured'));
+}
+
+/** Load decrypted credentials into memory only while the app is running. */
+export async function refreshGroqKeys() {
+  if (groqLoad) return groqLoad;
+  groqLoad = (async () => {
+    if (!NAT.isNative()) {
+      groqKeys = { loaded: true, primary: '', standby: '' };
+      return { primary: false, standby: false, secure: false, reason: 'apk_only' };
+    }
+    const [p, s] = await Promise.all([
+      NAT.getSecureSecret(GROQ_PRIMARY),
+      NAT.getSecureSecret(GROQ_STANDBY)
+    ]);
+    const settled = r => !!(r && (r.ok || r.reason === 'not_found'));
+    const pSettled = settled(p), sSettled = settled(s);
+    groqKeys = {
+      loaded: pSettled && sSettled,
+      primary: pSettled ? (p.ok ? String(p.value || '').trim() : '') : groqKeys.primary,
+      standby: sSettled ? (s.ok ? String(s.value || '').trim() : '') : groqKeys.standby
+    };
+    /* A timeout/unavailable Keystore must not erase the last truthful boolean
+       shown to the user. Only a completed slot read may update its flag. */
+    if (pSettled) setSetting('groqPrimaryConfigured', !!groqKeys.primary);
+    if (sSettled) setSetting('groqStandbyConfigured', !!groqKeys.standby);
+    return {
+      primary: groqKeys.loaded ? !!groqKeys.primary : !!getSetting('groqPrimaryConfigured'),
+      standby: groqKeys.loaded ? !!groqKeys.standby : !!getSetting('groqStandbyConfigured'),
+      secure: true,
+      ...(groqKeys.loaded ? {} : { reason: 'secure_store_unavailable' })
+    };
+  })();
+  try { return await groqLoad; }
+  finally { groqLoad = null; }
+}
+
+export function groqKeyStatus() {
+  return {
+    primary: groqKeys.loaded ? !!groqKeys.primary : !!getSetting('groqPrimaryConfigured'),
+    standby: groqKeys.loaded ? !!groqKeys.standby : !!getSetting('groqStandbyConfigured'),
+    secure: NAT.isNative()
+  };
+}
+
+export function hasDirectGroq() {
+  return groqKeys.loaded ? !!(groqKeys.primary || groqKeys.standby) : configuredFlags();
+}
+
 export function hasGroq() {
-  // API credentials are server-side only. This means "cloud AI route exists".
-  return SERVER.isConfigured() && getSetting('serverMode') !== false;
+  return hasDirectGroq() || (SERVER.isConfigured() && getSetting('serverMode') !== false);
 }
 
 export function hasServer() { return SERVER.isConfigured(); }
 
-export async function callGroq(messages, { onToken = null } = {}) {
-  if (!hasGroq()) throw new Error('CLOUD_NOT_CONFIGURED');
-  return SERVER.chat(messages, { onToken });
+function validGroqKey(key) {
+  const v = String(key || '').trim();
+  return !v || (v.startsWith('gsk_') && v.length >= 24 && v.length <= 512);
+}
+
+/** Save only non-empty replacements. Empty inputs leave an existing slot alone. */
+export async function saveGroqKeys(primary, standby) {
+  const p = String(primary || '').trim();
+  const s = String(standby || '').trim();
+  if (!NAT.isNative()) return { ok: false, reason: 'apk_only' };
+  if (!groqKeys.loaded) await refreshGroqKeys();
+  if (!p && !s) return { ok: false, reason: 'empty' };
+  if (!validGroqKey(p) || !validGroqKey(s)) return { ok: false, reason: 'invalid_format' };
+  const finalPrimary = p || groqKeys.primary;
+  const finalStandby = s || groqKeys.standby;
+  if (finalPrimary && finalStandby && finalPrimary === finalStandby)
+    return { ok: false, reason: 'same_key' };
+  if (!finalPrimary) return { ok: false, reason: 'primary_required' };
+
+  const results = [];
+  if (p) results.push(await NAT.setSecureSecret(GROQ_PRIMARY, p));
+  if (s) results.push(await NAT.setSecureSecret(GROQ_STANDBY, s));
+  if (results.some(r => !r || !r.ok)) {
+    await refreshGroqKeys();
+    return { ok: false, reason: 'secure_store_failed' };
+  }
+  await refreshGroqKeys();
+  return { ok: true, ...groqKeyStatus() };
+}
+
+export async function clearGroqKeys() {
+  if (!NAT.isNative()) return { ok: false, reason: 'apk_only' };
+  const [p, s] = await Promise.all([
+    NAT.deleteSecureSecret(GROQ_PRIMARY),
+    NAT.deleteSecureSecret(GROQ_STANDBY)
+  ]);
+  if (!(p && p.ok && s && s.ok)) {
+    /* One slot may already have been removed. Re-read both so memory never
+       keeps using a credential that Android successfully deleted. */
+    await refreshGroqKeys();
+    return { ok: false, reason: 'secure_store_failed', ...groqKeyStatus() };
+  }
+  groqKeys = { loaded: true, primary: '', standby: '' };
+  setSetting('groqPrimaryConfigured', false);
+  setSetting('groqStandbyConfigured', false);
+  return { ok: true, primary: false, standby: false, secure: true };
+}
+
+async function availableGroqKeys() {
+  if (!groqKeys.loaded) await refreshGroqKeys();
+  return [
+    groqKeys.primary ? { slot: 'primary', value: groqKeys.primary } : null,
+    groqKeys.standby ? { slot: 'standby', value: groqKeys.standby } : null
+  ].filter(Boolean);
+}
+
+function groqError(status, slot, detail = '') {
+  if (status === 401 || status === 403) return new Error(`BAD_KEY_${slot.toUpperCase()}`);
+  if (status === 429) return new Error(`RATE_LIMIT_${slot.toUpperCase()}`);
+  return new Error(`GROQ_${status}_${slot.toUpperCase()} ${detail.slice(0, 120)}`);
+}
+
+function mayUseStandby(error) {
+  const m = String(error && error.message || error);
+  return /BAD_KEY_|RATE_LIMIT_|GROQ_(408|409|425|5\d\d)_|NETWORK_/.test(m);
+}
+
+async function groqFetch(body, key, slot, signal) {
+  let res;
+  try {
+    res = await fetch(GROQ_URL, {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify(body)
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
+    throw new Error(`NETWORK_${slot.toUpperCase()}`);
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw groqError(res.status, slot, txt);
+  }
+  return res;
+}
+
+function boundedAttemptSignal(parent, timeoutMs = 30000) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromParent = () => controller.abort();
+  if (parent && parent.aborted) controller.abort();
+  else if (parent) parent.addEventListener('abort', abortFromParent, { once: true });
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    close() {
+      clearTimeout(timer);
+      if (parent) parent.removeEventListener('abort', abortFromParent);
+    }
+  };
+}
+
+async function withGroqFailover(body, consume, signal, suppliedKeys = null) {
+  const keys = suppliedKeys || await availableGroqKeys();
+  if (!keys.length) throw new Error('NO_KEY');
+  let last = null;
+  for (let i = 0; i < keys.length; i++) {
+    const current = keys[i];
+    const attempt = boundedAttemptSignal(signal);
+    try {
+      const res = await groqFetch(body, current.value, current.slot, attempt.signal);
+      return await consume(res, current.slot);
+    } catch (e) {
+      if (signal && signal.aborted) throw e;
+      last = attempt.timedOut() ? new Error(`NETWORK_${current.slot.toUpperCase()}`) : e;
+      const hasStandby = i + 1 < keys.length;
+      if (!hasStandby || !mayUseStandby(last)) throw last;
+      console.warn('[groq] primary route failed; switching to standby');
+    } finally {
+      attempt.close();
+    }
+  }
+  throw last || new Error('NO_KEY');
+}
+
+export async function callGroq(messages, {
+  stream = false, onToken = null, maxTokens = 1024,
+  temperature = 0.7, model = null, signal = undefined
+} = {}) {
+  /* Resolve real in-memory slots before choosing a route. This prevents a
+     stale non-secret configured flag from blocking the existing server route
+     when Android Keystore is temporarily unavailable. */
+  const keys = await availableGroqKeys();
+  if (!keys.length && SERVER.isConfigured() && getSetting('serverMode') !== false)
+    return SERVER.chat(messages, { onToken, signal });
+
+  const body = {
+    model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
+    messages, max_tokens: maxTokens, temperature, stream: !!stream
+  };
+  return withGroqFailover(body, async res => {
+    if (!stream) {
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim() || '';
+    }
+    if (!res.body || typeof res.body.getReader !== 'function') throw new Error('GROQ_STREAM_UNAVAILABLE');
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let full = '', buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const payload = s.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const tok = JSON.parse(payload).choices?.[0]?.delta?.content;
+          if (tok) { full += tok; if (onToken) onToken(tok, full); }
+        } catch (_) { /* ignore malformed provider event */ }
+      }
+    }
+    return full.trim();
+  }, signal, keys);
 }
 
 
@@ -138,14 +360,40 @@ export const TOOLS = [
 ];
 
 /** First-pass, non-streaming call that may return tool_calls. */
-export async function callGroqTools() {
-  if (!hasGroq()) throw new Error('CLOUD_NOT_CONFIGURED');
-  // The trusted backend owns provider selection and the bounded tool loop.
-  return { content: '' };
+export async function callGroqTools(messages, { model = null, signal = undefined } = {}) {
+  /* The existing backend owns its own tool loop. Runtime Groq keys use the
+     on-device action dispatcher, preserving confirmation + verification. */
+  const keys = await availableGroqKeys();
+  if (!keys.length && SERVER.isConfigured() && getSetting('serverMode') !== false)
+    return { content: '' };
+
+  const body = {
+    model: model || getSetting('groqModel') || 'llama-3.3-70b-versatile',
+    messages, tools: TOOLS, tool_choice: 'auto',
+    max_tokens: 600, temperature: 0.3, stream: false
+  };
+  return withGroqFailover(body, async res => {
+    const data = await res.json();
+    return data.choices?.[0]?.message || null;
+  }, signal, keys);
 }
 
-export async function testGroqKey() {
-  return { ok: false, msg: 'Client-side API keys are disabled. Configure GROQ_API_KEY on the backend.' };
+export async function testGroqKey(key) {
+  const value = String(key || '').trim();
+  if (!validGroqKey(value)) return { ok: false, msg: 'Key format is not valid.' };
+  try {
+    const body = {
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+      max_tokens: 5, temperature: 0, stream: false
+    };
+    const res = await groqFetch(body, value, 'test');
+    await res.json();
+    return { ok: true, msg: 'Key works.' };
+  } catch (e) {
+    const m = String(e && e.message || e);
+    return { ok: false, msg: m.includes('BAD_KEY') ? 'Groq rejected this key.' : 'Could not verify the key.' };
+  }
 }
 
 

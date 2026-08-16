@@ -68,6 +68,31 @@ export async function hasSpecialPermission(kind) {
   return call('hasSpecialPermission', { kind });
 }
 
+/* ================= ENCRYPTED APP SECRETS =================
+   Runtime credentials are stored by FridayNative using Android Keystore.
+   Web previews deliberately do not persist secrets. A stuck plugin callback
+   must not trap the app on its boot screen or freeze the Settings controls. */
+async function secureCall(method, args) {
+  let timer;
+  try {
+    return await Promise.race([
+      call(method, args),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve({ ok: false, reason: 'secure_store_timeout' }), 1800);
+      })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+export async function setSecureSecret(name, value) {
+  return secureCall('setSecureSecret', { name, value });
+}
+export async function getSecureSecret(name) {
+  return secureCall('getSecureSecret', { name });
+}
+export async function deleteSecureSecret(name) {
+  return secureCall('deleteSecureSecret', { name });
+}
+
 /* ================= CONTACTS (Phase B) ================= */
 let contactCache = null;
 

@@ -40,7 +40,7 @@ export function fmtSpeed(kph) {
 
 export function fmtBytesMB(v) {
   if (v == null || isNaN(v)) return '—';
-  return (v / 1048576).toFixed(1) + ' GB';
+  return (v / 1048576).toFixed(1) + ' MB';
 }
 
 export function netQuality(rtt, downlink) {
@@ -66,33 +66,52 @@ const set = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
 
 let _running = false;
 let _graph = [];
+let _locationBusy = false;
+let _lastLocationAttempt = 0;
+let _networkBusy = false;
+let _lastNetworkAttempt = 0;
+let _weatherBusy = false;
+let _lastWeatherAttempt = 0;
+let _bluetoothBusy = false;
+let _lastBluetoothAttempt = 0;
+let _lastSuggestionAttempt = 0;
 const GRAPH_MAX = 60;
 
 /* ---- Location: real geolocation + reverse geocode ---- */
 async function updateLocation() {
+  const now = Date.now();
+  if (_locationBusy || now - _lastLocationAttempt < 30000) return;
+  _locationBusy = true;
+  _lastLocationAttempt = now;
   const elCity = $('#locCity'), elRegion = $('#locRegion'), elCoords = $('#locCoords'),
         elAcc = $('#locAcc'), elAlt = $('#locAlt'), elSpeed = $('#locSpeed');
-  if (!elCity) return;
+  if (!elCity) { _locationBusy = false; return; }
   try {
     const pos = await API.getPosition(7000);
     const lat = pos.lat, lon = pos.lon, acc = pos.acc;
     set('locCoords', `${fmtCoord(lat, 'lat')}, ${fmtCoord(lon, 'lon')}`);
     if (elAcc) elAcc.textContent = acc != null ? Math.round(acc) + ' m' : '—';
-    if (pos.coords) {
-      if (elAlt) elAlt.textContent = pos.coords.altitude != null ? Math.round(pos.coords.altitude) + ' m' : '—';
-      if (elSpeed) elSpeed.textContent = pos.coords.speed != null ? fmtSpeed(pos.coords.speed * 3.6) : '—';
-    }
+    if (elAlt) elAlt.textContent = pos.altitude != null ? Math.round(pos.altitude) + ' m' : 'NOT REPORTED';
+    if (elSpeed) elSpeed.textContent = pos.speed != null ? fmtSpeed(pos.speed * 3.6) : 'NOT REPORTED';
     try {
       const place = await API.reverseGeocode(lat, lon);
       const parts = String(place || '').split(',');
-      if (elCity) elCity.textContent = (parts[0] || '—').toUpperCase();
-      if (elRegion && parts[1]) elRegion.textContent = parts.slice(1).join(',').trim().toUpperCase();
-    } catch (_) { if (elCity) elCity.textContent = '—'; }
+      if (elCity) elCity.textContent = (parts[0] || 'GPS FIX').toUpperCase();
+      if (elRegion) elRegion.textContent = parts.length > 1 ? parts.slice(1).join(',').trim().toUpperCase() : 'LIVE DEVICE LOCATION';
+    } catch (_) {
+      if (elCity) elCity.textContent = 'GPS FIX';
+      if (elRegion) elRegion.textContent = 'PLACE NAME OFFLINE';
+    }
   } catch (e) {
-    const reason = (e && e.code === 1) ? 'PERMISSION REQUIRED' : 'UNAVAILABLE';
+    const reason = (e && e.code === 1) ? 'PERMISSION REQUIRED' : (!navigator.onLine ? 'OFFLINE' : 'UNAVAILABLE');
     if (elCity) elCity.textContent = reason;
+    if (elRegion) elRegion.textContent = 'LOCATION NOT REPORTED';
     if (elCoords) elCoords.textContent = '—';
-    if (elAcc) elAcc.textContent = '—'; if (elAlt) elAlt.textContent = '—'; if (elSpeed) elSpeed.textContent = '—';
+    if (elAcc) elAcc.textContent = '—';
+    if (elAlt) elAlt.textContent = '—';
+    if (elSpeed) elSpeed.textContent = '—';
+  } finally {
+    _locationBusy = false;
   }
 }
 
@@ -100,48 +119,105 @@ async function updateLocation() {
 async function updateCompass() {
   const val = $('#compassValue'), ptr = document.querySelector('.compass-pointer');
   try {
-    if (typeof DeviceOrientationEvent === 'undefined') throw new Error('unsupported');
+    if (typeof DeviceOrientationEvent === 'undefined') throw Object.assign(new Error('unsupported'), { code: 'unsupported' });
     if (DeviceOrientationEvent.requestPermission) {
       const p = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-      if (p !== 'granted') throw new Error('denied');
+      if (p !== 'granted') throw Object.assign(new Error('denied'), { code: 'denied' });
     }
     const deg = await new Promise(res => {
       let done = false;
-      const h = e => { if (!done && e.webkitCompassHeading != null) { done = true; window.removeEventListener('deviceorientation', h); res(e.webkitCompassHeading); } };
+      const cleanup = () => {
+        window.removeEventListener('deviceorientationabsolute', h);
+        window.removeEventListener('deviceorientation', h);
+      };
+      const h = e => {
+        if (done) return;
+        let heading = null;
+        if (Number.isFinite(e.webkitCompassHeading)) heading = e.webkitCompassHeading;
+        else if (e.absolute === true && Number.isFinite(e.alpha)) heading = (360 - e.alpha) % 360;
+        if (heading == null) return; // Never present a relative orientation as a compass bearing.
+        done = true;
+        cleanup();
+        res(heading);
+      };
+      window.addEventListener('deviceorientationabsolute', h);
       window.addEventListener('deviceorientation', h);
-      setTimeout(() => { if (!done) { done = true; window.removeEventListener('deviceorientation', h); res(null); } }, 1600);
+      setTimeout(() => { if (!done) { done = true; cleanup(); res(null); } }, 1600);
     });
-    if (deg == null) throw new Error('no reading');
+    if (deg == null) throw Object.assign(new Error('no reading'), { code: 'unavailable' });
     if (val) val.textContent = compassLabel(deg);
     if (ptr) ptr.style.transform = `rotate(${deg}deg)`;
     const bars = document.querySelectorAll('.signal-bars .bar');
     bars.forEach((b, i) => b.classList.toggle('on', i < 3));
     const sl = document.querySelector('.signal-label');
     if (sl) sl.textContent = 'LIVE';
-  } catch (_) {
-    if (val) val.textContent = 'PERMISSION REQUIRED';
+  } catch (e) {
+    if (val) val.textContent = e && e.code === 'denied' ? 'PERMISSION REQUIRED' : 'NOT EXPOSED';
     const sl = document.querySelector('.signal-label');
     if (sl) sl.textContent = 'NO SIGNAL';
     document.querySelectorAll('.signal-bars .bar').forEach(b => b.classList.remove('on'));
   }
 }
 
-/* ---- Network: navigator.connection + honest IP ---- */
-function updateNetwork() {
-  const c = typeof navigator !== 'undefined' && navigator.connection ? navigator.connection : null;
-  const online = typeof navigator !== 'undefined' ? navigator.onLine : false;
-  set('netSsid', online ? (c && c.type ? String(c.type).toUpperCase() : 'WIFI') : 'OFFLINE');
-  set('netSignal', c && typeof c.rtt === 'number' ? c.rtt + ' ms' : '—');
-  set('netIp', 'Unavailable (APK)');
-  set('netDown', c && typeof c.downlink === 'number' ? c.downlink.toFixed(1) + ' Mbps' : '—');
-  set('netUp', '—');
-  set('netPing', c && typeof c.rtt === 'number' ? c.rtt + ' ms' : '—');
+/* ---- Network: native Wi-Fi audit when available; browser facts otherwise. ---- */
+async function updateNetwork() {
+  const now = Date.now();
+  if (_networkBusy || now - _lastNetworkAttempt < 15000) return;
+  _networkBusy = true;
+  _lastNetworkAttempt = now;
+  try {
+    const c = typeof navigator !== 'undefined' && navigator.connection ? navigator.connection : null;
+    const online = typeof navigator !== 'undefined' ? navigator.onLine : false;
+    set('netStatus', online ? 'CONNECTED' : 'OFFLINE');
+    set('netDown', c && typeof c.downlink === 'number' ? c.downlink.toFixed(1) + ' Mbps' : '—');
+    set('netUp', 'NOT EXPOSED');
+    set('netPing', c && typeof c.rtt === 'number' ? c.rtt + ' ms' : '—');
+
+    if (!online) {
+      set('netSsid', 'NO ACTIVE LINK');
+      set('netSignal', '—');
+      set('netIp', '—');
+      return;
+    }
+
+    if (NAT.isNative()) {
+      const [audit, system] = await Promise.all([
+        NAT.wifiAudit().catch(() => null),
+        NAT.getSystemState().catch(() => null)
+      ]);
+      if (audit && audit.ok) {
+        set('netSsid', audit.ssid ? String(audit.ssid).toUpperCase() : 'WI-FI CONNECTED');
+        const rssi = Number.isFinite(Number(audit.rssi)) ? Number(audit.rssi) : null;
+        const quality = rssi == null ? '—' : rssi >= -50 ? 'EXCELLENT' : rssi >= -60 ? 'GOOD' : rssi >= -70 ? 'FAIR' : 'WEAK';
+        set('netSignal', rssi == null ? '—' : `${quality} · ${Math.round(rssi)} dBm`);
+        set('netIp', audit.ip || 'NOT EXPOSED');
+      } else {
+        const wifiOn = system && system.ok && typeof system.wifi === 'boolean' ? system.wifi : null;
+        set('netSsid', wifiOn === true ? 'WI-FI ON · DETAILS LIMITED' : wifiOn === false ? 'MOBILE / OTHER LINK' : 'ACTIVE LINK');
+        set('netSignal', c && (c.rtt != null || c.downlink != null) ? netQuality(c.rtt, c.downlink).toUpperCase() : 'NOT EXPOSED');
+        set('netIp', 'NOT EXPOSED');
+      }
+      return;
+    }
+
+    const browserLink = c && (c.type || c.effectiveType) ? String(c.type || c.effectiveType).toUpperCase() : 'BROWSER LINK';
+    set('netSsid', browserLink);
+    set('netSignal', c && (c.rtt != null || c.downlink != null) ? netQuality(c.rtt, c.downlink).toUpperCase() : 'NOT EXPOSED');
+    set('netIp', 'NOT EXPOSED BY BROWSER');
+  } finally {
+    _networkBusy = false;
+  }
 }
 
-/* ---- Weather: open-meteo, keyless ---- */
+/* ---- Weather: Open-Meteo for the device's real location only. ---- */
 async function updateWeather() {
+  const now = Date.now();
+  if (_weatherBusy || now - _lastWeatherAttempt < 60000) return;
+  _weatherBusy = true;
+  _lastWeatherAttempt = now;
   const desc = document.querySelector('.weather-desc');
   const temp = document.querySelector('.weather-main .temp');
+  const icon = document.querySelector('.weather-main .weather-icon');
   const stats = document.querySelectorAll('.weather-stats .stat span:last-child');
   const forecast = document.querySelectorAll('.weather-forecast .f-day');
   try {
@@ -149,61 +225,100 @@ async function updateWeather() {
     const w = await API.getWeather(loc.lat, loc.lon);
     const c = w.current || {};
     const [d, emo] = API.describeWMO(c.weather_code);
-    if (temp) temp.textContent = (c.temperature_2m != null ? Math.round(c.temperature_2m) + '°C' : '—');
-    if (desc) desc.textContent = (d || '—').toUpperCase();
-    const icon = document.querySelector('.weather-main .weather-icon');
-    if (icon) icon.textContent = emo || '🌡️';
+    if (temp) temp.textContent = c.temperature_2m != null ? Math.round(c.temperature_2m) + '°C' : '—';
+    if (desc) {
+      const cacheNote = `${w._stale ? ' · CACHED WEATHER' : ''}${loc._stale ? ' · CACHED LOCATION' : ''}`;
+      desc.textContent = `${(d || 'UNAVAILABLE').toUpperCase()}${cacheNote}`;
+    }
+    if (icon) icon.textContent = emo || '';
     if (stats[0]) stats[0].textContent = c.relative_humidity_2m != null ? Math.round(c.relative_humidity_2m) + '%' : '—';
     if (stats[1]) stats[1].textContent = c.wind_speed_10m != null ? Math.round(c.wind_speed_10m) + ' km/h' : '—';
-    if (stats[2]) stats[2].textContent = c.uv_index != null ? Math.round(c.uv_index) + ' UV' : '—';
+    const uvMax = w.daily && Array.isArray(w.daily.uv_index_max) ? w.daily.uv_index_max[0] : null;
+    if (stats[2]) stats[2].textContent = Number.isFinite(uvMax) ? uvMax.toFixed(1) : 'NOT PROVIDED';
     if (w.daily && forecast.length) {
       const days = w.daily.time || [];
+      const mins = w.daily.temperature_2m_min || [];
+      const maxes = w.daily.temperature_2m_max || [];
+      const codes = w.daily.weather_code || [];
       forecast.forEach((f, i) => {
-        if (i >= days.length) return;
-        const [dd] = API.describeWMO((w.daily.weather_code || [])[i] || 0);
         const lbl = f.querySelector('span:first-child');
         const val = f.querySelector('span:last-child');
+        if (!days[i]) { if (lbl) lbl.textContent = '—'; if (val) val.textContent = '—'; return; }
+        const [dd] = API.describeWMO(codes[i]);
         if (lbl) lbl.textContent = new Date(days[i]).toLocaleDateString([], { weekday: 'short' }).toUpperCase();
-        if (val) val.textContent = `${Math.round((w.daily.temperature_2m_min || [])[i] || 0)}°/${Math.round((w.daily.temperature_2m_max || [])[i] || 0)}° ${dd ? dd[0] : ''}`;
+        if (val) val.textContent = Number.isFinite(mins[i]) && Number.isFinite(maxes[i])
+          ? `${Math.round(mins[i])}°/${Math.round(maxes[i])}°${dd ? ' ' + dd : ''}` : '—';
       });
     }
-  } catch (_) {
+  } catch (e) {
+    const reason = e && e.code === 1 ? 'PERMISSION REQUIRED' : (typeof navigator !== 'undefined' && !navigator.onLine ? 'OFFLINE' : 'UNAVAILABLE');
     if (temp) temp.textContent = '—';
-    if (desc) desc.textContent = 'UNAVAILABLE';
-    if (icon) icon.textContent = '🌡️';
+    if (desc) desc.textContent = reason;
+    if (icon) icon.textContent = '';
+    stats.forEach(el => { el.textContent = '—'; });
+    forecast.forEach(f => f.querySelectorAll('span').forEach(el => { el.textContent = '—'; }));
+  } finally {
+    _weatherBusy = false;
   }
 }
 
-/* ---- Bluetooth: honest (no native device list in web) ---- */
-function updateBluetooth() {
+/* ---- Bluetooth: native radio state; no fabricated device names/counts. ---- */
+async function updateBluetooth() {
+  const now = Date.now();
+  if (_bluetoothBusy || now - _lastBluetoothAttempt < 15000) return;
+  _bluetoothBusy = true;
+  _lastBluetoothAttempt = now;
   const status = document.querySelector('.bt-status');
   const count = document.querySelector('.bt-count');
   const list = document.querySelector('.bt-list');
-  if (status) status.textContent = NAT.isNative() ? 'SCAN (needs permission)' : 'UNAVAILABLE (WEB)';
-  if (count) count.textContent = NAT.isNative() ? 'Permission required' : '—';
-  if (list) list.innerHTML = '<div class="bt-device"><span class="bt-icon">🔵</span><div class="bt-info"><span>Bluetooth device list</span><span>Permission required (Android)</span></div></div>';
+  try {
+    if (!NAT.isNative()) {
+      if (status) status.textContent = 'WEB PREVIEW';
+      if (count) count.textContent = 'RADIO STATE NOT EXPOSED';
+      if (list) list.innerHTML = '<div class="bt-device"><div class="bt-info"><span>Browser limitation</span><span>Open the APK for the real radio state</span></div></div>';
+      return;
+    }
+    const system = await NAT.getSystemState().catch(() => null);
+    if (!system || !system.ok || typeof system.bluetooth !== 'boolean') {
+      if (status) status.textContent = 'UNAVAILABLE';
+      if (count) count.textContent = 'RADIO STATE NOT REPORTED';
+      if (list) list.innerHTML = '<div class="bt-device"><div class="bt-info"><span>Bluetooth state unavailable</span><span>No device information reported</span></div></div>';
+      return;
+    }
+    const on = system.bluetooth;
+    if (status) status.textContent = on ? 'ON' : 'OFF';
+    if (count) count.textContent = on ? 'RADIO ENABLED' : 'RADIO DISABLED';
+    if (list) list.innerHTML = `<div class="bt-device${on ? ' connected' : ''}"><div class="bt-info"><span>${on ? 'Bluetooth is enabled' : 'Bluetooth is disabled'}</span><span>Connected-device names are not exposed by this bridge</span></div></div>`;
+  } finally {
+    _bluetoothBusy = false;
+  }
 }
 
-/* ---- Telemetry: real CPU/RAM/storage/temp + live graph ---- */
+/* ---- Telemetry: measured runtime load/heap plus native storage/thermal. ---- */
 function updateTelemetry() {
-  const cpu = PERFX.cpuLoad();
   const heap = PERFX.heapStats();
   const snap = DEVX.snapshot();
   const storage = snap.storage;
   const thermal = snap.thermal;
   const circles = document.querySelectorAll('.tel-circle');
-  const val = (v, fallback) => (v != null && !isNaN(v)) ? Math.max(0, Math.min(100, Math.round(v))) : (fallback != null ? fallback : 0);
-  const cpuV = val(cpu), ramV = val(heap.usedPct), stoV = storage ? val((storage.usedPct != null ? storage.usedPct : (storage.totalGB ? ((storage.totalGB - storage.freeGB) / storage.totalGB) * 100 : null))) : 0;
-  if (circles[0]) { circles[0].style.setProperty('--p', cpuV); circles[0].querySelector('span').textContent = cpuV + '%'; }
-  if (circles[1]) { circles[1].style.setProperty('--p', ramV); circles[1].querySelector('span').textContent = ramV + '%'; }
-  if (circles[2]) { circles[2].style.setProperty('--p', stoV); circles[2].querySelector('span').textContent = stoV + '%'; }
+  const pct = v => (v != null && !isNaN(v)) ? Math.max(0, Math.min(100, Math.round(v))) : null;
+  const heapV = pct(heap.usedPct);
+  const storageV = storage ? pct(storage.usedPct != null ? storage.usedPct : (storage.totalGB ? ((storage.totalGB - storage.freeGB) / storage.totalGB) * 100 : null)) : null;
+  [[circles[1], heapV], [circles[2], storageV]].forEach(([circle, value]) => {
+    if (!circle) return;
+    circle.style.setProperty('--p', value == null ? 0 : value);
+    const label = circle.querySelector('span');
+    if (label) label.textContent = value == null ? '—' : value + '%';
+  });
   const details = document.querySelectorAll('.tel-details span');
-  if (details[0]) details[0].textContent = heap.usedMB != null ? `${(heap.usedMB / 1024).toFixed(1)} / ${(heap.totalMB / 1024).toFixed(1)} GB` : '—';
-  if (details[1]) details[1].textContent = storage ? `${storage.freeGB} GB free` : '—';
+  if (details[0]) details[0].textContent = heap.usedMB != null && heap.totalMB != null ? `${(heap.usedMB / 1024).toFixed(1)} / ${(heap.totalMB / 1024).toFixed(1)} GB JS heap` : 'JS heap not exposed';
+  if (details[1]) details[1].textContent = storage && storage.freeGB != null ? `${storage.freeGB} GB device storage free` : 'Device storage requires APK';
   const t = document.querySelector('.tel-temp span');
-  if (t) t.textContent = thermal && thermal.celsius != null ? Math.round(thermal.celsius) + '°C' : '—';
-  /* graph */
-  _graph.push(cpuV); if (_graph.length > GRAPH_MAX) _graph.shift();
+  if (t) t.textContent = thermal && thermal.celsius != null ? Math.round(thermal.celsius) + '°C' : 'NOT EXPOSED';
+  if (heapV != null) {
+    _graph.push(heapV); // Measured JS heap usage; never an invented CPU percentage.
+    if (_graph.length > GRAPH_MAX) _graph.shift();
+  }
   drawGraph();
 }
 
@@ -265,33 +380,59 @@ function updateAgenda() {
 
 /* ---- Suggestion + alarm + wake: real ---- */
 async function updateSuggestion() {
+  const now = Date.now();
+  if (now - _lastSuggestionAttempt < 60000) return;
+  _lastSuggestionAttempt = now;
   const p = document.querySelector('.suggestion-content p');
   if (!p) return;
   try {
     const loc = await API.resolveLocation();
     const wx = await API.getWeather(loc.lat, loc.lon).catch(() => null);
     const rain = wx && wx.daily && wx.daily.precipitation_probability_max ? wx.daily.precipitation_probability_max[0] : null;
-    if (rain != null && rain >= 50) { p.textContent = `It may rain in the next 24h (${rain}% chance) — umbrella rakho.`; return; }
+    if (!loc._stale && wx && !wx._stale && rain != null && rain >= 50) { p.textContent = `It may rain in the next 24h (${rain}% chance) — umbrella rakho.`; return; }
   } catch (_) {}
   const b = await DEV.battery().catch(() => null);
   if (b && typeof b.level === 'number' && b.level <= 20 && !b.charging) { p.textContent = `Battery is below 20% (${Math.round(b.level)}%) — charger lagao.`; return; }
   const next = (STORE.getList(STORE.KEYS.REMINDERS) || []).filter(r => !r.done && r.due > Date.now()).sort((a, b) => a.due - b.due)[0];
   if (next) { p.textContent = `Next up: ${next.text} at ${new Date(next.due).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`; return; }
-  p.textContent = 'All clear, Boss. Tap the core or mic to talk.';
+  p.textContent = 'Ready when you are, Boss. Tap the core or mic to talk.';
 }
 
 function updateAlarm() {
   const time = document.querySelector('.alarm-display .alarm-time');
   const days = document.querySelector('.alarm-display .alarm-days');
-  const list = AUTO.alarms().filter(a => a.enabled).sort((a, b) => (a.time > b.time ? 1 : -1));
+  const now = new Date();
+  const acceptsDay = (repeat, dow) => {
+    if (repeat === 'daily' || repeat === 'once') return true;
+    if (repeat === 'weekdays') return dow >= 1 && dow <= 5;
+    if (repeat === 'weekends') return dow === 0 || dow === 6;
+    return /^[0-6](,[0-6])*$/.test(repeat || '') && repeat.split(',').map(Number).includes(dow);
+  };
+  const nextAt = a => {
+    const parts = String(a.time || '').split(':').map(Number);
+    if (parts.length !== 2 || !Number.isInteger(parts[0]) || !Number.isInteger(parts[1])) return null;
+    for (let offset = 0; offset < 8; offset++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, parts[0], parts[1], 0, 0);
+      if (d > now && acceptsDay(a.repeat, d.getDay())) return d;
+    }
+    return null;
+  };
+  const list = AUTO.alarms()
+    .filter(a => a.enabled)
+    .map(a => ({ alarm: a, at: nextAt(a) }))
+    .filter(x => x.at)
+    .sort((a, b) => a.at - b.at);
   if (!list.length) {
     if (time) time.textContent = '—';
     if (days) days.textContent = 'No alarms set';
     return;
   }
-  const a = list[0];
+  const { alarm: a, at } = list[0];
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const dateLabel = at.toDateString() === now.toDateString() ? 'Today' : at.toDateString() === tomorrow.toDateString() ? 'Tomorrow' : at.toLocaleDateString([], { weekday: 'short' });
+  const repeatLabel = a.repeat === 'daily' ? 'Everyday' : a.repeat === 'weekdays' ? 'Weekdays' : a.repeat === 'weekends' ? 'Weekends' : a.repeat === 'once' ? 'Once' : a.repeat;
   if (time) time.textContent = a.time;
-  if (days) days.textContent = a.repeat === 'daily' ? 'Everyday' : a.repeat === 'weekdays' ? 'Weekdays' : a.repeat === 'once' ? 'Once' : a.repeat;
+  if (days) days.textContent = `${dateLabel} · ${repeatLabel}`;
 }
 
 function updateWake() {
@@ -304,13 +445,27 @@ function updateWake() {
 /* ---- Battery + voice state ---- */
 async function updateBattery() {
   const b = await DEV.battery().catch(() => null);
-  if (b && typeof b.level === 'number') {
-    set('statusBattery', Math.round(b.level) + '%');
-    const ch = $('#statusCharging');
-    if (ch) ch.style.display = b.charging ? 'block' : 'none';
-  } else {
-    set('statusBattery', '—');
-  }
+    const batteryCircle = document.querySelector('.tel-circle');
+    if (b && typeof b.level === 'number') {
+      const batteryPct = Math.max(0, Math.min(100, Math.round(b.level)));
+      set('statusBattery', batteryPct + '%');
+      const ch = $('#statusCharging');
+      if (ch) ch.style.display = b.charging ? 'block' : 'none';
+      if (batteryCircle) {
+        batteryCircle.style.setProperty('--p', batteryPct);
+        const label = batteryCircle.querySelector('span');
+        if (label) label.textContent = batteryPct + '%';
+      }
+    } else {
+      set('statusBattery', '—');
+      const ch = $('#statusCharging');
+      if (ch) ch.style.display = 'none';
+      if (batteryCircle) {
+        batteryCircle.style.setProperty('--p', 0);
+        const label = batteryCircle.querySelector('span');
+        if (label) label.textContent = '—';
+      }
+    }
 }
 
 function updateVoice() {
