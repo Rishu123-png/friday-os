@@ -30,6 +30,7 @@ PERMS = [
     "android.permission.READ_SMS",
     "android.permission.RECEIVE_SMS",
     "android.permission.READ_PHONE_STATE",
+    "android.permission.READ_CALL_LOG",
     "android.permission.ANSWER_PHONE_CALLS",
     "android.permission.SYSTEM_ALERT_WINDOW",
     "android.permission.WRITE_SETTINGS",
@@ -116,11 +117,21 @@ SERVICES = """
             android:enabled="true"
             android:exported="false"/>
 
-        <!-- v10.3 HERALD: Call Guard (decline+explainer; works even when app asleep) -->
+        <receiver
+            android:name=".FridayReminderReceiver"
+            android:enabled="true"
+            android:exported="false"/>
+
+        <receiver
+            android:name=".FridayAssistantActionReceiver"
+            android:enabled="true"
+            android:exported="false"/>
+
+        <!-- Call assistant: capability-limited call controls and confirmed message-back -->
         <receiver
             android:name=".FridayCallGuard"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.PHONE_STATE"/>
             </intent-filter>
@@ -172,6 +183,18 @@ def main():
     if 'FridayService' not in s:
         i = s.rindex('</application>')
         s = s[:i] + SERVICES + '\n    ' + s[i:]
+
+    # Step 5 is idempotent even when patching an older already-generated tree.
+    step5 = ""
+    if '.FridayReminderReceiver' not in s:
+        step5 += ('\n        <receiver android:name=".FridayReminderReceiver" '
+                  'android:enabled="true" android:exported="false"/>\n')
+    if '.FridayAssistantActionReceiver' not in s:
+        step5 += ('\n        <receiver android:name=".FridayAssistantActionReceiver" '
+                  'android:enabled="true" android:exported="false"/>\n')
+    if step5:
+        i = s.rindex('</application>')
+        s = s[:i] + step5 + '    ' + s[i:]
 
     # v14.1: FileProvider for sharing images (ACTION_SEND with content:// URIs)
     if '.fileprovider' not in s:
