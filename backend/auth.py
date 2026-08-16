@@ -1,4 +1,4 @@
-# FRIDAY OS — Bearer-token auth
+# FRIDAY OS — fail-closed bearer-token authentication
 import hmac
 
 from fastapi import Header, HTTPException
@@ -7,13 +7,23 @@ from config import settings
 
 
 def require_token(authorization: str | None = Header(default=None)) -> None:
-    """FastAPI dependency. When FRIDAY_TOKEN is configured, every request
-    must carry `Authorization: Bearer <token>`."""
-    if not settings.FRIDAY_TOKEN:
-        return  # dev mode: auth off
-    if not authorization or not authorization.lower().startswith("bearer "):
+    """Require ``Authorization: Bearer <FRIDAY_TOKEN>`` on every API route.
+
+    A missing server token is a configuration failure, not an implicit public mode.
+    Isolated local development can opt in explicitly with
+    FRIDAY_ALLOW_INSECURE_LOCAL=true.
+    """
+    expected = settings.FRIDAY_TOKEN
+    if not expected:
+        if settings.FRIDAY_ALLOW_INSECURE_LOCAL:
+            return
+        raise HTTPException(status_code=503, detail="Server authentication is not configured")
+
+    if not authorization:
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
-    # audit F10: constant-time compare — a plain == leaks length/prefix via timing
-    if not hmac.compare_digest(token.encode("utf-8"), settings.FRIDAY_TOKEN.encode("utf-8")):
+    scheme, separator, supplied = authorization.partition(" ")
+    if not separator or scheme.lower() != "bearer" or not supplied.strip():
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = supplied.strip()
+    if not hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid token")
