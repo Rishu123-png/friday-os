@@ -44,14 +44,22 @@ export function getPosition(timeout = 8000) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error('No geolocation'));
     navigator.geolocation.getCurrentPosition(
-      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
+      p => resolve({
+        lat: p.coords.latitude,
+        lon: p.coords.longitude,
+        acc: p.coords.accuracy,
+        altitude: p.coords.altitude,
+        speed: p.coords.speed,
+        heading: p.coords.heading
+      }),
       e => reject(e),
       { enableHighAccuracy: false, timeout, maximumAge: 600000 }
     );
   });
 }
 
-/** Falls back to Delhi if GPS denied */
+/** Resolve only a real device fix (or a previously cached real fix).
+ *  Never substitute another city's coordinates when permission/data is absent. */
 export async function resolveLocation() {
   const cached = cacheGet('location', true);
   try {
@@ -59,8 +67,8 @@ export async function resolveLocation() {
     cacheSet('location', pos, 60);
     return pos;
   } catch (e) {
-    if (cached) return cached;
-    return { lat: 28.6139, lon: 77.2090, fallback: true, label: 'New Delhi' };
+    if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lon) && !cached.fallback) return { ...cached, _stale: true };
+    throw e;
   }
 }
 
@@ -103,7 +111,7 @@ export async function getWeather(lat, lon) {
   const key = `wx_${lat.toFixed(2)}_${lon.toFixed(2)}`;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day` +
-    `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+    `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max` +
     `&timezone=auto&forecast_days=7`;
   try {
     const d = await j(url);
