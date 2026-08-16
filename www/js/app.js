@@ -5116,10 +5116,27 @@ async function initNative() {
 
   // Explicitly enabled always-on host. Event receivers remain independently durable.
   if (S.getSetting('backgroundService') !== false && S.getSetting('proactiveAssistant')) {
-    window.__stage = 'native:foreground-service';
-    NAT.startForegroundService({ wakeWord: S.getSetting('wakeWord') }).catch(() => {});
+    if (!assistantConfigured || !assistantConfigured.ok) {
+      S.setSetting('backgroundService', false);
+      syncSettingsUI();
+    } else {
+      window.__stage = 'native:foreground-service';
+      const started = await NAT.startForegroundService({ wakeWord: S.getSetting('wakeWord') });
+      if (!started || !started.ok) {
+        S.setSetting('backgroundService', false);
+        syncSettingsUI();
+        U.toast(`Android did not keep the always-on host running: ${(started && started.reason) || 'not running'}`, '⚠️', 5600);
+      }
+    }
   }
-  if (S.getSetting('bootStart')) NAT.setBootStart(true);
+  if (S.getSetting('bootStart')) {
+    const bootSaved = await NAT.setBootStart(true);
+    if (!bootSaved || !bootSaved.ok) {
+      S.setSetting('bootStart', false);
+      syncSettingsUI();
+      U.toast('FRIDAY could not persist reboot start, so the setting was turned off.', '⚠️', 5200);
+    }
+  }
 
   // pull real contacts into the local store
   try {
@@ -6422,7 +6439,10 @@ function bindEvents() {
     const num = (ev && ev.number) || 'caller';
     const act = (ev && ev.action) || '';
     reply(act === 'sms_sent' ? `📞 ${num} ko maine sambhaal liya, Boss — polite decline + tumhara SMS bhej diya.`
+        : act === 'sms_requested' ? `📞 ${num} ka call decline hua. Android ne SMS request accept ki hai; final sent result ka wait hai.`
         : act === 'whatsapp_draft' ? `📞 ${num} ko decline kiya — WhatsApp draft khul gaya hai, tap to send.`
+        : act === 'whatsapp_unavailable' ? `📞 ${num} decline hua, par WhatsApp draft nahi khula. Koi SMS nahi bheja gaya.`
+        : act === 'message_guard_blocked' ? `📞 ${num} decline hua; duplicate-message guard ne doosra message rok diya.`
         : act === 'sms_failed' ? `📞 ${num} decline hua, par SMS nahi gaya (SIM/SMS permission check karo).`
         : `📞 ${num} ke liye guard hua (${act}).`);
   });
