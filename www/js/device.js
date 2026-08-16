@@ -22,7 +22,7 @@ export async function battery() {
     const c = CAP();
     if (c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.FridayNative) {
       const r = await c.Plugins.FridayNative.getBatteryDetail();
-      if (r && r.level > 0) return { level: Math.round(r.level), charging: false };
+      if (r && r.level >= 0) return { level: Math.round(r.level), charging: !!r.charging };
     }
   } catch (_) {}
   try {
