@@ -33,7 +33,7 @@ import { getForegroundApp, launchApp, mediaControl, setTorch, setVolume,
          tapText, scrollScreen, typeText, getActiveNotifications,
          getNotifLog, getUsageStats, wifiAudit, lanScan, portScan,
          securityAudit, translateText, getSharedContent, setWallpaper,
-         replyNotification, findContact, getThermal, getSensors,
+         findContact, getThermal, getSensors,
          startForegroundService, showBubble, updateWidget, getRecentSMS,
          getLatestOTP, hcReadSteps, hcStatus, biometricPrompt } from '../native.js';
 import * as MEM from '../memory.js';
@@ -276,8 +276,11 @@ export async function executeAction(action) {
       }
 
       case 'reply_notif': {
-        const r = await replyNotification(action.app || '', action.text);
-        return { ok: r && r.ok, result: { app: action.app, text: action.text }, observation: r && r.ok ? 'Reply sent' : (r && r.reason ? r.reason : 'Reply failed') };
+        return {
+          ok: false,
+          result: { app: action.app, text: action.text },
+          observation: 'Exact notification, recipient, draft review, and explicit confirmation are required before reply dispatch'
+        };
       }
 
       // ---- Settings / UI ----
