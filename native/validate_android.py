@@ -32,7 +32,9 @@ def main() -> None:
     required_permissions = {
         "android.permission.INTERNET", "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS",
-        "android.permission.FOREGROUND_SERVICE", "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.FOREGROUND_SERVICE", "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM", "android.permission.READ_PHONE_STATE",
+        "android.permission.READ_CALL_LOG", "android.permission.ANSWER_PHONE_CALLS"
     }
     actual = {node.get(ANDROID + "name") for node in root.findall("uses-permission")}
     missing = sorted(required_permissions - actual)
@@ -41,7 +43,8 @@ def main() -> None:
 
     required_components = {
         "service": {".FridayService", ".FridayNotificationService", ".FridayAccessibility"},
-        "receiver": {".FridayBootReceiver", ".FridayWidgetProvider"},
+        "receiver": {".FridayBootReceiver", ".FridayWidgetProvider", ".FridayReminderReceiver",
+                     ".FridayAssistantActionReceiver", ".FridayCallGuard"},
         "provider": {"androidx.core.content.FileProvider"},
     }
     for kind, wanted in required_components.items():
@@ -54,6 +57,13 @@ def main() -> None:
     if not main.is_file():
         fail("MainActivity is not in the app package")
     main_text = main.read_text(encoding="utf-8")
+    java_dir = main.parent
+    step5_sources = ["FridayAssistantPolicy.java", "FridayAssistantSpeech.java",
+                     "FridayReminderScheduler.java", "FridayReminderReceiver.java",
+                     "FridayAssistantActionReceiver.java"]
+    missing_sources = [name for name in step5_sources if not (java_dir / name).is_file()]
+    if missing_sources:
+        fail("Step 5 native sources were not copied: " + ", ".join(missing_sources))
     plugins = ["FridayNative", "FridaySpeech", "FridayWakeWord", "FridayVosk",
                "FridayTranslate", "FridaySherpa", "LlamaCpp", "FridaySensors",
                "FridayHealthConnect"]
@@ -62,9 +72,9 @@ def main() -> None:
         fail("unregistered plugins: " + ", ".join(missing_plugins))
 
     assets = Path("android/app/src/main/assets/public")
-    for rel in ("index.html", "js/app.js", "js/boot-runtime.js"):
+    for rel in ("index.html", "js/app.js", "js/boot-runtime.js", "js/proactive-assistant.js"):
         if not (assets / rel).is_file():
-            fail("Phase 3 asset missing after cap sync: " + rel)
+            fail("required web asset missing after cap sync: " + rel)
     app_js = (assets / "js/app.js").read_text(encoding="utf-8")
     if "settleOptional" not in app_js or "friday:boot-timeout" not in app_js:
         fail("synced app.js is not the Phase 3 boot implementation")
