@@ -70,6 +70,16 @@ if TRANSLATE_ENABLED:
 DEPS.append(('androidx.health.connect:connect-client',
              'implementation "androidx.health.connect:connect-client:%s"' % HEALTH_CONNECT_VERSION))
 
+# Persistent foreground downloads. 2.9.1 supports the project's SDK 34/AGP line.
+WORK_MANAGER_VERSION = '2.9.1'
+DEPS.append(('androidx.work:work-runtime',
+             'implementation "androidx.work:work-runtime:%s"' % WORK_MANAGER_VERSION))
+# WorkManager's Java API exposes ListenableFuture. Health Connect carries Guava
+# only on the runtime variant, so declare it directly for javac as well.
+GUAVA_ANDROID_VERSION = '31.1-android'
+DEPS.append(('com.google.guava:guava',
+             'implementation "com.google.guava:guava:%s"' % GUAVA_ANDROID_VERSION))
+
 # v15 Phase 9: androidx.biometric (BiometricPrompt for fingerprint/face unlock)
 BIOMETRIC_VERSION = '1.1.0'
 DEPS.append(('androidx.biometric:biometric',
