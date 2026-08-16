@@ -1,1 +1,1034 @@
- 
+/* ==========================================================================
+   FRIDAY OS — PORTRAIT CORE HUD
+   Standalone reference-shaped shell. This file owns the default dashboard
+   structure; it does not depend on the retired hud-redesign.css override.
+   The DOM IDs remain unchanged so every value and handler still comes from
+   the existing location, weather, device, voice, memory and agent engines.
+   ========================================================================== */
+
+:root {
+  --friday-black: #000306;
+  --friday-ink: #02080d;
+  --friday-panel: rgba(13, 36, 44, .82);
+  --friday-ice: #9af5ff;
+  --friday-cyan: #57e7f7;
+  --friday-blue: #6aaeff;
+  --friday-mint: #79f7ce;
+  --friday-dim: #54949f;
+  --friday-line: rgba(114, 236, 255, .32);
+  --friday-fault: #ff718b;
+  --core-size: min(76vw, 44vh, 590px);
+  --hud-card-w: clamp(108px, 27.5vw, 212px);
+  --hud-card-h: clamp(62px, 7.2vh, 94px);
+}
+
+html[data-hud="on"],
+html[data-hud="on"] body {
+  background: #000 !important;
+}
+
+html[data-hud="on"] body {
+  --hud-accent: var(--friday-ice);
+  --hud-accent-rgb: 154, 245, 255;
+  color: #eaffff;
+}
+
+html[data-hud="on"] body[data-hud-state="listening"] {
+  --hud-accent: #76f4ff;
+  --hud-accent-rgb: 118, 244, 255;
+}
+html[data-hud="on"] body[data-hud-state="thinking"],
+html[data-hud="on"] body[data-hud-state="executing"] {
+  --hud-accent: #8fb8ff;
+  --hud-accent-rgb: 143, 184, 255;
+}
+html[data-hud="on"] body[data-hud-state="speaking"] {
+  --hud-accent: #84ffd4;
+  --hud-accent-rgb: 132, 255, 212;
+}
+html[data-hud="on"] body[data-hud-state="error"] {
+  --hud-accent: var(--friday-fault);
+  --hud-accent-rgb: 255, 113, 139;
+}
+
+html[data-hud="on"] .app {
+  isolation: isolate;
+  background: #000 !important;
+}
+
+/* The top row behaves like the phone status strip in the approved portrait. */
+html[data-hud="on"] .status-bar {
+  position: relative;
+  min-height: 32px;
+  padding: 5px 13px 2px !important;
+  background: #000 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  z-index: 60;
+}
+html[data-hud="on"] .status-left {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+}
+html[data-hud="on"] .status-time {
+  color: rgba(235, 253, 255, .88) !important;
+  font: 500 clamp(11px, 3vw, 16px)/1 system-ui, sans-serif !important;
+  letter-spacing: .02em;
+}
+html[data-hud="on"] .status-center {
+  margin-right: auto;
+}
+html[data-hud="on"] .status-label {
+  color: rgba(150, 213, 222, .56) !important;
+  font: 600 clamp(7px, 1.9vw, 10px)/1 ui-monospace, monospace !important;
+  letter-spacing: .16em !important;
+}
+html[data-hud="on"] .battery-status {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 5px;
+}
+html[data-hud="on"] .battery-status .label,
+html[data-hud="on"] .battery-status .charging-label {
+  display: none;
+}
+html[data-hud="on"] .battery-status .value {
+  color: rgba(235, 253, 255, .88) !important;
+  font: 500 clamp(11px, 3vw, 16px)/1 system-ui, sans-serif !important;
+  text-shadow: none !important;
+}
+
+/* One deterministic HUD stage. */
+html[data-hud="on"] .dashboard {
+  display: block !important;
+  position: relative !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: auto !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(58, 177, 215, .075) 0, rgba(18, 67, 86, .03) 34%, transparent 66%),
+    linear-gradient(#000, #000) !important;
+  color: #eaffff;
+  contain: layout paint;
+}
+
+/* Quiet radar geometry behind the core. */
+html[data-hud="on"] .dashboard::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 26%;
+  width: min(94vw, 700px);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  opacity: .32;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 49.86%, rgba(90, 218, 241, .16) 49.9% 50.1%, transparent 50.14%),
+    linear-gradient(transparent 49.86%, rgba(90, 218, 241, .16) 49.9% 50.1%, transparent 50.14%),
+    repeating-radial-gradient(circle, transparent 0 11.7%, rgba(82, 188, 215, .12) 11.85% 12%, transparent 12.15% 17%),
+    repeating-conic-gradient(from 0deg, rgba(90, 218, 241, .1) 0 .25deg, transparent .25deg 15deg);
+  filter: drop-shadow(0 0 14px rgba(62, 206, 240, .12));
+}
+html[data-hud="on"] .dashboard::after {
+  content: "";
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, .12), transparent 15%, transparent 84%, rgba(0, 0, 0, .18)),
+    radial-gradient(ellipse at center, transparent 48%, rgba(0, 0, 0, .56) 100%);
+}
+body[data-fx*='"particles":false'] .dashboard::before,
+body[data-low-power="true"] .dashboard::before {
+  opacity: .16;
+}
+
+/* FRIDAY identity and real aggregate system status. */
+html[data-hud="on"] .hud-identity {
+  position: absolute;
+  z-index: 12;
+  top: 2.8%;
+  left: 50%;
+  width: min(92%, 580px);
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+html[data-hud="on"] .hud-wordmark {
+  color: #b9f8ff;
+  font: 300 clamp(25px, 7.1vw, 54px)/1.05 system-ui, -apple-system, sans-serif;
+  letter-spacing: .075em;
+  text-shadow: 0 0 16px rgba(102, 229, 247, .22);
+}
+html[data-hud="on"] .hud-ready-dot {
+  display: inline-block;
+  width: .29em;
+  height: .29em;
+  margin: 0 0 .13em .06em;
+  border-radius: 50%;
+  background: var(--friday-mint);
+  box-shadow: 0 0 11px rgba(121, 247, 206, .8);
+}
+html[data-hud="on"] .systems-optimal-line {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 94%;
+  margin: 7px auto 0 !important;
+  color: rgba(132, 232, 205, .82) !important;
+  font: 500 clamp(7px, 1.9vw, 11px)/1.15 ui-monospace, SFMono-Regular, monospace !important;
+  letter-spacing: .08em !important;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+html[data-hud="on"] .systems-optimal-line #systemsLine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-hud="on"] .systems-optimal-line .dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Source rows dissolve; their four primary children sit around the core. */
+html[data-hud="on"] .hud-top-row,
+html[data-hud="on"] .hud-mid-row {
+  display: contents !important;
+}
+html[data-hud="on"] .hud-bottom-row,
+html[data-hud="on"] .hud-footer-row {
+  display: none !important;
+}
+
+/* Reference-matched glass data plates. */
+html[data-hud="on"] .hud-module {
+  position: absolute !important;
+  z-index: 8;
+  width: var(--hud-card-w) !important;
+  min-width: 0;
+  min-height: var(--hud-card-h);
+  padding: clamp(8px, 1.65vw, 15px) clamp(9px, 2.2vw, 18px) !important;
+  border: 1px solid rgba(151, 238, 251, .35) !important;
+  border-radius: 7px !important;
+  background:
+    linear-gradient(105deg, rgba(93, 221, 226, .18), transparent 13%, transparent 85%, rgba(98, 239, 209, .15)),
+    linear-gradient(135deg, rgba(35, 76, 86, .92), rgba(7, 23, 30, .9)) !important;
+  box-shadow:
+    inset 5px 0 0 rgba(112, 255, 217, .9),
+    inset -5px 0 0 rgba(112, 255, 217, .86),
+    inset 0 0 22px rgba(94, 226, 242, .1),
+    0 0 18px rgba(70, 218, 240, .08) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+html[data-hud="on"] .hud-module::before {
+  content: "" !important;
+  position: absolute;
+  inset: 0;
+  height: auto;
+  background: linear-gradient(110deg, rgba(255,255,255,.12), transparent 20% 76%, rgba(129,243,255,.08));
+  pointer-events: none;
+}
+html[data-hud="on"] .module-header {
+  position: relative;
+  z-index: 1;
+  display: block !important;
+  margin: 0 0 3px !important;
+  color: rgba(188, 244, 250, .78) !important;
+  font: 400 clamp(8px, 2.25vw, 17px)/1.08 system-ui, sans-serif !important;
+  letter-spacing: .025em !important;
+  text-shadow: 0 0 8px rgba(108, 234, 250, .32);
+}
+html[data-hud="on"] .module-header .icon { display: none !important; }
+
+html[data-hud="on"] .module-location {
+  top: 16%;
+  left: 3.8%;
+  text-align: left;
+}
+html[data-hud="on"] .module-network {
+  top: 16%;
+  right: 3.8%;
+  text-align: right;
+}
+html[data-hud="on"] .module-weather {
+  top: min(calc(27% + var(--core-size) + 14px), calc(100% - 188px));
+  left: 3.8%;
+  text-align: left;
+}
+html[data-hud="on"] .module-bluetooth {
+  top: min(calc(27% + var(--core-size) + 14px), calc(100% - 188px));
+  right: 3.8%;
+  text-align: right;
+}
+html[data-hud="on"] .module-compass,
+html[data-hud="on"] .hud-vision-node {
+  display: none !important;
+}
+/* Legacy decorative buttons had no action handlers; never present them as controls. */
+html[data-hud="on"] .view-calendar-btn,
+html[data-hud="on"] .suggestion-btn,
+html[data-hud="on"] .alarm-dismiss,
+html[data-hud="on"] .wake-change,
+html[data-hud="on"] .bt-scan-btn {
+  display: none !important;
+}
+
+/* Only headline truth is visible in the calm view. Deeper data stays in deck. */
+html[data-hud="on"] .globe-container,
+html[data-hud="on"] .coordinates,
+html[data-hud="on"] .loc-stats,
+html[data-hud="on"] .weather-stats,
+html[data-hud="on"] .weather-forecast,
+html[data-hud="on"] .bt-list,
+html[data-hud="on"] .bt-scan-btn {
+  display: none !important;
+}
+html[data-hud="on"] .location-name,
+html[data-hud="on"] .net-primary,
+html[data-hud="on"] .bt-status {
+  position: relative;
+  z-index: 1;
+  color: #f1feff !important;
+  font: 400 clamp(11px, 3.2vw, 24px)/1.05 system-ui, sans-serif !important;
+  letter-spacing: .015em;
+  text-shadow: 0 0 11px rgba(114, 235, 250, .3);
+  overflow-wrap: anywhere;
+}
+html[data-hud="on"] .location-sub,
+html[data-hud="on"] .bt-count {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+  color: rgba(143, 211, 220, .7) !important;
+  font: 500 clamp(6px, 1.65vw, 10px)/1.08 ui-monospace, monospace !important;
+  letter-spacing: .05em;
+  overflow-wrap: anywhere;
+}
+html[data-hud="on"] .network-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+html[data-hud="on"] .network-content .net-item {
+  display: none !important;
+}
+html[data-hud="on"] .network-content .net-item:first-of-type {
+  display: flex !important;
+  justify-content: flex-end;
+  font: 500 clamp(6px, 1.65vw, 10px)/1.08 ui-monospace, monospace !important;
+}
+html[data-hud="on"] .network-content .net-item:first-of-type .label {
+  display: none;
+}
+html[data-hud="on"] #netSsid {
+  max-width: 100%;
+  color: rgba(143, 211, 220, .7) !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html[data-hud="on"] .weather-main {
+  position: relative;
+  z-index: 1;
+  display: block !important;
+  margin: 0 !important;
+}
+html[data-hud="on"] .weather-icon { display: none !important; }
+html[data-hud="on"] .weather-main .temp {
+  color: #f1feff !important;
+  font: 400 clamp(11px, 3.2vw, 24px)/1.05 system-ui, sans-serif !important;
+  text-shadow: 0 0 11px rgba(114, 235, 250, .3);
+}
+html[data-hud="on"] .weather-desc {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  margin: 4px 0 0 !important;
+  color: rgba(143, 211, 220, .72) !important;
+  font: 500 clamp(6px, 1.65vw, 10px)/1.08 ui-monospace, monospace !important;
+  letter-spacing: .04em;
+  overflow-wrap: anywhere;
+}
+
+/* The luminous core is the composition, not a card. */
+html[data-hud="on"] .module-ai-core {
+  display: block !important;
+  z-index: 5;
+  top: 27% !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: var(--core-size) !important;
+  min-height: 0 !important;
+  height: var(--core-size) !important;
+  padding: 0 !important;
+  transform: translateX(-50%) !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-hud="on"] .module-ai-core::before { display: none !important; }
+html[data-hud="on"] .ai-core-container {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  display: block !important;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: manipulation;
+  outline: none;
+  filter: drop-shadow(0 0 18px rgba(var(--hud-accent-rgb), .28));
+  transition: filter .35s ease, transform .35s ease;
+}
+html[data-hud="on"] .ai-core-container:focus-visible {
+  outline: 1px solid var(--hud-accent);
+  outline-offset: 8px;
+}
+html[data-hud="on"] .ai-core-container::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: 24%;
+  border: 1px solid rgba(230, 255, 255, .78);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 48%, #fff 0 3%, rgba(230,255,255,.98) 4%, rgba(var(--hud-accent-rgb), .94) 11%, rgba(110,168,255,.66) 36%, rgba(70,224,240,.34) 58%, rgba(15,47,71,.16) 72%, transparent 74%),
+    conic-gradient(from 35deg, rgba(147,241,255,.7), rgba(103,116,255,.5), rgba(90,255,226,.65), rgba(147,241,255,.7));
+  box-shadow:
+    inset 0 0 28px rgba(255,255,255,.64),
+    inset 0 0 70px rgba(var(--hud-accent-rgb), .48),
+    0 0 16px rgba(222,255,255,.86),
+    0 0 44px rgba(var(--hud-accent-rgb), .66),
+    0 0 92px rgba(var(--hud-accent-rgb), .26);
+}
+html[data-hud="on"] .ai-core-container::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 7%;
+  border: clamp(3px, .9vw, 8px) solid rgba(var(--hud-accent-rgb), .76);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 3px rgba(216, 255, 255, .26),
+    inset 0 0 24px rgba(var(--hud-accent-rgb), .38),
+    0 0 0 2px rgba(203, 255, 255, .7),
+    0 0 0 clamp(10px, 2vw, 20px) rgba(var(--hud-accent-rgb), .12),
+    0 0 40px rgba(var(--hud-accent-rgb), .52);
+}
+html[data-hud="on"] .core-glow-bg {
+  position: absolute !important;
+  z-index: 0;
+  inset: -12% !important;
+  width: auto !important;
+  height: auto !important;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--hud-accent-rgb), .25), rgba(46,124,164,.1) 42%, transparent 70%) !important;
+  filter: blur(13px) !important;
+  opacity: .72;
+  pointer-events: none;
+}
+html[data-hud="on"] #coreCanvas {
+  position: absolute !important;
+  z-index: 6;
+  top: 28% !important;
+  left: 28% !important;
+  width: 44% !important;
+  height: 44% !important;
+  pointer-events: none;
+  opacity: .9;
+  mix-blend-mode: screen;
+}
+
+/* Architecture injected by hud-shell.js. */
+html[data-hud="on"] .friday-core-architecture {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+html[data-hud="on"] .friday-core-architecture::before {
+  content: "";
+  position: absolute;
+  inset: 2%;
+  border: 1px solid rgba(var(--hud-accent-rgb), .66);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--hud-accent-rgb), .16),
+    0 0 0 clamp(5px, 1vw, 10px) rgba(var(--hud-accent-rgb), .05),
+    0 0 26px rgba(var(--hud-accent-rgb), .24);
+}
+html[data-hud="on"] .friday-core-architecture::after {
+  content: "";
+  position: absolute;
+  inset: 14%;
+  border: 1px dashed rgba(218, 253, 255, .56);
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(225,255,255,.68) 0 .45deg, transparent .45deg 4deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 78%, #000 79% 82%, transparent 83%);
+  mask: radial-gradient(circle, transparent 0 78%, #000 79% 82%, transparent 83%);
+  opacity: .72;
+}
+html[data-hud="on"] .friday-orbit {
+  position: absolute;
+  inset: 11%;
+  border: 1px solid rgba(var(--hud-accent-rgb), .72);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(var(--hud-accent-rgb), .22);
+}
+html[data-hud="on"] .friday-orbit::after {
+  content: "";
+  position: absolute;
+  top: 9%;
+  left: 50%;
+  width: clamp(4px, 1.1vw, 8px);
+  height: clamp(4px, 1.1vw, 8px);
+  border-radius: 50%;
+  background: var(--hud-accent);
+  box-shadow: 0 0 10px var(--hud-accent);
+}
+html[data-hud="on"] .friday-orbit.orbit-a { transform: rotate(28deg) scaleY(.72); }
+html[data-hud="on"] .friday-orbit.orbit-b { transform: rotate(88deg) scaleY(.7); opacity: .76; }
+html[data-hud="on"] .friday-orbit.orbit-c { transform: rotate(148deg) scaleY(.72); opacity: .68; }
+html[data-hud="on"] .friday-reticle {
+  position: absolute;
+  z-index: 7;
+  background: rgba(215, 255, 255, .74);
+  box-shadow: 0 0 8px rgba(var(--hud-accent-rgb), .62);
+}
+html[data-hud="on"] .reticle-n,
+html[data-hud="on"] .reticle-s {
+  left: 49.75%;
+  width: .5%;
+  height: 12%;
+}
+html[data-hud="on"] .reticle-n { top: 0; }
+html[data-hud="on"] .reticle-s { bottom: 0; }
+html[data-hud="on"] .reticle-e,
+html[data-hud="on"] .reticle-w {
+  top: 49.75%;
+  width: 12%;
+  height: .5%;
+}
+html[data-hud="on"] .reticle-e { right: 0; }
+html[data-hud="on"] .reticle-w { left: 0; }
+
+html[data-hud="on"] .core-label,
+html[data-hud="on"] .core-quote {
+  display: none !important;
+}
+html[data-hud="on"] .friday-core-signature {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 12px);
+  left: 50%;
+  width: max-content;
+  max-width: 44vw;
+  transform: translateX(-50%);
+  color: var(--friday-ice);
+  text-align: center;
+  pointer-events: none;
+}
+html[data-hud="on"] .friday-core-signature::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  width: 1px;
+  height: clamp(11px, 2.2vh, 28px);
+  background: linear-gradient(transparent, var(--hud-accent));
+  box-shadow: 0 0 6px var(--hud-accent);
+}
+html[data-hud="on"] .friday-core-signature::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 3px);
+  bottom: calc(100% + 1px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--friday-mint);
+  box-shadow: 0 0 8px var(--friday-mint);
+}
+html[data-hud="on"] .friday-core-signature span {
+  display: block;
+  font: 400 clamp(10px, 2.9vw, 22px)/1.1 system-ui, sans-serif;
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+html[data-hud="on"] .friday-core-signature i {
+  display: block;
+  margin-top: 3px;
+  color: rgba(143, 230, 238, .82);
+  font: normal 500 clamp(6px, 1.7vw, 11px)/1 ui-monospace, monospace;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+html[data-hud="on"] .core-status {
+  position: absolute !important;
+  z-index: 16;
+  top: calc(100% + 50px) !important;
+  bottom: auto !important;
+  left: 50% !important;
+  width: max-content;
+  max-width: 42vw;
+  transform: translateX(-50%) !important;
+  color: rgba(154, 235, 242, .84) !important;
+  font: 500 clamp(6px, 1.65vw, 10px)/1 ui-monospace, monospace !important;
+  letter-spacing: .08em !important;
+  white-space: nowrap;
+  text-shadow: 0 0 8px rgba(var(--hud-accent-rgb), .45);
+}
+html[data-hud="on"] .core-status::before { content: "STATUS: "; }
+html[data-hud="on"] .voice-waveform {
+  position: absolute !important;
+  z-index: 8;
+  left: 31% !important;
+  right: 31% !important;
+  bottom: 22% !important;
+  width: auto !important;
+  height: 12% !important;
+  opacity: 0;
+  transition: opacity .25s ease;
+}
+html[data-hud="on"] body.hud-active .voice-waveform { opacity: .7; }
+html[data-hud="on"] .voice-waveform .wave-bar {
+  background: var(--hud-accent) !important;
+  box-shadow: 0 0 5px rgba(var(--hud-accent-rgb), .6);
+}
+
+/* Real agent details only appear while work is actually active. */
+html[data-hud="on"] .agent-panel {
+  z-index: 20 !important;
+  top: 58% !important;
+  min-width: min(72%, 250px) !important;
+  max-width: 82% !important;
+  border-color: rgba(var(--hud-accent-rgb), .3) !important;
+  background: rgba(0, 10, 16, .72) !important;
+}
+
+/* Calm idle / stronger real active states. */
+@keyframes friday-idle-breathe {
+  0%, 100% { transform: scale(.992); filter: drop-shadow(0 0 13px rgba(var(--hud-accent-rgb), .22)); }
+  50% { transform: scale(1.008); filter: drop-shadow(0 0 23px rgba(var(--hud-accent-rgb), .36)); }
+}
+@keyframes friday-active-drive {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 22px rgba(var(--hud-accent-rgb), .5)); }
+  50% { transform: scale(1.035); filter: drop-shadow(0 0 48px rgba(var(--hud-accent-rgb), .78)); }
+}
+@keyframes friday-architecture-spin { to { transform: rotate(360deg); } }
+@keyframes friday-counter-spin { to { transform: rotate(-360deg); } }
+html[data-hud="on"] body:not(.hud-active) .ai-core-container {
+  animation: friday-idle-breathe 5.2s ease-in-out infinite;
+}
+html[data-hud="on"] body.hud-active .ai-core-container {
+  animation: friday-active-drive 1.35s ease-in-out infinite;
+}
+html[data-hud="on"] body.hud-active .friday-core-architecture::after {
+  animation: friday-architecture-spin 7s linear infinite;
+}
+html[data-hud="on"] body[data-hud-state="thinking"] .friday-orbit.orbit-b,
+html[data-hud="on"] body[data-hud-state="executing"] .friday-orbit.orbit-b {
+  animation: friday-counter-spin 2.8s linear infinite;
+}
+html[data-hud="on"] body[data-hud-state="speaking"] .ai-core-container::before {
+  box-shadow:
+    inset 0 0 28px rgba(255,255,255,.72),
+    inset 0 0 76px rgba(var(--hud-accent-rgb), .6),
+    0 0 22px rgba(225,255,255,.94),
+    0 0 62px rgba(var(--hud-accent-rgb), .78),
+    0 0 110px rgba(var(--hud-accent-rgb), .38);
+}
+
+/* Subtle real-card-to-core connectors. */
+html[data-hud="on"] #hudLinks {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+html[data-hud="on"] #hudLinks line {
+  stroke: rgba(106, 226, 244, .16);
+  stroke-width: 1;
+  filter: drop-shadow(0 0 3px rgba(94, 225, 245, .14));
+}
+
+/* Six circular quick actions: the approved set plus direct chat access. */
+html[data-hud="on"] .quick-commands-grid {
+  position: absolute !important;
+  z-index: 14;
+  left: 50%;
+  bottom: 54px;
+  transform: translateX(-50%);
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 2.5vw, 20px) !important;
+  width: auto !important;
+  padding: 0 !important;
+}
+html[data-hud="on"] .cmd-btn {
+  flex: 0 0 auto;
+  width: clamp(44px, 12vw, 82px) !important;
+  height: clamp(44px, 12vw, 82px) !important;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1.5px solid rgba(142, 241, 251, .85) !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle, rgba(55, 135, 151, .12), rgba(2, 13, 18, .84)) !important;
+  color: rgba(166, 245, 251, .9) !important;
+  box-shadow:
+    inset 0 0 0 4px rgba(105, 225, 240, .03),
+    0 0 10px rgba(83, 224, 242, .13) !important;
+  display: grid !important;
+  place-items: center;
+  cursor: pointer;
+  transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
+}
+html[data-hud="on"] .cmd-btn:active {
+  transform: scale(.91);
+  background: rgba(65, 199, 219, .24) !important;
+  box-shadow: 0 0 19px rgba(95, 235, 251, .45) !important;
+}
+html[data-hud="on"] .cmd-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+html[data-hud="on"] .cmd-btn > span { display: none; }
+html[data-hud="on"] .cmd-icon {
+  display: block;
+  width: 47%;
+  height: 47%;
+  margin: 0 !important;
+  font-size: 0 !important;
+}
+html[data-hud="on"] .cmd-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(107, 235, 247, .5));
+}
+
+/* Bottom service rail mirrors live core/network state. */
+html[data-hud="on"] #hudTeleStrip {
+  position: absolute;
+  z-index: 15;
+  left: 3%;
+  right: 3%;
+  bottom: 2px;
+  min-height: 30px;
+  padding: 8px clamp(7px, 2vw, 16px) 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(5px, 1.8vw, 16px);
+  border: 1px solid rgba(105, 220, 233, .24);
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  background: linear-gradient(180deg, rgba(16, 45, 52, .84), rgba(3, 17, 22, .94));
+  box-shadow: inset 0 8px 24px rgba(75, 190, 208, .05), 0 -4px 16px rgba(45, 173, 202, .04);
+  color: rgba(93, 158, 168, .72);
+  font: 500 clamp(5.5px, 1.55vw, 9px)/1 ui-monospace, monospace;
+  letter-spacing: .035em;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+html[data-hud="on"] #hudTeleStrip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-hud="on"] #hudTeleStrip b {
+  color: rgba(123, 193, 201, .72);
+  font-weight: 600;
+}
+html[data-hud="on"] #hudTeleStrip b.on {
+  color: var(--friday-mint);
+  text-shadow: 0 0 7px rgba(121, 247, 206, .48);
+}
+
+/* Keep full app navigation, but make it a restrained system dock. */
+html[data-hud="on"] .nav-bar {
+  flex: 0 0 auto;
+  min-height: 46px;
+  padding: 2px 7px calc(2px + var(--safe-bottom)) !important;
+  border-top: 1px solid rgba(88, 183, 199, .13) !important;
+  background: #000 !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+html[data-hud="on"] .nav-btn {
+  min-height: 40px;
+  color: rgba(99, 159, 170, .5) !important;
+}
+html[data-hud="on"] .nav-btn svg { width: 17px; height: 17px; }
+html[data-hud="on"] .nav-btn span {
+  color: inherit;
+  font-size: 6px;
+  letter-spacing: .08em;
+}
+html[data-hud="on"] .nav-btn.active {
+  color: rgba(143, 239, 249, .88) !important;
+  filter: drop-shadow(0 0 5px rgba(80, 225, 242, .4));
+  box-shadow: none !important;
+}
+html[data-hud="on"] .nav-btn.active::after {
+  width: 14px;
+  height: 1px;
+  background: var(--friday-cyan);
+}
+
+/* Hidden system deck: real deeper values and controls, opened by long press. */
+html[data-hud="on"] .dashboard.hud-expanded {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  padding: 58px 10px 86px !important;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(56, 187, 219, .1), transparent 34%),
+    #000 !important;
+  contain: paint;
+}
+html[data-hud="on"] .dashboard.hud-expanded::before,
+html[data-hud="on"] .dashboard.hud-expanded::after,
+html[data-hud="on"] .dashboard.hud-expanded #hudLinks,
+html[data-hud="on"] .dashboard.hud-expanded #hudTeleStrip {
+  display: none !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-identity {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  transform: none;
+  margin: 0 0 20px;
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-wordmark {
+  font-size: 24px;
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-top-row,
+html[data-hud="on"] .dashboard.hud-expanded .hud-mid-row,
+html[data-hud="on"] .dashboard.hud-expanded .hud-bottom-row,
+html[data-hud="on"] .dashboard.hud-expanded .hud-footer-row {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 9px;
+  width: 100%;
+  margin: 0 0 9px;
+  padding: 0 !important;
+  z-index: 5;
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-bottom-row,
+html[data-hud="on"] .dashboard.hud-expanded .hud-footer-row {
+  grid-template-columns: 1fr;
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-module {
+  display: block !important;
+  position: relative !important;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 128px;
+  transform: none !important;
+  text-align: left !important;
+  border-radius: 12px !important;
+  padding: 12px !important;
+  box-shadow: inset 0 0 26px rgba(72, 210, 232, .06) !important;
+  overflow: hidden !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .module-ai-core {
+  display: none !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .module-compass {
+  display: block !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .module-header {
+  margin-bottom: 10px !important;
+  font-size: 10px !important;
+  letter-spacing: .12em !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .globe-container,
+html[data-hud="on"] .dashboard.hud-expanded .coordinates,
+html[data-hud="on"] .dashboard.hud-expanded .loc-stats,
+html[data-hud="on"] .dashboard.hud-expanded .weather-stats,
+html[data-hud="on"] .dashboard.hud-expanded .weather-forecast,
+html[data-hud="on"] .dashboard.hud-expanded .bt-list,
+html[data-hud="on"] .dashboard.hud-expanded .bt-scan-btn,
+html[data-hud="on"] .dashboard.hud-expanded .network-content .net-item {
+  display: flex !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .globe-container {
+  display: block !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .network-content .net-item {
+  justify-content: space-between;
+}
+html[data-hud="on"] .dashboard.hud-expanded .network-content .net-item .label {
+  display: inline !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .quick-commands-grid {
+  position: relative !important;
+  inset: auto !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(44px, 1fr));
+  gap: 8px !important;
+  width: 100% !important;
+  margin: 14px 0 !important;
+  padding: 0 !important;
+}
+html[data-hud="on"] .dashboard.hud-expanded .cmd-btn {
+  width: 48px !important;
+  height: 48px !important;
+  justify-self: center;
+}
+html[data-hud="on"] .dashboard.hud-expanded .weather-forecast,
+html[data-hud="on"] .dashboard.hud-expanded .weather-stats,
+html[data-hud="on"] .dashboard.hud-expanded .loc-stats,
+html[data-hud="on"] .dashboard.hud-expanded .bt-list {
+  flex-direction: column;
+}
+html[data-hud="on"] .dashboard.hud-expanded .tel-stats {
+  gap: 8px;
+}
+html[data-hud="on"] .hud-deck-close {
+  display: none;
+  position: fixed;
+  z-index: 80;
+  top: 41px;
+  left: 50%;
+  min-width: 190px;
+  min-height: 44px;
+  transform: translateX(-50%);
+  padding: 0 18px;
+  border: 1px solid rgba(124, 234, 246, .52);
+  border-radius: 22px;
+  background: rgba(2, 18, 24, .96);
+  color: var(--friday-ice);
+  font: 600 9px/1 ui-monospace, monospace;
+  letter-spacing: .12em;
+  box-shadow: 0 0 18px rgba(62, 207, 232, .12);
+}
+html[data-hud="on"] .dashboard.hud-expanded .hud-deck-close {
+  display: block;
+}
+
+/* Compact phones keep the same hierarchy without overlapping controls. */
+@media (max-width: 390px), (max-height: 690px) {
+  :root {
+    --core-size: min(70vw, 38vh, 300px);
+    --hud-card-w: clamp(106px, 31vw, 124px);
+    --hud-card-h: 62px;
+  }
+  html[data-hud="on"] .hud-identity { top: 1.5%; }
+  html[data-hud="on"] .hud-wordmark { font-size: clamp(23px, 6.7vw, 29px); }
+  html[data-hud="on"] .systems-optimal-line { margin-top: 4px !important; }
+  html[data-hud="on"] .module-location,
+  html[data-hud="on"] .module-network { top: 14%; }
+  html[data-hud="on"] .module-ai-core { top: 25% !important; }
+  html[data-hud="on"] .module-weather,
+  html[data-hud="on"] .module-bluetooth {
+    top: min(calc(25% + var(--core-size) + 9px), calc(100% - 150px));
+  }
+  html[data-hud="on"] .hud-module { padding: 7px 9px !important; }
+  html[data-hud="on"] .quick-commands-grid { bottom: 40px; gap: 7px !important; }
+  html[data-hud="on"] .cmd-btn {
+    width: clamp(44px, 12.8vw, 52px) !important;
+    height: clamp(44px, 12.8vw, 52px) !important;
+  }
+  html[data-hud="on"] #hudTeleStrip {
+    left: 1.5%;
+    right: 1.5%;
+    min-height: 26px;
+    padding-top: 6px;
+  }
+  html[data-hud="on"] .friday-core-signature { top: calc(100% + 8px); }
+  html[data-hud="on"] .core-status { top: calc(100% + 42px) !important; }
+}
+
+/* Landscape is an operational fallback; portrait remains the designed mode. */
+@media (orientation: landscape) and (max-height: 520px) {
+  :root {
+    --core-size: min(48vh, 230px);
+    --hud-card-w: clamp(118px, 19vw, 190px);
+    --hud-card-h: 58px;
+  }
+  html[data-hud="on"] .hud-identity { top: 2%; }
+  html[data-hud="on"] .hud-wordmark { font-size: 22px; }
+  html[data-hud="on"] .systems-optimal-line { margin-top: 3px !important; }
+  html[data-hud="on"] .module-ai-core { top: 22% !important; }
+  html[data-hud="on"] .module-location { top: 18%; left: 3%; }
+  html[data-hud="on"] .module-network { top: 18%; right: 3%; }
+  html[data-hud="on"] .module-weather { top: 58%; left: 3%; }
+  html[data-hud="on"] .module-bluetooth { top: 58%; right: 3%; }
+  html[data-hud="on"] .quick-commands-grid {
+    left: 50%;
+    bottom: 33px;
+    gap: 7px !important;
+  }
+  html[data-hud="on"] .cmd-btn { width: 40px !important; height: 40px !important; min-width: 40px; min-height: 40px; }
+  html[data-hud="on"] .friday-core-signature,
+  html[data-hud="on"] .core-status { display: none !important; }
+  html[data-hud="on"] #hudTeleStrip { min-height: 24px; padding: 5px 8px 3px; }
+}
+
+/* Accessibility and battery-aware motion policy. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-hud="on"] *,
+  html[data-hud="on"] *::before,
+  html[data-hud="on"] *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+body[data-low-power="true"] .ai-core-container,
+body[data-fx*='"motion":"low"'] .ai-core-container,
+body[data-fx*='"rings":false'] .friday-core-architecture::after,
+body[data-fx*='"rings":false'] .friday-orbit {
+  animation: none !important;
+}
+body[data-fx*='"glow":"low"'] .ai-core-container {
+  filter: drop-shadow(0 0 10px rgba(var(--hud-accent-rgb), .18)) !important;
+}
