@@ -5,7 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 
-/** Starts FRIDAY's background service when the phone finishes booting. */
+/** Restores durable reminders and, when explicitly enabled, FRIDAY's service after boot. */
 public class FridayBootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
@@ -14,14 +14,18 @@ public class FridayBootReceiver extends BroadcastReceiver {
         if (!a.equals(Intent.ACTION_BOOT_COMPLETED)
                 && !a.equals("android.intent.action.QUICKBOOT_POWERON")) return;
 
+        FridayReminderScheduler.restoreAfterBoot(ctx);
+
         boolean enabled = ctx.getSharedPreferences("friday", Context.MODE_PRIVATE)
                 .getBoolean("boot_start", false);
-        if (!enabled) return;
+        boolean proactive = ctx.getSharedPreferences(FridayAssistantSpeech.PREFS, Context.MODE_PRIVATE)
+                .getBoolean("proactive_enabled", false);
+        if (!enabled || !proactive) return;
 
         try {
             Intent svc = new Intent(ctx, FridayService.class);
-            svc.putExtra("title", "FRIDAY is ready");
-            svc.putExtra("text", "Tap to open");
+            svc.putExtra("title", "FRIDAY always-on mode restored");
+            svc.putExtra("text", "Smart prompts, reminders and call assistance active");
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(svc);
             else ctx.startService(svc);
         } catch (Exception ignored) {}
