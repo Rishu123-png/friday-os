@@ -494,15 +494,15 @@
           <p class="hint" id="serverStatusChip">FRIDAY Cloud: check your URL…</p>
         </div>
         <div class="settings-group">
-          <h3>📞 Call Guard (v10.3 — "FRIDAY sambhale")</h3>
-          <p class="hint">Call aaye aur tum baat nahi karna chahte → chhota card aayega <b>"🦾 FRIDAY sambhale"</b> — tap karte hi call politely decline + caller ko tumhara message chala jaata hai. <i>Honest note: Android kisi bhi app ko call me bolne nahi deta (Google Call Screen special hai) — isliye decline+explain jaisa system. Ek caller se 10 min me sirf ek message — spam never.</i></p>
+          <h3>📞 Call Assistant</h3>
+          <p class="hint">FRIDAY can announce the caller and show separate <b>Accept, Decline, Silence,</b> and <b>Decline + message</b> controls. The message option previews the exact recipient and text before your tap. Android may require call-control/default-dialer permission. FRIDAY cannot intercept cellular-call audio or inject an AI voice into the call.</p>
           <div class="setting-item">
-            <label>Call Guard</label>
+            <label>Call Assistant controls</label>
             <div class="toggle-switch"><input type="checkbox" id="callGuard"><span class="toggle-slider"></span></div>
           </div>
           <div class="setting-item">
             <label>Explainer message ({name}/{number} auto-fill)</label>
-            <input type="text" id="callGuardTemplate" autocomplete="off">
+            <input type="text" id="callGuardTemplate" maxlength="500" autocomplete="off">
           </div>
           <div class="setting-item">
             <label>Kaise bheje</label>
@@ -511,7 +511,7 @@
               <option value="whatsapp">WhatsApp (draft open hota hai, tum send dabate ho)</option>
             </select>
           </div>
-          <p class="hint">Permissions puchhega: Phone + Calls (decline ke liye) + Overlay + SMS/WhatsApp.</p>
+          <p class="hint">Permissions: Phone/Calls for supported controls, Contacts for caller names, Overlay for the card, and SMS only for the explicitly tapped message-back action.</p>
         </div>
         <div class="settings-group">
           <h3>🧠 Memory Dashboard (v11.3 COGNITION — dev)</h3>
@@ -742,6 +742,63 @@
             <label>Announce notifications</label>
             <div class="toggle-switch"><input type="checkbox" id="announceNotifications" checked><span class="toggle-slider"></span></div>
           </div>
+          <div class="setting-item">
+            <label>Always-on proactive FRIDAY <small>(explicit opt-in)</small></label>
+            <div class="toggle-switch"><input type="checkbox" id="proactiveAssistant"><span class="toggle-slider"></span></div>
+          </div>
+          <p class="hint">Keeps smart reminders, important-notification prompts and approved call assistance active after normal UI closure. Android manual <strong>Force Stop</strong> disables all background behavior until you reopen FRIDAY.</p>
+          <div class="setting-item">
+            <label>Address me as</label>
+            <select id="assistantAddress"><option value="Boss">Boss</option><option value="Sir">Sir</option></select>
+          </div>
+          <div class="setting-item">
+            <label>Private mode <small>(silence proactive speech and hide details)</small></label>
+            <div class="toggle-switch"><input type="checkbox" id="proactivePrivateMode"><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Keep details private while locked</label>
+            <div class="toggle-switch"><input type="checkbox" id="privateOnLock" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Quiet hours</label>
+            <div class="toggle-switch"><input type="checkbox" id="quietHoursEnabled" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item btn-row">
+            <label>From <input type="time" id="quietHoursStart" value="22:00"></label>
+            <label>Until <input type="time" id="quietHoursEnd" value="07:00"></label>
+          </div>
+          <div class="setting-item">
+            <label>Smart categories</label>
+            <div class="btn-row" aria-label="Notification categories">
+              <label><input type="checkbox" id="notifyMessages" checked> Messages</label>
+              <label><input type="checkbox" id="notifyEmail" checked> Email</label>
+              <label><input type="checkbox" id="notifyCalendar" checked> Calendar</label>
+              <label><input type="checkbox" id="notifyDelivery" checked> Deliveries</label>
+              <label><input type="checkbox" id="notifyMissedCalls" checked> Missed calls</label>
+              <label><input type="checkbox" id="notifySensitive" checked> OTP/banking (private prompt only)</label>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label>Never announce these package names <small>(comma-separated)</small></label>
+            <input type="text" id="notificationBlockedApps" placeholder="com.example.privateapp" autocomplete="off">
+          </div>
+          <div class="setting-item">
+            <label>Never announce these displayed senders <small>(comma-separated)</small></label>
+            <input type="text" id="notificationBlockedContacts" placeholder="Private contact, Work group" autocomplete="off">
+          </div>
+          <div class="setting-item btn-row">
+            <label>Minimum gap <input type="number" id="notificationRateSeconds" min="5" max="300" value="20"> sec</label>
+            <label>Hourly cap <input type="number" id="notificationMaxPerHour" min="1" max="60" value="12"></label>
+          </div>
+          <div class="setting-item">
+            <label>Announce incoming callers</label>
+            <div class="toggle-switch"><input type="checkbox" id="callAnnouncements" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item btn-row">
+            <button type="button" class="btn-secondary" id="notificationAccessBtn">🔔 Notification access</button>
+            <button type="button" class="btn-secondary" id="exactAlarmBtn">⏰ Exact reminder access</button>
+          </div>
+          <p class="hint">Reply drafts always repeat the exact recipient and text, then wait for “send it.” If an app exposes no Android RemoteInput action, FRIDAY reports that instead of pretending. Cellular call audio interception and AI voice injection are not supported.</p>
           <div class="setting-item">
             <label>Floating bubble</label>
             <div class="toggle-switch"><input type="checkbox" id="bubbleEnabled"><span class="toggle-slider"></span></div>
@@ -1033,5 +1090,5 @@
 <!-- FRIDAY OS unified HUD redesign — additive, non-destructive (see js/hud-shell.js) -->
 <script src="js/hud-shell.js"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f"}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a298241dbf78251f',t:'MTc4NjQ2MDc1Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a298241dbf78251f',t:'MTc4NjQ2MDc1Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2bfa2055b5eca42',t:'MTc4Njg3NDg1NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
