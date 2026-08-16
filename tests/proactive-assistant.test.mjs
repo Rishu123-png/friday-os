@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   CATEGORIES, classifyNotification, isQuietAt, notificationDecision, promptFor,
   createReplyAuthorization, confirmationPrompt, verifyReplyAuthorization
@@ -55,4 +56,33 @@ test('reply authorization is bound to exact event, recipient text and explicit p
   assert.equal(verifyReplyAuthorization(auth, { eventKey: 'notification-7', text: 'changed', confirmation: 'send it', now: 2_000 }).reason, 'action_changed');
   assert.equal(verifyReplyAuthorization(auth, { eventKey: 'notification-7', text: auth.text, confirmation: 'send it', now: 2_000 }).ok, true);
   assert.equal(verifyReplyAuthorization(auth, { eventKey: 'notification-7', text: auth.text, confirmation: 'send it', now: 122_000 }).reason, 'expired');
+});
+
+test('native startup awaits foreground and boot persistence results before claiming success', () => {
+  const app = readFileSync(new URL('../www/js/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const started = await NAT\.startForegroundService/);
+  assert.match(app, /if \(!started \|\| !started\.ok\)[\s\S]*?S\.setSetting\('backgroundService', false\)/);
+  assert.match(app, /const bootSaved = await NAT\.setBootStart\(true\)/);
+  assert.match(app, /if \(!bootSaved \|\| !bootSaved\.ok\)[\s\S]*?S\.setSetting\('bootStart', false\)/);
+});
+
+test('call SMS status separates accepted request from Android final sent result', () => {
+  const source = readFileSync(new URL('../native/FridayCallGuard.java', import.meta.url), 'utf8');
+  const callback = source.slice(source.indexOf('if (ACTION_SMS_RESULT.equals'),
+    source.indexOf('if (!TelephonyManager.ACTION_PHONE_STATE_CHANGED'));
+  const request = source.slice(source.indexOf('sm.sendTextMessage('),
+    source.indexOf('} catch (Exception e)', source.indexOf('sm.sendTextMessage(')));
+  assert.match(callback, /getResultCode\(\) == Activity\.RESULT_OK/);
+  assert.match(callback, /emitCallHandled\(number, "sms_sent"\)/);
+  assert.match(callback, /emitCallHandled\(number, "sms_failed"\)/);
+  assert.match(request, /emitCallHandled\(number, "sms_requested"\)/);
+  assert.doesNotMatch(request, /emitCallHandled\(number, "sms_sent"\)/);
+});
+
+test('offline assets contain no injected Cloudflare code or control-character license path', () => {
+  const index = readFileSync(new URL('../www/index.html', import.meta.url), 'utf8');
+  const licenseNames = readdirSync(new URL('../native/vendor/sherpa/', import.meta.url));
+  assert.doesNotMatch(index, /static\.cloudflareinsights\.com|__CF\$cv\$params|challenge-platform\/scripts/);
+  assert.equal(licenseNames.includes('LICENSE-NOTE.md'), true);
+  assert.equal(licenseNames.some((name) => /[\x00-\x1f\x7f]/.test(name)), false);
 });
