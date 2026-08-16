@@ -22,6 +22,7 @@
    templates/Groq. Nothing here can crash the app. */
 
 import { getSetting, setSetting } from './store.js';
+import { downloadFilePersistent } from './native.js';
 
 const CAP = () => (typeof window !== 'undefined' ? window.Capacitor : null);
 const isNative = () => {
@@ -178,23 +179,22 @@ export async function isInstalled(id) {
   catch (_) { return false; }
 }
 
-/** Download a model with progress: onProgress(percent, mbDone, mbTotal). */
+/**
+ * Download a model with progress: onProgress(percent, mbDone, mbTotal).
+ * The native WorkManager job survives Activity/process recreation, resumes a
+ * validated .part file, and atomically publishes the GGUF only when complete.
+ */
 export async function downloadModel(id, onProgress) {
   const m = modelById(id);
   if (!m) throw new Error('Unknown model');
-  const fs = FS();
-  if (!fs) throw new Error('Filesystem plugin unavailable (APK required)');
-  let sub = null;
-  try {
-    if (fs.addListener && onProgress) {
-      sub = await fs.addListener('progress', ev => {
-        const pct = ev.contentLength ? Math.round(ev.bytes / ev.contentLength * 100) : 0;
-        onProgress(pct, ev.bytes / 1048576, (ev.contentLength || 0) / 1048576);
-      });
-    }
-    await fs.mkdir({ path: 'models', directory: 'DATA', recursive: true }).catch(() => {});
-    await fs.downloadFile({ url: m.url, path: modelPath(id), directory: 'DATA', progress: true });
-  } finally { if (sub && sub.remove) sub.remove(); }
+  if (!isNative()) throw new Error('Persistent downloader unavailable (APK required)');
+  const result = await downloadFilePersistent({ url: m.url, dest: modelPath(id) },
+    (percent, bytes, totalBytes) => {
+      if (onProgress) onProgress(percent, bytes / 1048576, totalBytes / 1048576);
+    });
+  if (!result.ok || result.state !== 'succeeded') {
+    throw new Error(result.reason || `Download ${result.state || 'failed'}`);
+  }
   setSetting('localModel', id);
   return true;
 }

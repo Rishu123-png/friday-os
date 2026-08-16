@@ -535,11 +535,27 @@ export async function voskScanModels() {
   catch (e) { return { ok: false, reason: e?.message || 'error', items: [] }; }
 }
 
-export async function voskDownload(url) {
+export async function voskDownload(url, onProgress = null) {
   const p = vosk();
   if (!p) return { ok: false, reason: isNative() ? 'engine_missing' : 'web' };
-  try { return await p.downloadModel(url ? { url } : {}); }
-  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+  const modelUrl = url || 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip';
+  try {
+    const result = await downloadFilePersistent({
+      url: modelUrl,
+      dest: 'vosk/wake-model.zip',
+      extractZip: true,
+      stripTopLevel: true
+    }, onProgress);
+    if (!result?.ok || !result.path) return result || { ok: false, reason: 'download_failed' };
+
+    // FridayVosk only lists directories containing the model's required am/final.mdl.
+    // Do not retain a path merely because the ZIP worker completed successfully.
+    const scan = await voskScanModels();
+    const wanted = String(result.path).replace(/\/+$/, '');
+    const model = (scan?.items || []).find(item => String(item.path || '').replace(/\/+$/, '') === wanted);
+    if (!model) return { ...result, ok: false, reason: 'bad_model', path: '' };
+    return { ...result, ok: true, path: model.path, mb: model.mb };
+  } catch (e) { return { ok: false, reason: e?.message || 'download_failed' }; }
 }
 
 /** Subscribe to wake-word engine events: 'wake' | 'voskProgress' | 'voskError'. */
@@ -571,18 +587,105 @@ export async function llmEmbed(text) {
   catch (e) { return { ok: false, reason: e?.message || 'error' }; }
 }
 
-/* ================= v10.0 JARVIS: generic HuggingFace repo downloader ================= */
-export async function hfDownload({ repo, dest }) {
-  if (!isNative() || !plugin()) return { ok: false, reason: 'web' };
-  try { return await plugin().hfDownload({ repo, dest }); }
-  catch (e) { return { ok: false, reason: e?.message || 'error' }; }
+/* ================= PERSISTENT FOREGROUND DOWNLOADS =================
+   WorkManager owns the transfer, so Android can recreate the Activity or the
+   process without losing a multi-GB model download. Re-enqueuing the same
+   destination reconnects to the surviving/completed unique job. */
+const downloads = () => pluginNamed('FridayDownloads');
+const downloadProgressHandlers = new Set();
+
+function emitDownloadProgress(status) {
+  downloadProgressHandlers.forEach(cb => {
+    try { cb({
+      jobId: status.jobId,
+      file: status.file || '',
+      done: Number(status.bytes || 0),
+      total: Number(status.totalBytes || 0),
+      percent: Number(status.percent || 0),
+      state: status.state
+    }); } catch (_) {}
+  });
 }
 
-/** progress events during hf repo downloads */
+export async function downloadStatus(jobId) {
+  const p = downloads();
+  if (!p) return { ok: false, reason: isNative() ? 'download_engine_missing' : 'web' };
+  try { return await p.status({ jobId }); }
+  catch (e) { return { ok: false, reason: e?.message || 'status_failed' }; }
+}
+
+export async function cancelDownload(jobId) {
+  const p = downloads();
+  if (!p) return { ok: false, reason: isNative() ? 'download_engine_missing' : 'web' };
+  try { return await p.cancel({ jobId }); }
+  catch (e) { return { ok: false, reason: e?.message || 'cancel_failed' }; }
+}
+
+export async function downloadJobs() {
+  const p = downloads();
+  if (!p) return { ok: false, jobs: [], reason: isNative() ? 'download_engine_missing' : 'web' };
+  try { return await p.jobs(); }
+  catch (e) { return { ok: false, jobs: [], reason: e?.message || 'status_failed' }; }
+}
+
+export async function waitForDownload(jobId, onProgress = null) {
+  for (;;) {
+    const status = await downloadStatus(jobId);
+    if (!status.jobId) return status;
+    emitDownloadProgress(status);
+    if (onProgress) {
+      try { onProgress(status.percent || 0, status.bytes || 0, status.totalBytes || 0, status); } catch (_) {}
+    }
+    if (status.state === 'succeeded') return { ...status, ok: true };
+    if (['failed', 'cancelled'].includes(status.state)) return { ...status, ok: false };
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+}
+
+/** Persistent arbitrary HTTPS file download into app-private DATA. */
+export async function downloadFilePersistent({
+  url, dest, expectedBytes = 0, sha256 = '', extractZip = false, stripTopLevel = false
+}, onProgress = null) {
+  const p = downloads();
+  if (!p) return { ok: false, reason: isNative() ? 'download_engine_missing' : 'web' };
+  try {
+    const queued = await p.enqueue({ url, dest, expectedBytes, sha256, extractZip, stripTopLevel });
+    if (!queued?.jobId) return queued || { ok: false, reason: 'enqueue_failed' };
+    return await waitForDownload(queued.jobId, onProgress);
+  } catch (e) { return { ok: false, reason: e?.message || 'download_failed' }; }
+}
+
+/** Persistent Hugging Face repository download, preserving the old API. */
+export async function hfDownload({ repo, dest }) {
+  const p = downloads();
+  if (!p) return { ok: false, reason: isNative() ? 'download_engine_missing' : 'web' };
+  try {
+    const queued = await p.enqueueHuggingFace({ repo, dest });
+    if (!queued?.jobId) return queued || { ok: false, reason: 'enqueue_failed' };
+    return await waitForDownload(queued.jobId);
+  } catch (e) { return { ok: false, reason: e?.message || 'download_failed' }; }
+}
+
+/** Backwards-compatible progress subscription for Hugging Face screens. */
 export function hfAddProgressListener(cb) {
-  const p = plugin();
-  if (!p || typeof p.addListener !== 'function') return null;
-  try { return p.addListener('hfProgress', cb); } catch (_) { return null; }
+  if (typeof cb !== 'function') return null;
+  downloadProgressHandlers.add(cb);
+  return { remove: () => downloadProgressHandlers.delete(cb) };
+}
+
+/* ================= USER-INITIATED NATIVE DIAGNOSTICS ================= */
+export async function collectNativeDiagnostics() {
+  const p = pluginNamed('FridayDiagnostics');
+  if (!p) return { ok: false, reason: isNative() ? 'diagnostics_missing' : 'web' };
+  try { return await p.collect(); }
+  catch (e) { return { ok: false, reason: e?.message || 'diagnostics_failed' }; }
+}
+
+export async function clearNativeDiagnostics() {
+  const p = pluginNamed('FridayDiagnostics');
+  if (!p) return { ok: false, reason: isNative() ? 'diagnostics_missing' : 'web' };
+  try { return await p.clear(); }
+  catch (e) { return { ok: false, reason: e?.message || 'diagnostics_failed' }; }
 }
 
 /* ================= v10.0 TR1: offline ML Kit translator ================= */

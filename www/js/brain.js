@@ -1209,7 +1209,7 @@ I('dev_console', t => /\b(dev console|developer console|dev tools|diagnostics pa
   t => ({ say: null, action: { type: 'dev_console' } }), 5);
 I('telemetry', t => /\b(telemetry (on|off|enable|disable)|crash (reporting|telemetry)|analytics (on|off))\b/i.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'telemetry', on: !/\b(off|disable|band)\b/.test(t) } }), 5);
-I('telemetry_export', t => /\b(export telemetry|telemetry export|crash log export)\b/i.test(t) ? 1 : 0,
+I('telemetry_export', t => /\b(export telemetry|telemetry export|crash log export|export diagnostics|diagnostics export|export logcat)\b/i.test(t) ? 1 : 0,
   t => ({ say: null, action: { type: 'telemetry_export' } }), 5);
 
 /* image maker: "make an image of a cyberpunk city" */

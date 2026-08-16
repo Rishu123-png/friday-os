@@ -173,6 +173,7 @@ const bootFridayCore = () => {
   } catch (e) { Logger.error('core', 'boot wiring failed: ' + (e && e.message)); }
 };
 import * as SERVER from './server.js';
+import * as ACTION_DEVICE from './action-device.js';
 import { humanTime, parseTime, pick, stripFillers } from './nlp.js';
 
 const $ = U.$, $$ = U.$$;
@@ -631,6 +632,7 @@ async function init() {
   if (SERVER.isConfigured()) {
     serverHealthCheck();
     syncServerMemory();
+    ACTION_DEVICE.startActionLoop();
   }
   /* PWA shortcuts (?action=voice|chat|qr) — was dead code */
   const act = new URLSearchParams(location.search).get('action');
@@ -2533,9 +2535,16 @@ async function runAction(a, hit) {
       return true;
     }
     case 'telemetry_export': {
-      const blob = JSON.stringify(DEVCON.exportTelemetry(), null, 2);
-      D.download(`friday-telemetry-${Date.now()}.json`, blob, 'application/json');
-      reply('Telemetry export kiya (local file). Kuch bhi bina permission device se bahar nahi jaata.');
+      const native = NAT.isNative() ? await NAT.collectNativeDiagnostics().catch(e => ({ ok: false, reason: e?.message || 'failed' })) : { ok: false, reason: 'web' };
+      const payload = {
+        ...DEVCON.exportTelemetry(),
+        nativeDiagnostics: native.ok ? native.text : null,
+        nativeDiagnosticsStatus: native.ok ? { ok: true, crashCount: native.crashCount || 0 } : native
+      };
+      D.download(`friday-diagnostics-${Date.now()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+      reply(native.ok
+        ? `Diagnostics export kiya — JS telemetry, ${native.crashCount || 0} saved native crash report(s), app logcat, aur download states. File local hai; kuch automatically upload nahi hota.`
+        : 'JS telemetry export kiya. Native crash/logcat unavailable tha: ' + (native.reason || 'unknown') + '. Kuch automatically upload nahi hota.');
       return true;
     }
 
@@ -6094,6 +6103,7 @@ function bindEvents() {
   bind('#porcupineKey', 'porcupineKey', 'input');
   bind('#wakeKeyword', 'wakeKeyword', 'input');
   const voskDl = $('#voskDownload'), voskSc = $('#voskScan');
+  if (voskDl) voskDl.addEventListener('click', () => voskDownloadUI(false));
   if (voskSc) voskSc.addEventListener('click', voskScanUI);
   if (NAT.voskAddListener) NAT.voskAddListener('voskProgress', ev => {
     const chip = $('#voskStatusChip');
@@ -6398,7 +6408,9 @@ async function voskDownloadUI(quiet) {
     if (chip) chip.textContent = 'Wake brain: downloading… 0%';
     U.toast('Downloading the wake brain (36MB, one time) — a small offline ear. No account, no key.', '🎙️');
   }
-  const r = await NAT.voskDownload();
+  const r = await NAT.voskDownload(null, percent => {
+    if (chip && percent < 100) chip.textContent = `Wake brain: downloading… ${Math.max(0, Math.round(percent || 0))}%`;
+  });
   if (r && r.ok) {
     S.setSetting('voskModelPath', r.path || '');
     if (!quiet) {
