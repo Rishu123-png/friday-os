@@ -19,6 +19,9 @@ export const DEFAULTS = {
   // AI
   aiProvider: 'auto',        // auto | local | groq
   groqModel: 'llama-3.3-70b-versatile',
+  // Safe status flags only; Groq key values live in Android Keystore.
+  groqPrimaryConfigured: false,
+  groqStandbyConfigured: false,
   // Persona
   personality: 'friday',
   userName: 'Boss',
