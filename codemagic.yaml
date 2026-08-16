@@ -63,7 +63,7 @@ workflows:
           cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
-          cp native/res/xml/friday_widget_info.xml native/res/xml/file_paths.xml android/app/src/main/res/xml/
+          cp native/res/xml/*.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
           cp native/res/raw/keep.xml android/app/src/main/res/raw/
@@ -160,7 +160,7 @@ workflows:
           cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
-          cp native/res/xml/friday_widget_info.xml native/res/xml/file_paths.xml android/app/src/main/res/xml/
+          cp native/res/xml/*.xml android/app/src/main/res/xml/
           cp native/res/layout/friday_widget.xml android/app/src/main/res/layout/
           cp native/res/drawable/*.xml android/app/src/main/res/drawable/
           cp native/res/raw/keep.xml android/app/src/main/res/raw/
