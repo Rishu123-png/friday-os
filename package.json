@@ -10,7 +10,7 @@
     "apk": "cd android && ./gradlew assembleDebug",
     "build": "echo \"static app \u2014 nothing to compile\"",
     "test:web": "node --experimental-vm-modules --test tests/",
-    "test:backend": "python3 -m unittest backend/test_cloud_providers.py -v"
+    "test:backend": "python3 -m unittest discover -s backend -p 'test_*.py' -v"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
