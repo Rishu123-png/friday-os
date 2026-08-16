@@ -7,7 +7,20 @@ screenshot-*.png
 shot-*.png
 __pycache__/
 *.pyc
+.pytest_cache/
 
-# v10.1 FRIDAY Cloud — never commit secrets or the memory DB
-backend/.env
-backend/friday.db
+# Secrets: templates are allowed; populated env files are never committed.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Local backend state and diagnostic exports.
+backend/*.db
+backend/*.db-*
+backend/diagnostics/
+diagnostics/
+*.keystore
+*.jks
