@@ -629,6 +629,9 @@ public class FridayNative extends Plugin {
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             r.put("volume", Math.round(am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100f / max));
+            int brightness = Settings.System.getInt(getContext().getContentResolver(),
+                    Settings.System.SCREEN_BRIGHTNESS, -1);
+            if (brightness >= 0) r.put("brightness", Math.round(brightness * 100f / 255f));
         } catch (Exception ignored) {}
         call.resolve(r);
     }
@@ -1901,87 +1904,12 @@ public class FridayNative extends Plugin {
         }).start();
     }
 
-    /* ================= v10.0 JARVIS: generic HuggingFace repo downloader =================
-       One downloader to rule them all - embedding models, sherpa voice packs,
-       STT packs... Given a HF repo id it fetches the file list from the API,
-       downloads every real file (skips README/.gitattributes) into
-       filesDir/hfRepo/<dest>. Emits "hfProgress" {percent,file}. */
-    private boolean hfBusy = false;
-
+    /* The old in-Activity Hugging Face downloader was intentionally disabled:
+       it could be killed with the Activity and published partial files. All
+       callers now use FridayDownloads + foreground WorkManager persistence. */
+    @Deprecated
     @PluginMethod
     public void hfDownload(final PluginCall call) {
-        final String repo = call.getString("repo", "").trim();
-        final String dest = call.getString("dest", repo.replace('/', '_').replaceAll("[^A-Za-z0-9._-]", ""));
-        if (repo.isEmpty()) { call.resolve(fail("no_repo")); return; }
-        if (hfBusy) { call.resolve(fail("busy")); return; }
-        hfBusy = true;
-        new Thread(() -> {
-            try {
-                /* ---- 1) file list ---- */
-                java.net.HttpURLConnection meta = (java.net.HttpURLConnection)
-                    new java.net.URL("https://huggingface.co/api/models/" + repo).openConnection();
-                meta.setConnectTimeout(15000);
-                meta.setReadTimeout(20000);
-                meta.setRequestProperty("User-Agent", "friday-os");
-                StringBuilder sb = new StringBuilder();
-                try (java.io.BufferedReader br = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(meta.getInputStream()))) {
-                    String line; while ((line = br.readLine()) != null) sb.append(line);
-                }
-                meta.disconnect();
-                java.util.ArrayList<String> files = new java.util.ArrayList<>();
-                java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("\"rfilename\"\\s*:\\s*\"([^\"]+)\"").matcher(sb.toString());
-                while (m.find()) {
-                    String f = m.group(1);
-                    if (f.endsWith(".gitattributes")) continue;
-                    String base = f.contains("/") ? f.substring(f.lastIndexOf('/') + 1) : f;
-                    if (base.equalsIgnoreCase("readme.md") || base.equalsIgnoreCase("license")) continue;
-                    files.add(f);
-                }
-                if (files.isEmpty()) { hfBusy = false; call.resolve(fail("empty_repo")); return; }
-
-                /* ---- 2) download all ---- */
-                java.io.File root = new java.io.File(getContext().getFilesDir(), "hfRepo/" + dest);
-                root.mkdirs();
-                int done = 0;
-                com.getcapacitor.JSArray saved = new com.getcapacitor.JSArray();
-                for (String f : files) {
-                    java.io.File out = new java.io.File(root, f);
-                    java.io.File parent = out.getParentFile();
-                    if (parent != null) parent.mkdirs();
-                    java.net.HttpURLConnection c = (java.net.HttpURLConnection)
-                        new java.net.URL("https://huggingface.co/" + repo + "/resolve/main/" + f).openConnection();
-                    c.setInstanceFollowRedirects(true);
-                    c.setConnectTimeout(20000);
-                    c.setReadTimeout(60000);
-                    c.setRequestProperty("User-Agent", "friday-os");
-                    int code = c.getResponseCode();
-                    if (code == 200) {
-                        try (java.io.InputStream in = c.getInputStream();
-                             java.io.FileOutputStream fos = new java.io.FileOutputStream(out)) {
-                            byte[] buf = new byte[65536]; int n;
-                            while ((n = in.read(buf)) != -1) fos.write(buf, 0, n);
-                        }
-                        saved.put(f);
-                    }
-                    c.disconnect();
-                    done++;
-                    JSObject prog = new JSObject();
-                    prog.put("percent", Math.round(done * 100.0 / files.size()));
-                    prog.put("file", f);
-                    notifyListeners("hfProgress", prog);
-                }
-                hfBusy = false;
-                JSObject r = ok();
-                r.put("dir", root.getAbsolutePath());
-                r.put("files", saved);
-                r.put("total", files.size());
-                call.resolve(r);
-            } catch (Throwable t) {
-                hfBusy = false;
-                call.resolve(fail(t.getMessage() != null ? t.getMessage() : "hf_failed"));
-            }
-        }, "friday-hf-dl").start();
+        call.resolve(fail("moved_to_persistent_downloader"));
     }
 }
