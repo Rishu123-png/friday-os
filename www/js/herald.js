@@ -17,7 +17,10 @@ export function pickLatestInbox(items, app = 'whatsapp', maxAgeMs = 6 * 3600e3, 
     .filter(n => n && pkgs.includes(n.pkg) && (n.text || '').trim())
     .filter(n => !maxAgeMs || (now - (n.when || 0)) < maxAgeMs)
     .sort((a, b) => (b.when || 0) - (a.when || 0));
-  return list.map(n => ({ pkg: n.pkg, who: n.title || 'Someone', text: String(n.text).trim(), when: n.when || 0 }));
+  return list.map(n => ({
+    key: n.key || '', pkg: n.pkg, who: n.title || 'Someone', text: String(n.text).trim(),
+    replyable: n.replyable !== false, sensitive: !!n.sensitive, category: n.category || 'MESSAGE', when: n.when || 0
+  }));
 }
 
 /** Short Hinglish summary of the inbox for speaking aloud. */
