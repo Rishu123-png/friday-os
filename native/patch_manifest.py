@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Injects permissions, services and receivers into AndroidManifest.xml. Run by Codemagic."""
-import io, sys
+import io, re, sys
 
 PATH = 'android/app/src/main/AndroidManifest.xml'
 
@@ -179,6 +179,25 @@ def main():
 
     if add:
         s = s.replace('<application', add + '\n    <application', 1)
+
+    # Runtime Groq credentials are encrypted with an Android-Keystore key, but
+    # their ciphertext must not be copied by Auto Backup or device transfer.
+    app_start = s.index('<application')
+    app_end = s.index('>', app_start)
+    app_open = s[app_start:app_end + 1]
+    backup_attrs = {
+        'android:fullBackupContent': '@xml/friday_backup_rules',
+        'android:dataExtractionRules': '@xml/friday_data_extraction_rules',
+    }
+    for attr, value in backup_attrs.items():
+        rendered = '%s="%s"' % (attr, value)
+        if attr in app_open:
+            app_open = re.sub(
+                re.escape(attr) + r"\s*=\s*(['\"])[^'\"]*\1",
+                rendered, app_open, count=1)
+        else:
+            app_open = app_open[:-1] + '\n        ' + rendered + '>'
+    s = s[:app_start] + app_open + s[app_end + 1:]
 
     if 'FridayService' not in s:
         i = s.rindex('</application>')
