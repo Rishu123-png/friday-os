@@ -3,7 +3,7 @@
 """Registers FRIDAY's custom plugins with Capacitor's MainActivity. Run by Codemagic."""
 import re, io, glob, sys
 
-PLUGINS = ['FridayNative', 'FridaySpeech', 'FridayWakeWord', 'FridayVosk', 'FridayTranslate', 'FridaySherpa', 'LlamaCpp', 'FridaySensors', 'FridayHealthConnect']
+PLUGINS = ['FridayNative', 'FridaySpeech', 'FridayWakeWord', 'FridayVosk', 'FridayTranslate', 'FridaySherpa', 'LlamaCpp', 'FridaySensors', 'FridayHealthConnect', 'FridayDownloads', 'FridayDiagnostics']
 
 cands = glob.glob('android/app/src/main/java/**/MainActivity.java', recursive=True)
 if not cands:
