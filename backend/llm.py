@@ -18,8 +18,8 @@ from typing import AsyncGenerator
 
 from config import settings
 from cloud_providers import complete
-from tools import TOOL_RUNNERS, TOOL_SCHEMAS
-from memory import memory_brief
+from tools import TOOL_RUNNERS
+from device_commands import device_action_tool_schema, normalize_device_tool
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -102,6 +102,7 @@ SERVER_TOOL_SCHEMAS = [
             },
         },
     },
+    device_action_tool_schema(),
 ]
 
 
@@ -116,7 +117,11 @@ def _system_prompt(brief: str) -> str:
         "- When you call a tool, you WILL get the real result in the next message from the system.\n"
         "- NEVER invent tool results or pretend you completed an action. Use ONLY what the tool returns.\n"
         "- If a tool says it failed or needs permission, tell the user honestly and explain how to fix it.\n"
-        "- For device actions (weather, time, knowledge, web): call the tool, get the result, THEN respond.\n"
+        "- For live data or phone actions, call the relevant tool, get the result, THEN respond.\n"
+        "- device_action only queues a typed request for Android. QUEUED is not completed; "
+        "AWAITING_CONFIRMATION is not authorized. Repeat that distinction honestly.\n"
+        "- Never claim a call connected, a message delivered, an alarm saved, an app opened, or a setting changed "
+        "unless the tool result contains independent verification evidence.\n"
         "- If the tool confirms success, say what actually happened — never say 'Done' without evidence.\n"
         "- If the tool fails, explain why honestly.\n"
         "- AMBIGUITY: if a request is ambiguous or missing a critical detail, ask ONE short clarifying "
@@ -166,11 +171,17 @@ def _wants_tools(history: list) -> bool:
         r"\bhttps?://\b", r"\bfetch\b", r"\bopen (the |that )?(url|website|site|page)\b",
         r"\bturn (on|off)\b", r"\bsmart home\b", r"\bswitch (on|off)\b",
         r"\b(lights?|fan|ac|air conditioner)\b.*\b(on|off)\b",
+        r"\b(torch|flashlight|volume|brightness|wi[ -]?fi|bluetooth|battery|storage)\b",
+        r"\b(open|launch|start)\b.*\bapp\b", r"\b(open|launch)\s+[a-z0-9]",
+        r"\b(play|pause|next|previous|stop)\b.*\b(music|song|media|track)\b",
+        r"\b(set|create|add)\b.*\balarm\b", r"\bnotifications?\b",
+        r"\b(read|scan|capture|screenshot)\b.*\bscreen\b",
+        r"\b(call|dial|phone|send sms|send message|text)\b",
     ]
     return any(re.search(p, last) for p in patterns)
 
 
-async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]:
+async def run_tool_loop(history: list, brief: str, enqueue_device_action=None) -> AsyncGenerator[dict, None]:
     """
     Bounded multi-round agent tool loop.
 
@@ -239,14 +250,36 @@ async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]
                 except Exception:
                     args = {}
 
-                runner = TOOL_RUNNERS.get(name)
-                if runner:
-                    try:
-                        result = await runner(args)
-                    except Exception as e:
-                        result = f"Tool error: {e}"
+                action_event = None
+                if name == "device_action":
+                    if enqueue_device_action is None:
+                        result = "DEVICE ACTION FAILED: no authenticated action queue is available."
+                    else:
+                        try:
+                            normalized = normalize_device_tool(args)
+                            action_event = await enqueue_device_action(normalized)
+                            action = action_event["action"]
+                            if action["state"] == "awaiting_confirmation":
+                                result = (
+                                    "DEVICE ACTION AWAITING_CONFIRMATION, not authorized and not executed. "
+                                    f"action_id={action['action_id']}. Ask the user for explicit confirmation."
+                                )
+                            else:
+                                result = (
+                                    "DEVICE ACTION QUEUED, not yet executed or verified. "
+                                    f"action_id={action['action_id']}. Tell the user it was queued, not completed."
+                                )
+                        except Exception as e:
+                            result = f"DEVICE ACTION FAILED: {str(e)[:300]}"
                 else:
-                    result = f"Unknown tool: {name}"
+                    runner = TOOL_RUNNERS.get(name)
+                    if runner:
+                        try:
+                            result = await runner(args)
+                        except Exception as e:
+                            result = f"Tool error: {e}"
+                    else:
+                        result = f"Unknown tool: {name}"
 
                 result_str = str(result)[:2000]  # cap context pollution
 
@@ -257,6 +290,8 @@ async def run_tool_loop(history: list, brief: str) -> AsyncGenerator[dict, None]
                     "content": result_str,
                 })
 
+                if action_event is not None:
+                    yield {"type": "action", **action_event}
                 yield {
                     "type": "tool",
                     "name": name,
