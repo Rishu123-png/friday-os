@@ -228,9 +228,10 @@ export function friendlyApp(pkg) {
 /* ================= BACKGROUND SERVICE (Phase B) ================= */
 export async function startForegroundService(opts = {}) {
   return call('startForegroundService', {
-    title: opts.title || 'FRIDAY is listening',
-    text: opts.text || 'Say "Hey Friday"',
-    wakeWord: opts.wakeWord !== false
+    title: opts.title || 'FRIDAY always-on mode',
+    text: opts.text || 'Smart prompts, reminders and call assistance active',
+    /* Reserved for a service-owned hotword engine when the installed build has one. */
+    wakeWord: opts.wakeWord === true
   });
 }
 export async function stopForegroundService() { return call('stopForegroundService'); }
@@ -355,9 +356,25 @@ export function onGeofence(cb) {
 }
 
 /* ================= NOTIFICATION REPLY (RemoteInput) ================= */
-export async function replyNotification(app, text) {
-  return call('replyNotification', { app: app || '', text });
+export async function authorizeNotificationReply({ eventKey = '', app = '', recipient = '', text = '', confirmation = '' } = {}) {
+  return call('authorizeNotificationReply', { eventKey, app, recipient, text, confirmation });
 }
+export async function replyNotification(app, text, eventKey = '', authorizationToken = '') {
+  return call('replyNotification', { app: app || '', text, eventKey, authorizationToken });
+}
+
+/* ================= STEP 5: ALWAYS-ON ASSISTANT ================= */
+export async function configureAssistant(config = {}) { return call('configureAssistant', config); }
+export async function getAssistantStatus() { return call('getAssistantStatus'); }
+export async function consumeAssistantEvent() { return call('consumeAssistantEvent'); }
+export async function scheduleAssistantReminder(id, text, dueAt, context = {}) {
+  return call('scheduleAssistantReminder', {
+    id, text, dueAt,
+    actionType: context.actionType || '', target: context.target || '', message: context.message || ''
+  });
+}
+export async function cancelAssistantReminder(id) { return call('cancelAssistantReminder', { id }); }
+export async function restoreAssistantReminders() { return call('restoreAssistantReminders'); }
 
 /* ---------- v10.3 HERALD: call guard ---------- */
 export async function setCallGuard(cfg) { return call('setCallGuard', cfg); }

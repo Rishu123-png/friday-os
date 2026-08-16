@@ -27,6 +27,7 @@ import * as CLARIFY from './clarify.js';
 import * as SEM from './semantic.js';
 import * as SUIT from './suit.js';
 import * as HERALD from './herald.js';
+import * as PROACTIVE from './proactive-assistant.js';
 import { CORE, Bus, Logger } from './fridaycore.js';   // v11 Phase 1
 import * as IGN from './ignite.js';   // v11.1 Phase 2: cinematic boot
 import * as HUD from './hud.js';      // v11.1 Phase 3: living HUD
@@ -181,7 +182,7 @@ const $ = U.$, $$ = U.$$;
 const state = {
   listening: false, speaking: false, processing: false,
   messages: [], expect: null, lastTopic: null, lastSubject: null, booted: false,
-  vaultPending: null
+  vaultPending: null, proactiveEvent: null, proactiveReminder: null, pendingInboxSend: null
 };
 
 /* ================= BOOT (v11.1 IGNITION: cinematic + REAL checks) ================= */
@@ -764,6 +765,96 @@ async function runMissionFrom(startIdx) {
   return true;
 }
 
+async function handleAssistantPromptResponse(text, opts = {}) {
+  const normalized = String(text || '').trim().toLowerCase();
+  const reminder = state.proactiveReminder;
+  if (reminder) {
+    const done = /^(done|mark (it )?done|complete|ho gaya|kar diya)$/.test(normalized);
+    const cancel = /^(ignore|later|leave it|rehne do|chhodo)$/.test(normalized);
+    const snooze = /^(snooze|snooze( it)?( for)?( \d+)?( minutes?)?|baad me|dus minute)$/.test(normalized);
+    const rescheduleRequest = /^(reschedule|change (the )?time)\b/.test(normalized);
+    const rescheduleTime = (rescheduleRequest || reminder.awaitingReschedule) ? parseTime(normalized) : null;
+    const reschedule = rescheduleRequest || (!!reminder.awaitingReschedule && !!rescheduleTime);
+    const open = /^(open|open friday)$/.test(normalized);
+    if (done || cancel || snooze || reschedule || open) {
+      if (!opts.silentEcho) addMsg('user', text);
+      if (done) {
+        S.updateItem(KEYS.REMINDERS, reminder.id, { done: true });
+        await NAT.cancelAssistantReminder(reminder.id);
+        state.proactiveReminder = null; refresh('reminders');
+        reply('Done, Boss. Reminder complete.'); return true;
+      }
+      if (snooze) {
+        const m = Math.max(1, Math.min(24 * 60, +(normalized.match(/\d+/) || [10])[0]));
+        const due = Date.now() + m * 60_000;
+        S.updateItem(KEYS.REMINDERS, reminder.id, { due, done: false });
+        const updated = { ...reminder, due, done: false };
+        scheduleReminder(updated); state.proactiveReminder = null; refresh('reminders');
+        reply(`Snoozed for ${m} minutes, Boss.`); return true;
+      }
+      if (reschedule) {
+        const when = rescheduleTime;
+        if (!when) {
+          state.proactiveReminder = { ...reminder, awaitingReschedule: true };
+          reply('Tell me the new time, for example: “tomorrow at 8 AM”.');
+          return true;
+        }
+        const due = when.date.getTime();
+        S.updateItem(KEYS.REMINDERS, reminder.id, { due, done: false });
+        const updated = { ...reminder, due, done: false };
+        scheduleReminder(updated); state.proactiveReminder = null; refresh('reminders');
+        reply(`Rescheduled for ${humanTime(when.date)}, Boss.`); return true;
+      }
+      if (open) { state.proactiveReminder = null; U.openPanel('activity'); refresh('activity'); reply('Reminder list is open. You can choose a new time.'); return true; }
+      state.proactiveReminder = null; reply('Okay, I will leave it pending.'); return true;
+    }
+  }
+
+  const event = state.proactiveEvent;
+  if (!event || Date.now() > event.expiresAt) {
+    if (event) state.proactiveEvent = null;
+    return false;
+  }
+  const answer = PROACTIVE.interpretPromptResponse(text);
+  if (!answer) return false;
+  if (!opts.silentEcho) addMsg('user', text);
+  if (answer === 'ignore') { state.proactiveEvent = null; reply('Left for later, Boss.'); return true; }
+  if (answer === 'read') {
+    if (NAT.isNative()) {
+      const status = await NAT.getAssistantStatus();
+      if (status && status.privateMode) event.canReveal = false;
+    }
+    if (!event.canReveal) {
+      reply(event.sensitive
+        ? 'That notification is classified as private, so I will not read its contents aloud.'
+        : 'Unlock your phone or use private audio before I read that notification.');
+      return true;
+    }
+    const detail = `${event.title || event.app}. ${event.text || 'No text was exposed by that app.'}`;
+    addMsg('ai', `🔔 **${event.app}** — ${event.title || ''}\n${event.text || '_No readable content exposed._'}`, { proactive: true });
+    V.speak(detail.slice(0, 500));
+    return true;
+  }
+  if (answer === 'open') {
+    state.proactiveEvent = null;
+    const opened = await NAT.launchApp(event.pkg);
+    reply(opened && opened.ok ? `Opening ${event.app}.` : 'Android could not open that source app.');
+    return true;
+  }
+  if (answer === 'reply') {
+    if (NAT.isNative()) {
+      const status = await NAT.getAssistantStatus();
+      if (status && status.privateMode) event.canReveal = false;
+    }
+    if (!event.canReveal) {
+      reply('Unlock your phone or use private audio before drafting a reply to that notification.');
+      return true;
+    }
+    return runAction({ type: 'inbox_reply', app: event.pkg, eventKey: event.key }, {});
+  }
+  return false;
+}
+
 async function handleInput(text, opts = {}) {
   text = String(text || '').trim();
   if (!text) return;
@@ -779,6 +870,9 @@ async function handleInput(text, opts = {}) {
   state.lastInputWasVoice = !!opts.fromVoice;
   /* v11.2 VOX: engine hears intent start — THINKING covers typed turns too */
   if (!opts.noChain) VOX.vox.set('THINKING', (opts.fromVoice ? 'voice' : 'typed') + ' input');
+
+  /* Step 5: short, event-bound responses are handled before generic NLU. */
+  if (!opts.noChain && await handleAssistantPromptResponse(text, opts)) return;
 
   /* ===== v11.2 VOX: SMART CONFIRMATION for destructive commands =====
      "delete all reminders" never fires silently — FRIDAY asks "pakka?".
@@ -912,6 +1006,37 @@ async function handleInput(text, opts = {}) {
   if (state.expect) {
     const kind = state.expect;
     state.expect = null;
+    /* Step 5: exact recipient/text/action confirmation. Bare "yes" is not enough. */
+    if (kind === 'inbox_send_confirm') {
+      const auth = state.pendingInboxSend;
+      if (!auth) return reply('That reply approval expired. Nothing was sent.');
+      if (/^(cancel|no|nahi|chhodo|rehne do)$/.test(text.trim().toLowerCase())) {
+        state.pendingInboxSend = null; return reply('Cancelled. Nothing was sent.');
+      }
+      const verified = PROACTIVE.verifyReplyAuthorization(auth, {
+        eventKey: auth.eventKey, text: auth.text, confirmation: text, now: Date.now()
+      });
+      if (!verified.ok) {
+        if (verified.reason === 'expired') { state.pendingInboxSend = null; return reply('That approval expired. I did not send anything.'); }
+        state.expect = 'inbox_send_confirm';
+        return reply('Please say exactly “send it” to send that recipient-bound draft, or “cancel”.');
+      }
+      state.pendingInboxSend = null;
+      const nativeAuthorization = await NAT.authorizeNotificationReply({
+        eventKey: auth.eventKey,
+        app: auth.app,
+        recipient: auth.recipient,
+        text: auth.text,
+        confirmation: text
+      });
+      if (!nativeAuthorization || !nativeAuthorization.ok || !nativeAuthorization.authorizationToken) {
+        return reply(`I could not authorize that exact reply: ${(nativeAuthorization && (nativeAuthorization.reason || nativeAuthorization.error)) || 'the notification changed'}. Nothing was sent.`);
+      }
+      const sent = await NAT.replyNotification(
+        auth.app, auth.text, auth.eventKey, nativeAuthorization.authorizationToken);
+      if (sent && sent.ok) return reply(`Sent to ${auth.recipient || auth.app} ✅`);
+      return reply(`I could not send it: ${(sent && (sent.reason || sent.error)) || 'RemoteInput is unavailable'}. The draft was not redirected to anyone else.`);
+    }
     /* v12.0 Phase 8: PLANX interactive steps (confirm / rescue / ask) */
     if (kind === 'plan_answer' && state.planAsk) {
       const done = state.planAsk; state.planAsk = null;
@@ -1402,36 +1527,46 @@ async function runAction(a, hit) {
       reply(HERALD.inboxSummary(items) + ' — "uska jawab do" bolo to draft bana doon.');
       return true;
     }
-    case 'inbox_reply': {      /* "uska jawab do" — draft + approve chips */
-      const log = await NAT.getNotifLog(a.app || 'whatsapp', 40);
-      const items = HERALD.pickLatestInbox((log && log.items) || [], a.app || 'whatsapp');
-      if (!items.length) { reply('Koi recent message nahi mila jiska jawab doon, Boss.'); return true; }
-      const target = items[0];
+    case 'inbox_reply': {      /* draft is bound to one notification action */
+      let target = null;
+      if (a.eventKey && state.proactiveEvent && state.proactiveEvent.key === a.eventKey) {
+        const e = state.proactiveEvent;
+        target = { key: e.key, pkg: e.pkg, who: e.title || 'Someone', text: e.text,
+          replyable: e.replyable, sensitive: e.sensitive, when: e.time || Date.now() };
+      }
+      if (!target) {
+        const log = await NAT.getNotifLog(a.app || 'whatsapp', 40);
+        const items = HERALD.pickLatestInbox((log && log.items) || [], a.app || 'whatsapp');
+        target = items[0] || null;
+      }
+      if (!target) { reply('I could not find a recent message to bind this reply to, Boss.'); return true; }
       const p = HERALD.draftPromptFor(target.who, target.text, MEM.buildContext ? MEM.buildContext() : '');
       let draft = '';
-      /* server first, then Groq — callGroq handles both (v10.1 wiring) */
       if (SERVER.isConfigured() || AI.hasGroq()) {
         try { draft = await AI.callGroq([{ role: 'system', content: p.sys }, { role: 'user', content: p.usr }], { maxTokens: 120 }); } catch (_) {}
       }
-      if (!draft || !String(draft).trim()) draft = `Haan ${target.who}, Boss abhi busy hain — thodi der me reply karte hain. 👍`;
-      state.pendingInboxSend = { app: a.app || 'whatsapp', text: draft.trim() };
-      reply(`Draft ready — ${target.who} ko: "${state.pendingInboxSend.text}"\n"Bhejo" bolo to chala jayega.`);
+      if (!draft || !String(draft).trim()) draft = `Haan ${target.who}, Boss abhi busy hain — thodi der me reply karte hain.`;
+      draft = String(draft).trim();
+      if (!target.key || target.replyable === false) {
+        state.pendingInboxSend = null;
+        reply(`Draft for ${target.who}: “${draft}”\n\nThat notification does not expose an Android RemoteInput action, so I cannot send it. I can only copy it or open the source app.`);
+        return true;
+      }
+      state.pendingInboxSend = PROACTIVE.createReplyAuthorization({
+        eventKey: target.key, app: target.pkg || a.app || 'whatsapp', recipient: target.who, text: draft
+      });
+      state.expect = 'inbox_send_confirm';
+      reply(PROACTIVE.confirmationPrompt(state.pendingInboxSend));
       addClarifyChips([
-        { label: '✅ Bhejo', say: 'bhejo' },
-        { label: '✏️ Naya draft', say: 'naya draft' },
-        { label: '❌ Chhodo', say: 'chhodo' }
+        { label: '✅ Send this exact reply', say: 'send it' },
+        { label: '❌ Cancel', say: 'cancel' }
       ]);
       return true;
     }
-    case 'inbox_send': {       /* chip "bhejo" */
-      const pending = state.pendingInboxSend;
-      state.pendingInboxSend = null;
-      if (!pending) { reply('Koi draft pending nahi hai, Boss.'); return true; }
-      const r = await NAT.replyNotification(pending.app, pending.text);
-      if (r && r.ok) reply(`Bhej diya ✅ — ${pending.app} pe.`);
-      else if (r && r.reason === 'no_listener') reply('Notification access OFF hai — Settings > notifications se ON karke phir bolo.');
-      else if (r && r.reason === 'not_found') reply('Wo notification ab nahi hai (sender ne hata diya?). Draft mehra copy kar sakte ho: "' + pending.text + '"');
-      else reply('Reply nahi ja paya (' + ((r && r.reason) || 'unknown') + ') — WhatsApp khud kholke bhej do.');
+    case 'inbox_send': {
+      if (!state.pendingInboxSend) { reply('There is no recipient-bound reply waiting for approval. Nothing was sent.'); return true; }
+      state.expect = 'inbox_send_confirm';
+      reply(PROACTIVE.confirmationPrompt(state.pendingInboxSend));
       return true;
     }
     case 'inbox_reshoot': {    /* chip "naya draft" */
@@ -1443,10 +1578,16 @@ async function runAction(a, hit) {
     case 'call_guard': {       /* "call guard on karo" */
       S.setSetting('callGuard', !!a.on);
       const chk = $('#callGuard'); if (chk) chk.checked = !!a.on;
-      await syncCallGuardNative();
+      const saved = await syncCallGuardNative();
+      if (!saved || !saved.ok) {
+        S.setSetting('callGuard', !a.on);
+        if (chk) chk.checked = !a.on;
+        reply('I could not save that Call Assistant change, so I left the previous native state in place.');
+        return true;
+      }
       reply(a.on
-        ? 'Call Guard ON 🦾 — ab call aane pe "FRIDAY sambhale" card aayega. Phone/calls/overlay permissions maange to allow karna.'
-        : 'Call Guard band. Calls ab poori tarah tumhare haath me.');
+        ? 'Call Assistant ON — incoming calls can be announced with Accept, Decline, Silence, and previewed Message controls where Android permits them.'
+        : 'Call Assistant off. FRIDAY will not control incoming calls.');
       return true;
     }
 
@@ -1652,11 +1793,7 @@ async function runAction(a, hit) {
 
     case 'reply_notif': {
       if (!NAT.isNative()) { reply(nativeOnly('notification replies')); return true; }
-      const r = await NAT.replyNotification(a.app || '', a.text);
-      if (r.ok) reply(`Reply sent${r.app ? ' in ' + NAT.friendlyApp(r.app) : ''}.`);
-      else if (r.reason === 'no_listener') { reply('I need notification access for that. Opening settings.'); NAT.openSpecialSetting('notification_listener'); }
-      else if (r.reason === 'not_found') reply('No replyable notification found — nothing waiting for an answer.');
-      else reply('That notification cannot take replies.');
+      reply('For safety I cannot send an unbound notification reply. Say “check my inbox”, choose the exact message, review the recipient and draft, then confirm “send it”.');
       return true;
     }
 
@@ -4500,6 +4637,11 @@ function errMsg(e) {
 /* ================= NATIVE (Phase B + C) ================= */
 let recentNotifs = [];
 let nativeCaps = { native: false };
+let assistantSettingsRevision = 0;
+let backgroundServiceRevision = 0;
+let bootStartRevision = 0;
+let callGuardDetailsRevision = 0;
+let callGuardEnabledRevision = 0;
 
 function nativeOnly(what) {
   return `${what.charAt(0).toUpperCase() + what.slice(1)} only works in the installed app, not the browser. Build the APK and it'll work.`;
@@ -4888,11 +5030,79 @@ async function runPortScan(host) {
   return true;
 }
 
+function minuteOfDay(value, fallback) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || ''));
+  if (!m) return fallback;
+  return Math.max(0, Math.min(1439, (+m[1] * 60) + +m[2]));
+}
+
+async function syncAssistantNative() {
+  if (!NAT.isNative()) return { ok: false, reason: 'web' };
+  return NAT.configureAssistant({
+    enabled: !!S.getSetting('proactiveAssistant'),
+    notificationsEnabled: S.getSetting('announceNotifications') !== false,
+    privateMode: !!S.getSetting('proactivePrivateMode'),
+    privateOnLock: S.getSetting('privateOnLock') !== false,
+    quietEnabled: S.getSetting('quietHoursEnabled') !== false,
+    quietStart: minuteOfDay(S.getSetting('quietHoursStart'), 22 * 60),
+    quietEnd: minuteOfDay(S.getSetting('quietHoursEnd'), 7 * 60),
+    categories: (S.getSetting('notificationCategories') || []).join(','),
+    blockedPackages: S.getSetting('notificationBlockedApps') || '',
+    blockedContacts: S.getSetting('notificationBlockedContacts') || '',
+    rateLimitSeconds: Math.max(5, +(S.getSetting('notificationRateSeconds') || 20)),
+    maxPerHour: Math.max(1, +(S.getSetting('notificationMaxPerHour') || 12)),
+    address: S.getSetting('assistantAddress') || 'Boss',
+    callAnnouncements: S.getSetting('callAnnouncements') !== false
+  });
+}
+
+async function reconcileAssistantState(statusSnapshot = null) {
+  const status = statusSnapshot || await NAT.getAssistantStatus();
+  let firedReminder = null;
+  if (status && Array.isArray(status.reminders)) {
+    for (const native of status.reminders) {
+      const local = S.getList(KEYS.REMINDERS).find(r => String(r.id) === String(native.id));
+      if (!local) continue;
+      if (native.state === 'done' && !local.done) S.updateItem(KEYS.REMINDERS, local.id, { done: true });
+      if (native.state === 'scheduled' && native.dueAt && native.dueAt !== local.due)
+        S.updateItem(KEYS.REMINDERS, local.id, { due: native.dueAt, done: false });
+      if (native.state === 'fired' && !local.done) firedReminder = local;
+    }
+    refresh('reminders');
+  }
+  const pending = await NAT.consumeAssistantEvent();
+  const event = pending && pending.event;
+  if (event && String(event.key || '').startsWith('reminder:')) {
+    const id = String(event.key).slice('reminder:'.length);
+    const local = S.getList(KEYS.REMINDERS).find(r => String(r.id) === id);
+    state.proactiveReminder = local || { id, text: event.text || 'Reminder' };
+    firedReminder = null;
+    addMsg('ai', `⏰ **Reminder** — ${event.text || ''}\nMark done, snooze, or reschedule?`, { proactive: true });
+  } else if (event) {
+    handleNotification({ ...event, nativeAnnounced: true, time: event.at || Date.now() });
+  }
+  if (firedReminder) {
+    state.proactiveReminder = firedReminder;
+    addMsg('ai', `⏰ **Reminder** — ${firedReminder.text}\nMark done, snooze, or reschedule?`, { proactive: true });
+  }
+}
+
 async function initNative() {
   try {
   window.__stage = 'native:capabilities';
   nativeCaps = await NAT.capabilities();
   if (!nativeCaps.native) return;
+  /* Native Pause/Private actions are durable and must win over stale WebView state. */
+  const assistantSnapshot = await NAT.getAssistantStatus().catch(() => null);
+  if (assistantSnapshot && typeof assistantSnapshot.enabled === 'boolean')
+    S.setSetting('proactiveAssistant', assistantSnapshot.enabled);
+  if (assistantSnapshot && typeof assistantSnapshot.privateMode === 'boolean')
+    S.setSetting('proactivePrivateMode', assistantSnapshot.privateMode);
+  syncSettingsUI();
+  const assistantConfigured = await syncAssistantNative();
+  if (!assistantConfigured || !assistantConfigured.ok) {
+    U.toast('FRIDAY could not persist the native Always-On settings; background claims are withheld.', '⚠️', 5600);
+  }
 
   // v7.4.3: ask for the mic (etc.) ONCE, so the first mic tap never errors
   try {
@@ -4904,8 +5114,8 @@ async function initNative() {
     }
   } catch (e) { /* system dialog may not show yet - first mic tap asks again */ }
 
-  // keep FRIDAY alive in the background
-  if (S.getSetting('backgroundService') !== false) {
+  // Explicitly enabled always-on host. Event receivers remain independently durable.
+  if (S.getSetting('backgroundService') !== false && S.getSetting('proactiveAssistant')) {
     window.__stage = 'native:foreground-service';
     NAT.startForegroundService({ wakeWord: S.getSetting('wakeWord') }).catch(() => {});
   }
@@ -4933,6 +5143,7 @@ async function initNative() {
       NAT.onNotification(handleNotification);
     }
   } catch (e) { /* listener not enabled - not fatal */ }
+  await reconcileAssistantState(assistantSnapshot).catch(() => {});
   // ---- v7.5 health wiring (all optional, all degrade silently) ----
   try {
     if (S.getSetting('stepsAuto') !== false) HEALTH.ensureSteps();
@@ -4995,21 +5206,38 @@ function syncWidget() {
 function handleNotification(n) {
   recentNotifs.unshift(n);
   recentNotifs = recentNotifs.slice(0, 40);
-  if (HEALTH.inFocus()) return;   // focus mode: collect silently, announce nothing
+  if (HEALTH.inFocus()) return;   // focus mode: collect silently
 
-  const allow = S.getSetting('announceApps') || NAT.ANNOUNCE_DEFAULTS;
-  if (!allow.includes(n.pkg)) return;
-  if (!S.getSetting('announceNotifications')) return;
-  if (state.listening || state.speaking) return;
+  const settings = {
+    proactiveAssistant: S.getSetting('proactiveAssistant'),
+    announceNotifications: S.getSetting('announceNotifications'),
+    notificationCategories: S.getSetting('notificationCategories'),
+    notificationBlockedApps: S.getSetting('notificationBlockedApps'),
+    notificationBlockedContacts: S.getSetting('notificationBlockedContacts'),
+    privateMode: S.getSetting('proactivePrivateMode'),
+    privateOnLock: S.getSetting('privateOnLock'),
+    quietHoursEnabled: S.getSetting('quietHoursEnabled'),
+    quietHoursStart: S.getSetting('quietHoursStart'), quietHoursEnd: S.getSetting('quietHoursEnd')
+  };
+  const decision = PROACTIVE.notificationDecision(n, settings);
+  /* In the APK, native policy owns DND, importance, dedupe and rate limits.
+     Never let the visible WebView re-announce an event native deliberately filtered. */
+  if ((NAT.isNative() && n.nativeAnnounced === false) || (!decision.announce && !n.nativeAnnounced)) return;
 
   const app = NAT.friendlyApp(n.pkg);
-  const who = S.getSetting('userName') || 'Boss';
-  const line = n.title
-    ? `${who}, ${app} from ${n.title}. ${n.text}`.slice(0, 220)
-    : `${who}, ${app}: ${n.text}`.slice(0, 220);
-
-  addMsg('ai', `\ud83d\udd14 **${app}** - ${n.title || ''}\n${n.text}`, { proactive: true });
-  V.speak(line, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  const event = {
+    ...n, app, category: decision.category, sensitive: decision.sensitive,
+    canReveal: decision.canReveal, expiresAt: Date.now() + 90_000
+  };
+  state.proactiveEvent = event;
+  const hidden = !decision.canReveal;
+  addMsg('ai', `🔔 **${app}** — ${hidden ? 'Private update' : (n.title || '')}\n${hidden ? '_Details protected by your privacy settings._' : (n.text || '_No readable content exposed._')}`, { proactive: true });
+  const prompt = PROACTIVE.promptFor(event, {
+    address: S.getSetting('assistantAddress') || 'Boss', canReveal: decision.canReveal
+  });
+  if (!n.nativeAnnounced && !state.listening && !state.speaking) {
+    V.speak(prompt, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  }
   D.vibrate(25);
 }
 
@@ -5024,8 +5252,9 @@ async function runSetup() {
   await sleep(1200);
 
   const steps = [
-    ['notification_listener', 'notification access', 'so I can read and announce your notifications'],
-    ['overlay', 'display over other apps', 'for the floating bubble'],
+    ['notification_listener', 'notification access', 'so I can classify important notifications and expose reply actions'],
+    ['exact_alarm', 'alarms and reminders', 'so durable reminders fire at the requested time'],
+    ['overlay', 'display over other apps', 'for call controls and the floating bubble'],
     ['accessibility', 'accessibility', 'so I can navigate your phone'],
     ['battery_optimization', 'battery optimisation', 'so I keep running in the background']
   ];
@@ -5355,52 +5584,39 @@ function notifId(seed) {
 async function scheduleNativeReminder(item) {
   try {
     if (!NAT.isNative()) return false;
+    let context = {
+      actionType: item.actionType || '', target: item.target || item.phone || '', message: item.message || ''
+    };
+    if (item.wa) {
+      const contact = await NAT.findContact(item.wa.name);
+      context = { actionType: 'message', target: contact && contact.phone || '', message: item.wa.msg || '' };
+    }
+    const durable = await NAT.scheduleAssistantReminder(String(item.id), item.text, item.due, context);
+    if (durable && durable.ok) return true;
+    /* Backward-compatible fallback for an older APK shell. */
     const LN = window.Capacitor?.Plugins?.LocalNotifications;
     if (!LN || !LN.schedule) return false;
     if (LN.requestPermissions) await LN.requestPermissions();
     await LN.schedule({ notifications: [{
-      id: notifId(item.id),
-      title: 'FRIDAY — Reminder',
-      body: item.text,
-      schedule: { at: new Date(item.due), allowWhileIdle: true },
-      smallIcon: 'ic_stat_icon'
+      id: notifId(item.id), title: 'FRIDAY — Reminder', body: item.text,
+      schedule: { at: new Date(item.due), allowWhileIdle: true }, smallIcon: 'ic_stat_icon'
     }]});
     return true;
   } catch (e) { console.warn('[reminders] native schedule failed', e); return false; }
 }
 
 function scheduleReminder(item) {
-  scheduleNativeReminder(item);   // background-safe path (APK)
+  if (NAT.isNative()) { scheduleNativeReminder(item); return; } // AlarmManager owns APK delivery
   const delay = item.due - Date.now();
   if (delay < 0 || delay > 2 ** 31 - 1) return;
   clearTimeout(timers.get(item.id));
-  timers.set(item.id, setTimeout(async () => {
-    if (item.wa) {
-      try {
-        const c = await NAT.findContact(item.wa.name);
-        const num = c && (c.phone || c.number);
-        if (num) {
-          const r = await NAT.whatsappSend(num, item.wa.msg, true);
-          /* v7.6.4: only claim "sent" when the accessibility auto-press actually
-             ran - otherwise be honest that the chat is open and needs one tap */
-          D.notify('FRIDAY',
-            r && r.ok
-              ? (r.autoSend ? 'WhatsApp sent to ' : 'WhatsApp is open for ') + item.wa.name
-              : 'Could not send WhatsApp to ' + item.wa.name,
-            item.id);
-        } else {
-          D.notify('FRIDAY', 'No number saved for ' + item.wa.name, item.id);
-        }
-      } catch (e) { D.notify('FRIDAY', 'Scheduled WhatsApp failed', item.id); }
-      S.updateItem(KEYS.REMINDERS, item.id, { done: true });
-      refresh('reminders');
-      return;
-    }
+  timers.set(item.id, setTimeout(() => {
     D.buzz();
-    D.notify('FRIDAY — Reminder', item.text, item.id);
-    U.toast(item.text, '⏰', 6000);
-    V.speak(`Reminder: ${item.text}`);
-    S.updateItem(KEYS.REMINDERS, item.id, { done: true });
+    const body = item.wa ? `${item.text} — message draft for ${item.wa.name}` : item.text;
+    D.notify('FRIDAY — Reminder', body, item.id);
+    U.toast(body, '⏰', 6000);
+    state.proactiveReminder = { ...item, expiresAt: Date.now() + 10 * 60_000 };
+    V.speak(`${S.getSetting('assistantAddress') || 'Boss'}, reminder: ${body}. Mark it done, snooze it, or open Friday?`);
     refresh('reminders');
   }, delay));
 }
@@ -5844,6 +6060,7 @@ function bindEvents() {
     const del = e.target.closest('[data-del]');
     if (del) {
       const [key, id] = del.dataset.del.split('|');
+      if (key === KEYS.REMINDERS) NAT.cancelAssistantReminder(String(id)).catch(() => {});
       S.removeItem(key, isNaN(id) ? id : id);
       const rec = S.getList(key);
       S.saveList(key, rec.filter(r => String(r.id) !== String(id)));
@@ -6050,8 +6267,9 @@ function bindEvents() {
     if (!el) return;
     el.addEventListener(ev, () => {
       const v = prop === 'checked' ? el.checked : el.value;
+      const previous = S.getSetting(key);
       S.setSetting(key, v);
-      onSettingChange(key, v);
+      onSettingChange(key, v, previous);
     });
   };
   bind('#aiProvider', 'aiProvider');
@@ -6085,6 +6303,34 @@ function bindEvents() {
     }); }
   bind('#bootStart', 'bootStart', 'change', 'checked');
   bind('#announceNotifications', 'announceNotifications', 'change', 'checked');
+  bind('#proactiveAssistant', 'proactiveAssistant', 'change', 'checked');
+  bind('#assistantAddress', 'assistantAddress');
+  bind('#proactivePrivateMode', 'proactivePrivateMode', 'change', 'checked');
+  bind('#privateOnLock', 'privateOnLock', 'change', 'checked');
+  bind('#quietHoursEnabled', 'quietHoursEnabled', 'change', 'checked');
+  bind('#quietHoursStart', 'quietHoursStart');
+  bind('#quietHoursEnd', 'quietHoursEnd');
+  bind('#notificationBlockedApps', 'notificationBlockedApps', 'input');
+  bind('#notificationBlockedContacts', 'notificationBlockedContacts', 'input');
+  bind('#notificationRateSeconds', 'notificationRateSeconds', 'change');
+  bind('#notificationMaxPerHour', 'notificationMaxPerHour', 'change');
+  bind('#callAnnouncements', 'callAnnouncements', 'change', 'checked');
+  const catControls = {
+    notifyMessages: 'MESSAGE', notifyEmail: 'EMAIL', notifyCalendar: 'CALENDAR',
+    notifyDelivery: 'DELIVERY', notifyMissedCalls: 'MISSED_CALL', notifySensitive: 'SENSITIVE'
+  };
+  Object.entries(catControls).forEach(([id, category]) => {
+    const el = $('#' + id); if (!el) return;
+    el.addEventListener('change', () => {
+      const previous = [...(S.getSetting('notificationCategories') || [])];
+      const selected = new Set(previous);
+      el.checked ? selected.add(category) : selected.delete(category);
+      S.setSetting('notificationCategories', [...selected]);
+      onSettingChange('notificationCategories', [...selected], previous);
+    });
+  });
+  { const b = $('#notificationAccessBtn'); if (b) b.addEventListener('click', () => NAT.openSpecialSetting('notification_listener')); }
+  { const b = $('#exactAlarmBtn'); if (b) b.addEventListener('click', () => NAT.openSpecialSetting('exact_alarm')); }
   bind('#bubbleEnabled', 'bubbleEnabled', 'change', 'checked');
   bind('#hindiUI', 'hindiUI', 'change', 'checked');
   bind('#batteryWarnFull', 'batteryWarnFull', 'change', 'checked');
@@ -6151,9 +6397,21 @@ function bindEvents() {
   bind('#callGuardTemplate', 'callGuardTemplate', 'input');
   bind('#callGuardMode', 'callGuardMode', 'change');
   $('#callGuard')?.addEventListener('change', async e => {
-    S.setSetting('callGuard', e.target.checked);
-    await syncCallGuardNative();
-    U.toast(e.target.checked ? 'Call Guard ON — "FRIDAY sambhale" card active (permissions allow karna)' : 'Call Guard off', '📞');
+    const requested = e.target.checked;
+    const revision = ++callGuardEnabledRevision;
+    S.setSetting('callGuard', requested);
+    const saved = await syncCallGuardNative();
+    if (revision !== callGuardEnabledRevision) {
+      await syncCallGuardNative();
+      return;
+    }
+    if (!saved || !saved.ok) {
+      S.setSetting('callGuard', !requested);
+      e.target.checked = !requested;
+      U.toast('Call Assistant setting could not be saved; the previous state remains active.', '⚠️');
+      return;
+    }
+    U.toast(requested ? 'Call Assistant ON — caller announcement and supported controls active' : 'Call Assistant off', '📞');
   });
   $('#inboxTestBtn')?.addEventListener('click', () => { U.showView('chat'); handleInput('uska jawab do', { fromVoice: false }); });
   /* v11.1 IGNITION settings */
@@ -6226,7 +6484,7 @@ function bindEvents() {
   addEventListener('popstate', () => { if (U.anyPanelOpen()) U.closeAllPanels(); });
 }
 
-function onSettingChange(key, v) {
+function onSettingChange(key, v, previousValue) {
   if (key === 'uiTheme') U.applyTheme(v);
   if (key === 'speechRate') $('#speechRateValue').textContent = v + 'x';
   if (key === 'wakeSensitivity') { const ws = $('#wakeSensValue'); if (ws) ws.textContent = v; }   // v11.2 VOX
@@ -6245,16 +6503,123 @@ function onSettingChange(key, v) {
   }
   if (key === 'showWidgets') { const dw = $('#dashWidgets'); if (dw) dw.style.display = v ? 'grid' : 'none'; }
   if (key === 'backgroundService' && NAT.isNative()) {
-    v ? NAT.startForegroundService({}) : NAT.stopForegroundService();
-    if (v && !S.getSetting('batOptAsked')) {
+    const revision = ++backgroundServiceRevision;
+    if (v && S.getSetting('proactiveAssistant')) {
+      NAT.startForegroundService({}).then(r => {
+        if (revision !== backgroundServiceRevision) {
+          if (S.getSetting('backgroundService') === false) NAT.stopForegroundService();
+          return;
+        }
+        if (!r || !r.ok) {
+          S.setSetting('backgroundService', false);
+          syncSettingsUI();
+          U.toast(`Always-on host could not start: ${(r && r.reason) || 'Android blocked it'}`, '⚠️', 5200);
+          return;
+        }
+        U.toast('Always-on host is active. Manual Force Stop still disables it until FRIDAY is reopened.', '🛡️', 5200);
+      });
+    } else {
+      NAT.stopForegroundService();
+    }
+    if (v && S.getSetting('proactiveAssistant') && !S.getSetting('batOptAsked')) {
       S.setSetting('batOptAsked', true);
-      U.toast('One-time: set FRIDAY battery to Unrestricted so the phone never kills me', '🔋');
+      U.toast('One-time: set FRIDAY battery to Unrestricted for the best background reliability', '🔋');
       NAT.openSpecialSetting('battery_optimization').catch(() => {});
     }
   }
   if (key === 'bootStart' && NAT.isNative()) {
-    NAT.setBootStart(v);
-    if (v) U.toast('Infinix/XOS also needs - Settings > Apps > FRIDAY OS > Auto-start ON', '🛡');
+    const revision = ++bootStartRevision;
+    NAT.setBootStart(v).then(r => {
+      if (revision !== bootStartRevision) {
+        NAT.setBootStart(!!S.getSetting('bootStart'));
+        return;
+      }
+      if (!r || !r.ok) {
+        S.setSetting('bootStart', !v);
+        syncSettingsUI();
+        U.toast('FRIDAY could not save the reboot setting.', '⚠️');
+      } else if (v) {
+        U.toast('Your phone may also require Settings > Apps > FRIDAY OS > Auto-start ON', '🛡');
+      }
+    });
+  }
+  const assistantKeys = new Set(['proactiveAssistant', 'assistantAddress', 'proactivePrivateMode', 'privateOnLock',
+    'quietHoursEnabled', 'quietHoursStart', 'quietHoursEnd', 'notificationCategories',
+    'notificationBlockedApps', 'notificationBlockedContacts', 'notificationRateSeconds', 'notificationMaxPerHour',
+    'callAnnouncements', 'announceNotifications']);
+  if (assistantKeys.has(key) && NAT.isNative()) {
+    const revision = ++assistantSettingsRevision;
+    const configured = syncAssistantNative();
+    if (key === 'proactiveAssistant') {
+      if (!v) {
+        NAT.stopForegroundService();
+        configured.then(async r => {
+          if (revision !== assistantSettingsRevision) {
+            await syncAssistantNative();
+            return;
+          }
+          if (r && r.ok) return;
+          const status = await NAT.getAssistantStatus();
+          if (status && typeof status.enabled === 'boolean') {
+            S.setSetting('proactiveAssistant', status.enabled);
+            syncSettingsUI();
+          }
+          U.toast('FRIDAY could not persist the Pause setting; check Always-On Assistant status.', '⚠️', 5200);
+        });
+      } else {
+        configured.then(async r => {
+          if (revision !== assistantSettingsRevision) {
+            await syncAssistantNative();
+            return;
+          }
+          if (!r || !r.ok) {
+            S.setSetting('proactiveAssistant', false);
+            syncSettingsUI();
+            U.toast('FRIDAY could not save Always-On Assistant settings, so it stayed off.', '⚠️', 5200);
+            return;
+          }
+          NAT.hasSpecialPermission('notification_listener').then(permission => {
+            if (!permission || !permission.granted) NAT.openSpecialSetting('notification_listener');
+          }).catch(() => {});
+          if (S.getSetting('backgroundService') !== false) {
+            const started = await NAT.startForegroundService({});
+            if (!started || !started.ok) {
+              S.setSetting('backgroundService', false);
+              syncSettingsUI();
+              U.toast(`Proactive events are enabled, but Android blocked the always-on host: ${(started && started.reason) || 'not running'}`, '⚠️', 6200);
+              return;
+            }
+            U.toast('Always-on mode is active. Manual Force Stop still disables it until FRIDAY is reopened.', '🛡️', 5200);
+          } else {
+            U.toast('Proactive reminders and smart notification handling are enabled; the foreground host is off.', '🛡️', 5200);
+          }
+        });
+      }
+    } else {
+      configured.then(async r => {
+        if (revision !== assistantSettingsRevision) {
+          await syncAssistantNative();
+          return;
+        }
+        if (r && r.ok) return;
+        if (previousValue !== undefined) S.setSetting(key, previousValue);
+        syncSettingsUI();
+        U.toast('That assistant setting could not be saved; the previous value was restored.', '⚠️');
+      });
+    }
+  }
+  if ((key === 'callGuardTemplate' || key === 'callGuardMode') && NAT.isNative()) {
+    const revision = ++callGuardDetailsRevision;
+    syncCallGuardNative().then(async r => {
+      if (revision !== callGuardDetailsRevision) {
+        await syncCallGuardNative();
+        return;
+      }
+      if (r && r.ok) return;
+      if (previousValue !== undefined) S.setSetting(key, previousValue);
+      syncSettingsUI();
+      U.toast('Call Assistant details could not be saved; the previous value was restored.', '⚠️');
+    }).catch(() => {});
   }
   if (key === 'bubbleEnabled' && NAT.isNative()) runAction({ type: 'bubble', on: v }, {});
   if (key === 'announceNotifications' && NAT.isNative() && v) {
@@ -6387,8 +6752,8 @@ function netFacts() {
 
 /* v10.3: mirror the call-guard settings into the native receiver prefs. */
 async function syncCallGuardNative() {
-  if (!NAT.isNative() || !NAT.setCallGuard) return;
-  await NAT.setCallGuard({
+  if (!NAT.isNative() || !NAT.setCallGuard) return { ok: false, reason: 'web' };
+  return NAT.setCallGuard({
     enabled: !!S.getSetting('callGuard'),
     template: S.getSetting('callGuardTemplate') || '',
     mode: S.getSetting('callGuardMode') || 'sms'
@@ -6566,6 +6931,25 @@ function syncSettingsUI() {
   set('#backgroundService', S.getSetting('backgroundService'), 'checked');
   set('#bootStart', S.getSetting('bootStart'), 'checked');
   set('#announceNotifications', S.getSetting('announceNotifications'), 'checked');
+  set('#proactiveAssistant', !!S.getSetting('proactiveAssistant'), 'checked');
+  set('#assistantAddress', S.getSetting('assistantAddress') || 'Boss');
+  set('#proactivePrivateMode', !!S.getSetting('proactivePrivateMode'), 'checked');
+  set('#privateOnLock', S.getSetting('privateOnLock') !== false, 'checked');
+  set('#quietHoursEnabled', S.getSetting('quietHoursEnabled') !== false, 'checked');
+  set('#quietHoursStart', S.getSetting('quietHoursStart') || '22:00');
+  set('#quietHoursEnd', S.getSetting('quietHoursEnd') || '07:00');
+  set('#notificationBlockedApps', S.getSetting('notificationBlockedApps') || '');
+  set('#notificationBlockedContacts', S.getSetting('notificationBlockedContacts') || '');
+  set('#notificationRateSeconds', S.getSetting('notificationRateSeconds') || 20);
+  set('#notificationMaxPerHour', S.getSetting('notificationMaxPerHour') || 12);
+  set('#callAnnouncements', S.getSetting('callAnnouncements') !== false, 'checked');
+  const selectedCategories = new Set(S.getSetting('notificationCategories') || []);
+  set('#notifyMessages', selectedCategories.has('MESSAGE'), 'checked');
+  set('#notifyEmail', selectedCategories.has('EMAIL'), 'checked');
+  set('#notifyCalendar', selectedCategories.has('CALENDAR'), 'checked');
+  set('#notifyDelivery', selectedCategories.has('DELIVERY'), 'checked');
+  set('#notifyMissedCalls', selectedCategories.has('MISSED_CALL'), 'checked');
+  set('#notifySensitive', selectedCategories.has('SENSITIVE'), 'checked');
   set('#bubbleEnabled', S.getSetting('bubbleEnabled'), 'checked');
   set('#hindiUI', S.getSetting('hindiUI'), 'checked');
   set('#batteryWarnFull', S.getSetting('batteryWarnFull'), 'checked');
