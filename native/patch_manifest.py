@@ -17,6 +17,7 @@ PERMS = [
     "android.permission.USE_EXACT_ALARM",
     "com.android.alarm.permission.SET_ALARM",
     "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
     "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
     "android.permission.ACTIVITY_RECOGNITION",
     "android.permission.PACKAGE_USAGE_STATS",
