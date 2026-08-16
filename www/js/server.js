@@ -34,6 +34,34 @@ function base() {
   return String(getSetting('serverUrl') || '').trim().replace(/\/+$/, '');
 }
 
+const PENDING_ACTION_KEY = 'friday_pending_action_v1';
+
+function chatRequestId() {
+  try { if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch (_) {}
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function pendingActionId() {
+  try {
+    const item = JSON.parse(localStorage.getItem(PENDING_ACTION_KEY) || 'null');
+    return item && typeof item.action_id === 'string' ? item.action_id : '';
+  } catch (_) { return ''; }
+}
+
+function rememberActionEvent(action) {
+  if (!action || typeof action.action_id !== 'string') return;
+  try {
+    if (action.state === 'awaiting_confirmation') {
+      localStorage.setItem(PENDING_ACTION_KEY, JSON.stringify({
+        action_id: action.action_id,
+        created_at: action.created_at || Math.floor(Date.now() / 1000)
+      }));
+    } else if (pendingActionId() === action.action_id) {
+      localStorage.removeItem(PENDING_ACTION_KEY);
+    }
+  } catch (_) {}
+}
+
 /** Server health — call on boot to flip the "FRIDAY Cloud: online" badge. */
 export async function health() {
   if (!isConfigured()) return { ok: false, reason: 'not_configured' };
@@ -48,16 +76,39 @@ export async function health() {
 /**
  * Stream a chat completion from the server.
  * @param {Array} messages  OpenAI-style [{role, content}, ...]
- * @param {Object} opts     { onToken(text), onTool(name, result), signal }
+ * @param {Object} opts     { onToken(text), onTool(name, result), onAction(action, summary), signal }
  * @returns {Promise<string>} the full assistant reply
  */
 export async function chat(messages, opts = {}) {
-  const res = await fetch(base() + '/v1/chat', {
+  // Keep one request id across a transport retry: chat-created action keys are
+  // derived from it, so a lost HTTP response cannot enqueue the same phone
+  // side effect twice. Callers may also supply requestId when retrying later.
+  const requestId = opts.requestId || chatRequestId();
+  const request = {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({
+      messages,
+      chat_request_id: requestId,
+      pending_action_id: pendingActionId() || undefined
+    }),
     signal: opts.signal
-  });
+  };
+  let res;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await fetch(base() + '/v1/chat', request);
+    } catch (error) {
+      if (attempt > 0 || opts.signal?.aborted || error?.name === 'AbortError') throw error;
+      continue;
+    }
+    if (attempt === 0 && [502, 503, 504].includes(res.status)) {
+      try { await res.body?.cancel(); } catch (_) {}
+      continue;
+    }
+    break;
+  }
+  if (!res) throw new Error('SERVER_NETWORK');
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     throw new Error('SERVER_HTTP_' + res.status + ' ' + txt.slice(0, 120));
@@ -82,6 +133,10 @@ export async function chat(messages, opts = {}) {
       try { ev = JSON.parse(payload); } catch (_) { continue; }
       if (ev.type === 'token') { full += ev.text; opts.onToken && opts.onToken(ev.text, full); }
       else if (ev.type === 'tool') { opts.onTool && opts.onTool(ev.name, ev.result); }
+      else if (ev.type === 'action') {
+        rememberActionEvent(ev.action);
+        opts.onAction && opts.onAction(ev.action, ev.summary || '');
+      }
       else if (ev.type === 'error') { throw new Error(ev.message || 'SERVER_ERROR'); }
       else if (ev.type === 'done') return full.trim();
     }
@@ -119,6 +174,62 @@ export async function ttsAndPlay(text, { voice = null } = {}) {
   audio.onended = () => URL.revokeObjectURL(url);
   audio.play().catch(() => {});
   return audio;
+}
+
+/* ================= ACTION PROTOCOL v1.0 ================= */
+const ACTION_PROTOCOL_VERSION = '1.0';
+
+async function actionRequest(path, { method = 'GET', body = null } = {}) {
+  if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+  try {
+    const response = await fetch(base() + path, {
+      method,
+      headers: headers(),
+      body: body == null ? undefined : JSON.stringify(body)
+    });
+    if (response.status === 204) return { ok: true, action: null };
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail = data && data.detail;
+      return { ok: false, reason: (detail && (detail.code || detail.message)) || `http_${response.status}`, detail };
+    }
+    return { ok: true, action: data };
+  } catch (_) { return { ok: false, reason: 'network' }; }
+}
+
+export async function actionCapabilities() {
+  return actionRequest('/v1/actions/capabilities');
+}
+
+export async function enqueueAction(type, args, { idempotencyKey, confirmed = false, expiresInSeconds = 300 } = {}) {
+  const key = idempotencyKey || `app-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return actionRequest('/v1/actions', { method: 'POST', body: {
+    protocol_version: ACTION_PROTOCOL_VERSION,
+    type, args: args || {}, idempotency_key: key,
+    expires_in_seconds: expiresInSeconds, safety: { confirmed: !!confirmed }
+  } });
+}
+
+export async function confirmAction(actionId) {
+  return actionRequest(`/v1/actions/${encodeURIComponent(actionId)}/confirm`, { method: 'POST', body: {} });
+}
+
+export async function getAction(actionId) {
+  return actionRequest(`/v1/actions/${encodeURIComponent(actionId)}`);
+}
+
+export async function claimAction(deviceId, capabilities) {
+  return actionRequest('/v1/actions/claim', { method: 'POST', body: {
+    protocol_version: ACTION_PROTOCOL_VERSION,
+    device_id: deviceId,
+    capabilities: Array.from(new Set(capabilities || []))
+  } });
+}
+
+export async function submitActionResult(actionId, result) {
+  return actionRequest(`/v1/actions/${encodeURIComponent(actionId)}/result`, {
+    method: 'POST', body: result
+  });
 }
 
 /** Push a fact the intent engine extracted ("my name is Rishu"). */
