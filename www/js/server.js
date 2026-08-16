@@ -6,8 +6,8 @@
    memory brain / coder downloads).
 
    Wiring (FRIDAY-BACKEND.md):
-     ai.js    callGroq():  if (SERVER.isConfigured()) return SERVER.chat(...)
-     ai.js    callGroqTools(): same — server runs its own tool loop
+     ai.js    callGroq(): runtime Groq first; this route when no direct key exists
+     ai.js    callGroqTools(): direct keys use local tools; this route owns its loop
      voice.js speak():     if (SERVER.isConfigured()) SERVER.ttsAndPlay(...)
      voice.js listen():    if (SERVER.isConfigured()) SERVER.stt(...) → text
 
