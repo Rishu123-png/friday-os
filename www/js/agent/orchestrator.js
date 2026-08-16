@@ -41,6 +41,7 @@ import * as SEM from '../semantic.js';
 import * as V from '../voice.js';
 import { vox } from '../vox.js';
 import { persona } from '../ai.js';
+import { verifyAction } from './verification.js';
 
 /* ======================== CONFIGURATION ======================== */
 
@@ -195,8 +196,7 @@ export async function executeAction(action) {
       case 'flashlight': {
         const on = action.on !== false;
         const r = await V.torch(on);
-        const obs = await verifyFlashlight(on);
-        return { ok: r, result: { state: on ? 'on' : 'off' }, observation: obs };
+        return { ok: !!r, result: { state: on ? 'on' : 'off' }, observation: null };
       }
 
       case 'battery': {
@@ -206,53 +206,45 @@ export async function executeAction(action) {
 
       case 'volume': {
         const r = await setVolume(action.percent);
-        const obs = await verifyVolume(action.percent);
-        return { ok: r.ok, result: { percent: action.percent }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       case 'brightness': {
         const r = await setBrightness(action.percent);
-        const obs = await verifyBrightness(action.percent);
-        return { ok: r.ok, result: { percent: action.percent }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       case 'toggle_wifi':
       case 'sys_toggle': {
         const r = await setWifi(action.on);
-        const obs = await verifyWifi(action.on);
-        return { ok: r.ok, result: { wifi: action.on }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       case 'media': {
         const r = await mediaControl(action.action);
-        const obs = await verifyMedia(action.action);
-        return { ok: r.ok, result: { action: action.action }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       // ---- App launching ----
       case 'open_app': {
         const r = await launchApp(action.app);
-        const obs = await verifyAppLaunched(action.app, r);
-        return { ok: r.ok, result: r, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       // ---- Communications ----
       case 'call': {
         const r = await placeCall(action.number);
-        const obs = await verifyCall(action.number);
-        return { ok: r.ok, result: { number: action.number }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       case 'sms': {
         const r = await sendSMSSilent(action.number, action.body);
-        const obs = await verifySMS(action.number, action.body);
-        return { ok: r.ok, result: { number: action.number, body: action.body }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       case 'whatsapp': {
         const r = await whatsappSend(action.number, action.body || '', action.autoSend !== false);
-        const obs = await verifyWhatsApp(action.number, action.body);
-        return { ok: r.ok, result: { number: action.number, body: action.body }, observation: obs };
+        return { ok: !!r.ok, result: r, observation: null };
       }
 
       // ---- System ----
@@ -325,119 +317,35 @@ export async function executeAction(action) {
  * Each verifier checks REAL device state, never assumes success.
  */
 export const Verifiers = {
-
-  /** Verify flashlight state by checking device state */
-  async flashlight(on) {
-    try {
-      const state = await getSystemState();
-      if (state && state.ok && typeof state.torch === 'boolean') {
-        return { verified: state.torch === on, detail: state.torch ? 'torch is on' : 'torch is off' };
-      }
-      // Can't verify — assume success if API said ok
-      return { verified: true, detail: 'torch command succeeded (state not readable)' };
-    } catch (_) {
-      return { verified: true, detail: 'torch command accepted' };
-    }
+  flashlight(on) {
+    return verifyAction({ type: 'torch', on }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify app launched by checking foreground app */
-  async appLaunched(appName, launchResult) {
-    if (!launchResult || !launchResult.ok) {
-      return { verified: false, detail: 'launch failed' };
-    }
-    // Give Android a moment to switch apps
-    await sleep(1200);
-    try {
-      const fg = await getForegroundApp();
-      if (fg && fg.ok && fg.pkg) {
-        const pkg = fg.pkg.toLowerCase();
-        const name = appName.toLowerCase();
-        // Match by package name or label
-        const apps = await listApps();
-        const known = apps?.find(a =>
-          a.label.toLowerCase().includes(name) ||
-          a.pkg.toLowerCase().includes(name)
-        );
-        if (known && pkg.includes(known.pkg.toLowerCase().slice(0, 8))) {
-          return { verified: true, detail: `${known.label} is now in foreground`, pkg: known.pkg };
-        }
-        // If the launch result listed an app, check its pkg
-        if (launchResult.app && launchResult.app.pkg) {
-          if (pkg.includes(launchResult.app.pkg.toLowerCase().slice(0, 8))) {
-            return { verified: true, detail: `${launchResult.app.label} is now in foreground`, pkg: launchResult.app.pkg };
-          }
-        }
-        return { verified: false, detail: `foreground is ${fg.pkg || 'unknown'}, expected ${appName}`, actual: fg.pkg };
-      }
-      // Foreground check not available — trust the launch result if it reported ok
-      return { verified: launchResult.ok, detail: launchResult.ok ? 'launch reported success' : 'launch failed' };
-    } catch (_) {
-      return { verified: launchResult && launchResult.ok, detail: 'verification unavailable' };
-    }
+  appLaunched(appName, launchResult) {
+    return verifyAction({ type: 'open_app', app: appName }, {
+      ok: !!(launchResult && launchResult.ok),
+      result: launchResult,
+    });
   },
-
-  /** Verify volume level */
-  async volume(percent) {
-    try {
-      const state = await getSystemState();
-      if (state && state.ok && typeof state.volume === 'number') {
-        const diff = Math.abs(state.volume - percent);
-        return { verified: diff <= 10, detail: `volume is ${state.volume}% (set ${percent}%)` };
-      }
-      return { verified: true, detail: 'volume set (state not readable)' };
-    } catch (_) {
-      return { verified: true, detail: 'volume command accepted' };
-    }
+  volume(percent) {
+    return verifyAction({ type: 'volume', percent }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify media state */
-  async media(action) {
-    // Media control returns ok/fail — we trust it for now
-    // A more advanced verifier would check what's actually playing
-    return { verified: true, detail: `media ${action} command executed` };
+  media(action) {
+    return verifyAction({ type: 'media', action }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify WiFi state */
-  async wifi(on) {
-    try {
-      const state = await getSystemState();
-      if (state && state.ok && typeof state.wifi === 'boolean') {
-        return { verified: state.wifi === on, detail: state.wifi ? 'Wi-Fi is on' : 'Wi-Fi is off' };
-      }
-      return { verified: true, detail: 'wifi command accepted' };
-    } catch (_) {
-      return { verified: true, detail: 'wifi command accepted' };
-    }
+  wifi(on) {
+    return verifyAction({ type: 'toggle_wifi', on }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify Bluetooth state */
-  async bluetooth(on) {
-    try {
-      const state = await getSystemState();
-      if (state && state.ok && typeof state.bluetooth === 'boolean') {
-        return { verified: state.bluetooth === on, detail: state.bluetooth ? 'Bluetooth is on' : 'Bluetooth is off' };
-      }
-      return { verified: true, detail: 'bluetooth command accepted' };
-    } catch (_) {
-      return { verified: true, detail: 'bluetooth command accepted' };
-    }
+  bluetooth(on) {
+    return verifyAction({ type: 'toggle_bt', on }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify call placed */
-  async call(number) {
-    // Calls are hard to verify after the fact (Android won't tell us)
-    // Best effort: check if the call API reported success
-    return { verified: true, detail: `call command sent to ${number}` };
+  call(number) {
+    return verifyAction({ type: 'call', number }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify SMS sent */
-  async sms(number, body) {
-    return { verified: true, detail: `SMS sent to ${number}` };
+  sms(number, body) {
+    return verifyAction({ type: 'sms', number, body }, { ok: true, result: { ok: true } });
   },
-
-  /** Verify WhatsApp opened */
-  async whatsapp(number, body) {
-    return { verified: true, detail: `WhatsApp opened for ${number}` };
+  whatsapp(number, body) {
+    return verifyAction({ type: 'whatsapp', number, body }, { ok: true, result: { ok: true } });
   },
 };
 
@@ -635,8 +543,21 @@ export async function runAgentLoop(text, opts = {}) {
       if (onStep) onStep({ step: stepCount, verify: verifyRecord });
 
       // ---- PHASE 5: CHECK RESULT ----
-      if (verified.verified || execResult.ok) {
-        // Success — continue or finish
+      // API/native acceptance is not verification. If independent observation
+      // is unavailable, stop without retrying the side effect and say exactly
+      // that; calls/messages must never be repeated just to manufacture proof.
+      if (verified.status === 'unavailable' && execResult.ok) {
+        const msg = buildUnverifiedResponse(action, verified.detail);
+        agentState.set('RESPONDING', { step: stepCount, maxSteps, message: 'Reporting unverified result' });
+        if (respond) respond(msg);
+        if (onStep) onStep({ step: stepCount, type: 'unverified', message: msg });
+        agentState.complete(false, msg, { steps });
+        agentState.end();
+        return { done: true, steps, finalResponse: msg, unverified: true };
+      }
+
+      if (verified.verified) {
+        // Verified success — continue or finish
         const response = buildSuccessResponse(action, observation, verified);
         if (decision.say) {
           const fullResponse = decision.say + (response ? ' ' + response : '');
@@ -683,8 +604,17 @@ export async function runAgentLoop(text, opts = {}) {
           agentState.set('VERIFYING', { step: stepCount, maxSteps, message: 'Verifying after retry' });
           const retryVerify = await verifyAction(action, retryResult);
           agentState.verification(!!retryVerify.verified, retryVerify.detail, { step: stepCount });
-          if (retryVerify.verified || retryResult.ok) {
-            const msg = retryResult.observation || 'Done after retry.';
+          if (retryVerify.status === 'unavailable' && retryResult.ok) {
+            const msg = buildUnverifiedResponse(action, retryVerify.detail);
+            agentState.set('RESPONDING', { step: stepCount, message: 'Reporting unverified retry result' });
+            if (respond) respond(msg);
+            if (onStep) onStep({ step: stepCount, type: 'unverified', message: msg });
+            agentState.complete(false, msg, { steps });
+            agentState.end();
+            return { done: true, steps, finalResponse: msg, unverified: true };
+          }
+          if (retryVerify.verified) {
+            const msg = retryResult.observation || retryVerify.detail || 'Done after retry.';
             agentState.set('RESPONDING', { step: stepCount, message: 'Preparing response' });
             if (respond) respond(msg);
             agentState.set('SUCCESS', { step: stepCount, message: 'Task complete after retry' });
@@ -1226,6 +1156,20 @@ function buildSuccessResponse(action, observation, verification) {
     whatsapp: 'WhatsApp opened',
   };
   return names[action.type] || 'Done.';
+}
+
+/** Build an honest response when execution was accepted but cannot be proven. */
+function buildUnverifiedResponse(action, detail) {
+  if (detail) return detail;
+  const labels = {
+    call: 'Android accepted the call request, but I could not verify that the call connected.',
+    sms: 'Android accepted the SMS request, but no delivery receipt was available.',
+    whatsapp: 'WhatsApp accepted the request, but I could not verify message delivery.',
+    alarm_add: 'Android accepted the alarm request, but I could not read the saved alarm back.',
+    media: 'Android accepted the media command, but I could not independently observe playback state.',
+    torch: 'Android accepted the flashlight command, but this device does not expose its state for verification.',
+  };
+  return labels[action.type] || 'The device accepted the action, but I could not independently verify the result.';
 }
 
 /** Build failure response */

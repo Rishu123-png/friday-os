@@ -34,75 +34,142 @@ import { getSetting } from '../store.js';
  * @param {Object} result   - The raw result from executeAction
  * @returns {Promise<VerificationResult>}
  */
-export async function verifyAction(action, result) {
+export async function verifyAction(action, execution) {
   const type = action.type;
+  const accepted = !!(execution && execution.ok);
+  const raw = execution && execution.result !== undefined ? execution.result : execution;
 
+  // A failed native/API invocation can never become verified later.
+  if (!accepted) {
+    return failed(
+      (execution && (execution.error || execution.reason)) ||
+      (raw && (raw.reason || raw.error)) ||
+      'Action execution failed.',
+      { execution: safeEvidence(raw) }
+    );
+  }
+
+  let outcome;
   switch (type) {
     case 'torch':
     case 'flashlight':
-      return verifyFlashlight(action.on);
+      outcome = await verifyFlashlight(action.on);
+      break;
 
     case 'open_app':
-      return verifyAppLaunched(action.app, result);
+      outcome = await verifyAppLaunched(action.app, raw);
+      break;
 
     case 'volume':
-      return verifyVolume(action.percent);
+      outcome = await verifyVolume(action.percent);
+      break;
 
     case 'brightness':
-      return verifyBrightness(action.percent);
+      outcome = await verifyBrightness(action.percent);
+      break;
 
     case 'sys_toggle':
     case 'toggle_wifi':
-      return verifyWifi(action.on);
+      outcome = await verifyWifi(action.on);
+      break;
 
     case 'toggle_bt':
-      return verifyBluetooth(action.on);
+      outcome = await verifyBluetooth(action.on);
+      break;
 
     case 'toggle_dnd':
-      return verifyDND(action.on);
+      outcome = await verifyDND(action.on);
+      break;
 
+    // Android accepted these commands, but this layer has no independent
+    // playback/call/delivery/alarm observation. Acceptance is not proof.
     case 'media':
-      return verifyMedia(action.action);
-
+      outcome = unavailable(`Media ${action.action || 'control'} command was accepted, but playback state could not be independently verified.`, { action: action.action });
+      break;
     case 'call':
-      return verifyCall(action.number);
-
+      outcome = unavailable(`The call command was accepted for ${formatPhone(action.number)}, but call connection could not be independently verified.`, {});
+      break;
     case 'sms':
-      return verifySMS(action.number, action.body);
-
+      outcome = unavailable(`The SMS command was accepted for ${formatPhone(action.number)}, but no delivery receipt is available.`, {});
+      break;
     case 'whatsapp':
-      return verifyWhatsApp(action.number, action.body);
+      outcome = unavailable(`WhatsApp launch/composition was accepted for ${formatPhone(action.number)}, but message delivery could not be verified.`, {});
+      break;
+    case 'alarm_add':
+      outcome = unavailable(`Android accepted the alarm request for ${action.alarm && action.alarm.time || 'the requested time'}, but the saved alarm could not be read back.`, {});
+      break;
 
     case 'screenshot':
-      return verifyScreenshot(result);
+      outcome = await verifyScreenshot(raw);
+      break;
 
     case 'screen_read':
-    case 'read_notifications':
     case 'read_screen_text':
-      return verifyScreenRead(result);
+      outcome = await verifyScreenRead(raw);
+      break;
+
+    case 'read_notifications':
+      outcome = raw && raw.ok && Array.isArray(raw.items)
+        ? verified(`Read ${raw.items.length} active notification${raw.items.length === 1 ? '' : 's'}.`, { count: raw.items.length })
+        : failed((raw && raw.reason) || 'Could not read notifications.', safeEvidence(raw));
+      break;
 
     case 'battery':
-      return verifyBattery(result);
-
-    case 'alarm_add':
-      return verifyAlarm(action.alarm);
+      outcome = await verifyBattery(raw);
+      break;
 
     case 'location':
-      return verifyLocation(result);
+      outcome = await verifyLocation(raw);
+      break;
 
     case 'storage':
-      return verifyStorage(result);
+      outcome = await verifyStorage(raw);
+      break;
 
     case 'security_scan':
-      return verifySecurityScan(result);
+      outcome = await verifySecurityScan(raw);
+      break;
 
     default:
-      // For unhandled types, check if the action reported success
-      if (result && result.ok) {
-        return { verified: true, detail: 'Action reported success', evidence: { ok: true } };
-      }
-      return { verified: false, detail: result && result.error ? result.error : 'Action failed' };
+      outcome = unavailable('The action API accepted the request, but no independent verifier exists for this action.', { type });
   }
+
+  return normalizeVerification(outcome);
+}
+
+function verified(detail, evidence = {}) {
+  return { status: 'verified', verified: true, detail, evidence };
+}
+
+function failed(detail, evidence = {}) {
+  return { status: 'failed', verified: false, detail, evidence };
+}
+
+function unavailable(detail, evidence = {}) {
+  return { status: 'unavailable', verified: false, detail, evidence };
+}
+
+function safeEvidence(value) {
+  if (!value || typeof value !== 'object') return {};
+  const out = {};
+  for (const key of ['ok', 'reason', 'error', 'level', 'charging', 'freeGB', 'totalGB', 'width', 'height']) {
+    if (value[key] !== undefined) out[key] = value[key];
+  }
+  return out;
+}
+
+function normalizeVerification(value) {
+  if (!value || typeof value !== 'object') return failed('Verifier returned no result.');
+  if (value.status === 'verified' || value.status === 'failed' || value.status === 'unavailable') return value;
+
+  const note = String(value.evidence && value.evidence.note || '').toLowerCase();
+  const detail = String(value.detail || '');
+  if (/not readable|unavailable|trusting|reported success|command (sent|accepted)/.test(note + ' ' + detail.toLowerCase())) {
+    return unavailable(detail || 'Independent verification is unavailable.', value.evidence || {});
+  }
+  return value.verified
+    ? verified(detail || 'Action verified.', value.evidence || {})
+    : failed(detail || 'Action verification failed.', value.evidence || {});
 }
 
 /* ======================== INDIVIDUAL VERIFIERS ======================== */
@@ -688,27 +755,4 @@ export async function collectObservations(profile) {
   return obs;
 }
 
-/* ======================== EXPORTS ======================== */
-
-export {
-  verifyAction,
-  verifyFlashlight,
-  verifyAppLaunched,
-  verifyVolume,
-  verifyBrightness,
-  verifyWifi,
-  verifyBluetooth,
-  verifyDND,
-  verifyMedia,
-  verifyCall,
-  verifySMS,
-  verifyWhatsApp,
-  verifyScreenshot,
-  verifyScreenRead,
-  verifyBattery,
-  verifyAlarm,
-  verifyLocation,
-  verifyStorage,
-  verifySecurityScan,
-  collectObservations,
-};
+/* Public functions are exported at their declarations above. */
