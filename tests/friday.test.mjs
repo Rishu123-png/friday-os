@@ -79,6 +79,13 @@ test('math percent-of intent', () => {
 });
 test('wifi toggle intent', () => assert.equal(resolve('turn on wifi').intent, 'toggle_wifi'));
 test('joke intent', () => assert.equal(resolve('tell me a joke').intent, 'joke'));
+test('open app settings always targets FRIDAY in-app settings', () => {
+  for (const phrase of ['open app settings', 'Open app settings', 'friday open app settings']) {
+    const hit = resolve(phrase);
+    assert.ok(hit, 'missed: ' + phrase);
+    assert.deepEqual(hit.action, { type: 'open_panel', panel: 'settings' });
+  }
+});
 test('intent engine has breadth', () => assert.ok(intentCount() >= 55));
 
 /* ---------------- Memory: fact extraction ---------------- */
@@ -2313,7 +2320,7 @@ test('hudv20: fmtCoord adds hemisphere', () => {
 test('hudv20: fmtSpeed + fmtBytesMB + netQuality', () => {
   assert.equal(HUDV20.fmtSpeed(12.34), '12.3 km/h');
   assert.equal(HUDV20.fmtSpeed(null), '—');
-  assert.equal(HUDV20.fmtBytesMB(209715200), '200.0 GB');
+  assert.equal(HUDV20.fmtBytesMB(209715200), '200.0 MB');
   assert.equal(HUDV20.netQuality(40, 12), 'Excellent');
   assert.equal(HUDV20.netQuality(300, 0.3), 'Weak');
   assert.equal(HUDV20.netQuality(null, null), '—');
