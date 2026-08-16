@@ -57,6 +57,9 @@ workflows:
           PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
           mkdir -p "$PKG_DIR" android/app/src/main/java/com
           cp native/*.java "$PKG_DIR/"
+          TEST_PKG_DIR="android/app/src/test/java/com/rishu/fridayos"
+          mkdir -p "$TEST_PKG_DIR"
+          cp native/tests/*.java "$TEST_PKG_DIR/"
           cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
@@ -78,7 +81,7 @@ workflows:
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
           test -f app/build/outputs/apk/debug/app-debug.apk
 
     artifacts:
@@ -151,6 +154,9 @@ workflows:
           PKG_DIR="android/app/src/main/java/com/rishu/fridayos"
           mkdir -p "$PKG_DIR" android/app/src/main/java/com
           cp native/*.java "$PKG_DIR/"
+          TEST_PKG_DIR="android/app/src/test/java/com/rishu/fridayos"
+          mkdir -p "$TEST_PKG_DIR"
+          cp native/tests/*.java "$TEST_PKG_DIR/"
           cp -r native/vendor/sherpa/com/k2fsa android/app/src/main/java/com/
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout android/app/src/main/res/drawable android/app/src/main/res/raw
           cp native/friday_accessibility.xml android/app/src/main/res/xml/
@@ -174,7 +180,7 @@ workflows:
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew testDebugUnitTest assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
 
     artifacts:
