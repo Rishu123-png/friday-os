@@ -1,1 +1,879 @@
- 
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://friday-os.local/protocol/action-v1.schema.json",
+  "title": "FRIDAY Action Protocol v1.0",
+  "description": "Versioned backend-to-Android action and result envelopes.",
+  "$defs": {
+    "ActionRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.torch.set"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.volume.set"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "percent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              },
+              "required": [
+                "percent"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.brightness.set"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "percent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              },
+              "required": [
+                "percent"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.wifi.set"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.bluetooth.set"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "media.control"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 10000,
+                  "enum": [
+                    "play",
+                    "pause",
+                    "next",
+                    "previous",
+                    "stop",
+                    "playpause"
+                  ]
+                }
+              },
+              "required": [
+                "command"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "app.open"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "app": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "required": [
+                "app"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "alarm.create"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "hour": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 23
+                },
+                "minute": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 59
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 120,
+                  "default": "FRIDAY"
+                },
+                "repeat": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 10000,
+                  "enum": [
+                    "once",
+                    "daily",
+                    "weekdays",
+                    "weekends"
+                  ],
+                  "default": "once"
+                }
+              },
+              "required": [
+                "hour",
+                "minute"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.battery.get"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "device.storage.get"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "notifications.list"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "screen.read"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "screen.capture"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {}
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "phone.call"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "number": {
+                  "type": "string",
+                  "pattern": "^\\+?[0-9][0-9 .()\\-]{6,18}$"
+                }
+              },
+              "required": [
+                "number"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_version",
+            "type",
+            "args",
+            "idempotency_key"
+          ],
+          "properties": {
+            "protocol_version": {
+              "const": "1.0"
+            },
+            "type": {
+              "const": "message.sms.send"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "number": {
+                  "type": "string",
+                  "pattern": "^\\+?[0-9][0-9 .()\\-]{6,18}$"
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "number",
+                "body"
+              ]
+            },
+            "idempotency_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            "expires_in_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400,
+              "default": 300
+            },
+            "safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "confirmed": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ActionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "action_id",
+        "device_id",
+        "lease_token",
+        "started_at",
+        "finished_at",
+        "execution",
+        "verification"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0"
+        },
+        "action_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{3,128}$"
+        },
+        "lease_token": {
+          "type": "string",
+          "minLength": 20
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "output"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "unsupported",
+                "denied"
+              ]
+            },
+            "output": {
+              "type": "object"
+            },
+            "error": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "method",
+            "evidence"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "verified",
+                "failed",
+                "unavailable",
+                "not_required"
+              ]
+            },
+            "method": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "evidence": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ActionRequest"
+    },
+    {
+      "$ref": "#/$defs/ActionResult"
+    }
+  ]
+}
