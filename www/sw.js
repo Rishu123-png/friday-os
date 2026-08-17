@@ -1,11 +1,9 @@
-/* FRIDAY OS — Service Worker v16
+/* FRIDAY OS — Service Worker v16.1
    P0 FIX: offline-first HUD
-   - v15 missed css/hud-v21.css, hud-agent, hud_v20, hud-shell, agent modules → broken offline styling
-   - v16 adds self-hosted fonts (no CDN), bumps CACHE, includes all critical HUD assets.
-   Resilient precache: one missing file never kills the whole cache.
-   CDN libraries are cached so on-device AI features work offline after first use. */
+   P1: includes new modular split (hud-controller, tick, voice, chat)
+   Resilient precache: one missing file never kills the whole cache. */
 
-const CACHE = 'friday-os-v16';
+const CACHE = 'friday-os-v16-1';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
@@ -27,14 +25,13 @@ const ASSETS = [
   './js/memex.js', './js/visionx.js', './js/autox.js',
   './js/planx.js', './js/intelx.js', './js/devx.js',
   './js/secx.js', './js/perfx.js', './js/cinex.js',
-  /* P0 FIX: HUD real-data engine + agent HUD + shell were missing */
   './js/hud_v20.js', './js/hud-agent.js', './js/hud-shell.js',
   './js/agent/agentState.js', './js/agent/orchestrator.js', './js/agent/verification.js',
   './js/action-device.js', './js/boot-runtime.js',
+  './js/modules/hud-controller.js', './js/modules/tick-controller.js', './js/modules/voice-controller.js', './js/modules/chat-controller.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
-/* Never cache: live data / auth'd API calls */
 const NO_CACHE = [
   'api.groq.com',
   'api.open-meteo.com',
@@ -47,7 +44,6 @@ const NO_CACHE = [
   'dummyjson.com'
 ];
 
-/* Cross-origin hosts whose scripts/models SHOULD be cached (offline AI) */
 const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co'];
 
 self.addEventListener('install', e => {
@@ -72,12 +68,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
   if (NO_CACHE.some(h => url.hostname.includes(h))) return;
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-
-  // Navigation: network first, cached shell offline
   if (req.mode === 'navigate') {
     e.respondWith((async () => {
       try {
@@ -92,8 +85,6 @@ self.addEventListener('fetch', e => {
     })());
     return;
   }
-
-  // Static + AI CDN: cache first, revalidate in background
   e.respondWith((async () => {
     const cached = await caches.match(req);
     const cacheable = res => res && res.status === 200 &&
@@ -104,9 +95,8 @@ self.addEventListener('fetch', e => {
       }
       return res;
     }).catch(() => null);
-
     if (cached) {
-      network.catch(() => {}); // background refresh, ignore failures
+      network.catch(() => {});
       return cached;
     }
     return (await network) ||
