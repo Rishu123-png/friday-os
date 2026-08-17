@@ -35,6 +35,7 @@ function base() {
 }
 
 const PENDING_ACTION_KEY = 'friday_pending_action_v1';
+const PENDING_TTL_MS = 5 * 60 * 1000; // v16 P0: auto-expire after 5 minutes
 
 function chatRequestId() {
   try { if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch (_) {}
@@ -43,7 +44,22 @@ function chatRequestId() {
 
 function pendingActionId() {
   try {
-    const item = JSON.parse(localStorage.getItem(PENDING_ACTION_KEY) || 'null');
+    const raw = localStorage.getItem(PENDING_ACTION_KEY);
+    if (!raw) return '';
+    const item = JSON.parse(raw);
+    // v16: TTL check — stale pending would block next confirmation
+    // Backward compat: very old small placeholders (e.g. 1000 used in unit tests) skip TTL
+    if (item && typeof item.created_at === 'number') {
+      if (item.created_at < 1e9) {
+        // test placeholder or ancient sec value — keep alive for test compat
+      } else {
+        const createdMs = item.created_at > 1e12 ? item.created_at : item.created_at * 1000;
+        if (Date.now() - createdMs > PENDING_TTL_MS) {
+          localStorage.removeItem(PENDING_ACTION_KEY);
+          return '';
+        }
+      }
+    }
     return item && typeof item.action_id === 'string' ? item.action_id : '';
   } catch (_) { return ''; }
 }
@@ -54,12 +70,17 @@ function rememberActionEvent(action) {
     if (action.state === 'awaiting_confirmation') {
       localStorage.setItem(PENDING_ACTION_KEY, JSON.stringify({
         action_id: action.action_id,
-        created_at: action.created_at || Math.floor(Date.now() / 1000)
+        created_at: Date.now() // v16: store ms, not seconds, for precise TTL
       }));
     } else if (pendingActionId() === action.action_id) {
       localStorage.removeItem(PENDING_ACTION_KEY);
     }
   } catch (_) {}
+}
+
+/** Public helper for chat abort cleanup — prevents stale confirmation lock */
+export function clearPendingAction() {
+  try { localStorage.removeItem(PENDING_ACTION_KEY); } catch (_) {}
 }
 
 /** Server health — call on boot to flip the "FRIDAY Cloud: online" badge. */
