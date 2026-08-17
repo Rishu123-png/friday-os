@@ -1777,7 +1777,13 @@ public class FridayNative extends Plugin {
                 JSObject r = ok(); r.put("app", app); r.put("eventKey", eventKey); call.resolve(r);
             } else {
                 JSObject r = fail("not_found");
-                r.put("reason", "The exact notification nnot_reply"); r.put("reason", e.getMessage()); call.resolve(r);
+                r.put("reason", "The exact notification could not be replied to");
+                call.resolve(r);
+            }
+        } catch (Exception e) {
+            JSObject r = fail("reply_failed");
+            r.put("reason", e.getMessage());
+            call.resolve(r);
         }
     }
 
