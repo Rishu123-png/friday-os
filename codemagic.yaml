@@ -6,7 +6,7 @@ workflows:
 
     environment:
       node: 20
-      java: 17
+      java: 21
       vars:
         PACKAGE_NAME: "com.rishu.fridayos"
 
@@ -38,11 +38,11 @@ workflows:
       - name: Run complete Phase 3 test suite
         script: npm test
 
-      - name: Verify Java 17 and Android SDK 35 (Capacitor 7)
+      - name: Verify Java 21 and Android SDK 35 (Capacitor 7)
         script: |
           java -version
           JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
-          test "$JAVA_MAJOR" = "17" || { echo "Java 17 required"; exit 1; }
+          test "$JAVA_MAJOR" = "21" || { echo "Java 21 required"; exit 1; }
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           test -d "$SDK" || { echo "Android SDK not found: $SDK"; exit 1; }
           SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
@@ -118,7 +118,7 @@ workflows:
 
     environment:
       node: 20
-      java: 17
+      java: 21
       android_signing:
         - friday_keystore
       vars:
@@ -152,11 +152,11 @@ workflows:
       - name: Run complete Phase 3 test suite
         script: npm test
 
-      - name: Verify Java 17 and Android SDK 35 (Capacitor 7)
+      - name: Verify Java 21 and Android SDK 35 (Capacitor 7)
         script: |
           java -version
           JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
-          test "$JAVA_MAJOR" = "17" || { echo "Java 17 required"; exit 1; }
+          test "$JAVA_MAJOR" = "21" || { echo "Java 21 required"; exit 1; }
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           test -d "$SDK" || { echo "Android SDK not found: $SDK"; exit 1; }
           SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
