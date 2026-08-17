@@ -31,7 +31,7 @@ workflows:
       - name: Run complete Phase 3 test suite
         script: npm test
 
-      - name: Verify Java 17 and Android SDK 34
+      - name: Verify Java 17 and Android SDK 35 (Capacitor 7)
         script: |
           java -version
           JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
@@ -41,7 +41,7 @@ workflows:
           SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
           test -n "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
           yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
           echo "ANDROID_SDK=$SDK"
 
       - name: Generate Capacitor Android project and sync Phase 3 assets
@@ -129,7 +129,7 @@ workflows:
       - name: Run complete Phase 3 test suite
         script: npm test
 
-      - name: Verify Java 17 and Android SDK 34
+      - name: Verify Java 17 and Android SDK 35 (Capacitor 7)
         script: |
           java -version
           JAVA_MAJOR=$(java -version 2>&1 | awk -F '[".]' '/version/ {print $2}')
@@ -139,7 +139,7 @@ workflows:
           SDKMANAGER=$(command -v sdkmanager || find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)
           test -n "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
           yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Generate Capacitor Android project and sync Phase 3 assets
         script: |
