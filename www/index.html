@@ -11,11 +11,8 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <!-- v7.7 HUD fonts: Orbitron/Rajdhani/JetBrains Mono were referenced in CSS
-       but never loaded. Progressive enhancement - falls back offline. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@500;600&family=JetBrains+Mono:wght@500&display=swap">
+  <!-- v16 HUD fonts: self-hosted offline-first (no CDN). 76KB total, cached by SW. -->
+  <link rel="stylesheet" href="css/fonts-local.css">
   <link rel="stylesheet" href="styles.css">
   <!-- FRIDAY OS standalone portrait core HUD -->
   <link rel="stylesheet" href="css/hud-v21.css">
