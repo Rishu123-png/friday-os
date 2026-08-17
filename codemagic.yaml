@@ -25,7 +25,14 @@ workflows:
     scripts:
       - name: Install locked dependencies
         script: |
-          npm ci
+          echo "Cleaning previous node_modules cache for Capacitor 7 upgrade..."
+          rm -rf node_modules
+          npm cache clean --force || true
+          npm ci --include=dev
+          echo "Verifying Capacitor 7 install:"
+          ls -la node_modules/.bin/cap* node_modules/.bin/capacitor || true
+          ls -la node_modules/@capacitor/android/package.json || echo "android package missing!"
+          npx --yes @capacitor/cli --version
           python3 -m pip install --user --disable-pip-version-check "httpx>=0.27"
 
       - name: Run complete Phase 3 test suite
@@ -132,7 +139,14 @@ workflows:
     scripts:
       - name: Install locked dependencies
         script: |
-          npm ci
+          echo "Cleaning previous node_modules cache for Capacitor 7 upgrade..."
+          rm -rf node_modules
+          npm cache clean --force || true
+          npm ci --include=dev
+          echo "Verifying Capacitor 7 install:"
+          ls -la node_modules/.bin/cap* node_modules/.bin/capacitor || true
+          ls -la node_modules/@capacitor/android/package.json || echo "android package missing!"
+          npx --yes @capacitor/cli --version
           python3 -m pip install --user --disable-pip-version-check "httpx>=0.27"
 
       - name: Run complete Phase 3 test suite
