@@ -2,33 +2,33 @@
   "name": "friday-os",
   "version": "1.0.0",
   "type": "module",
-  "description": "FRIDAY OS \u2014 personal AI assistant. Offline-first, optional Groq key, offline LLM via llama.cpp.",
+  "description": "FRIDAY OS — personal AI assistant. Offline-first, optional Groq key, offline LLM via llama.cpp.",
   "private": true,
   "scripts": {
     "serve": "npx --yes http-server www -p 8080 -c-1",
     "test": "npm run test:web && npm run test:backend",
     "sync": "npx cap sync android",
     "apk": "cd android && ./gradlew assembleDebug",
-    "build": "echo \"static app \u2014 nothing to compile\"",
+    "build": "echo \"static app — nothing to compile\"",
     "test:web": "node --experimental-vm-modules --test tests/",
     "test:backend": "python3 -m unittest discover -s backend -p 'test_*.py' -v"
   },
   "dependencies": {
-    "@capacitor/android": "^6.2.0",
-    "@capacitor/app": "^6.0.2",
-    "@capacitor/core": "^6.2.0",
-    "@capacitor/device": "^6.0.2",
-    "@capacitor/filesystem": "^6.0.2",
-    "@capacitor/geolocation": "^6.1.0",
-    "@capacitor/haptics": "^6.0.2",
-    "@capacitor/local-notifications": "^6.1.1",
-    "@capacitor/network": "^6.0.3",
-    "@capacitor/preferences": "^6.0.3",
-    "@capacitor/share": "^6.0.3",
-    "@capacitor/splash-screen": "^6.0.3",
-    "@capacitor/status-bar": "^6.0.2"
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/device": "^7.0.1",
+    "@capacitor/filesystem": "^7.0.1",
+    "@capacitor/geolocation": "^7.1.0",
+    "@capacitor/haptics": "^7.0.1",
+    "@capacitor/local-notifications": "^7.0.1",
+    "@capacitor/network": "^7.0.1",
+    "@capacitor/preferences": "^7.0.1",
+    "@capacitor/share": "^7.0.1",
+    "@capacitor/splash-screen": "^7.0.1",
+    "@capacitor/status-bar": "^7.0.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0"
+    "@capacitor/cli": "^7.4.3"
   }
 }
