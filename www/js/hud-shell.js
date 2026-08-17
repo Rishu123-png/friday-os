@@ -1,5 +1,5 @@
 /* =========================================================================
-   FRIDAY OS — HUD SHELL
+   FRIDAY OS — HUD SHELL v16 (P0 fix: debounced + battery-aware)
    Plain script (not a module), loaded after app.js:
    - activates the standalone portrait HUD stylesheet
    - draws restrained connector lines from the four live cards to the core
@@ -7,6 +7,7 @@
    - turns long-press-on-core into the hidden advanced control deck
 
    No service, location, network or device value is invented here.
+   Fix: RAF debounced drawLinks, visibility-aware telemetry, no layout thrash
    ========================================================================= */
 (function () {
   'use strict';
@@ -59,11 +60,18 @@
       }
       return 'idle';
     }
+
+    // v16: debounce sync via RAF to avoid thrash when orb flickers quickly
+    var rafSync = null;
     function syncHudState() {
-      var state = coreState();
-      document.body.setAttribute('data-hud-state', state);
-      document.body.classList.toggle('hud-active', state !== 'idle' && state !== 'sleeping');
-      requestAnimationFrame(drawLinks);
+      if (rafSync) return;
+      rafSync = requestAnimationFrame(function () {
+        rafSync = null;
+        var state = coreState();
+        document.body.setAttribute('data-hud-state', state);
+        document.body.classList.toggle('hud-active', state !== 'idle' && state !== 'sleeping');
+        scheduleDraw();
+      });
     }
     syncHudState();
     if (window.MutationObserver) {
@@ -72,12 +80,13 @@
       });
     }
 
-    /* ---------------- connector lines ---------------- */
+    /* ---------------- connector lines (RAF debounced) ---------------- */
     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('id', 'hudLinks');
     dashboard.insertBefore(svg, dashboard.firstChild);
 
     function nodesToLink() {
+      if (document.hidden) return []; // battery: no work when hidden
       var list = Array.prototype.slice.call(
         dashboard.querySelectorAll('.hud-module:not(.module-ai-core):not(.module-compass), .hud-vision-node')
       );
@@ -87,9 +96,20 @@
       });
     }
 
+    var rafDraw = null;
+    function scheduleDraw() {
+      if (rafDraw) return;
+      rafDraw = requestAnimationFrame(function () {
+        rafDraw = null;
+        drawLinks();
+      });
+    }
+
     function drawLinks() {
+      if (document.hidden) return;
       var stageRect = dashboard.getBoundingClientRect();
       var coreRect = coreWrap.getBoundingClientRect();
+      if (coreRect.width < 1 || coreRect.height < 1) return;
       var cx = coreRect.left + coreRect.width / 2 - stageRect.left;
       var cy = coreRect.top + coreRect.height / 2 - stageRect.top;
       while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -115,6 +135,7 @@
     dashboard.appendChild(strip);
 
     function syncTelemetry() {
+      if (document.hidden) return; // v16: save battery when tab hidden
       var netVal = document.getElementById('netStatus');
       var tNet = document.getElementById('hudTNet');
       if (netVal && tNet) {
@@ -129,7 +150,16 @@
         tVoice.className = /^(LISTENING|THINKING|EXECUTING|SPEAKING)$/.test(voiceState) ? 'on' : '';
       }
     }
-    setInterval(syncTelemetry, 1500);
+    var teleTimer = setInterval(syncTelemetry, 1500);
+    // pause telemetry when hidden, resume when visible
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        // keep timer but skip work; no need to clear
+      } else {
+        syncTelemetry();
+        scheduleDraw();
+      }
+    });
     syncTelemetry();
 
     /* ---------------- core interaction: tap = talk, hold = advanced ---
@@ -157,14 +187,14 @@
       dashboard.classList.add(EXPANDED);
       coreWrap.setAttribute('aria-expanded', 'true');
       requestAnimationFrame(function () {
-        drawLinks();
+        scheduleDraw();
         try { deckClose.focus({ preventScroll: true }); } catch (_) { deckClose.focus(); }
       });
     }
     function closeAdvanced() {
       dashboard.classList.remove(EXPANDED);
       coreWrap.setAttribute('aria-expanded', 'false');
-      requestAnimationFrame(drawLinks);
+      requestAnimationFrame(scheduleDraw);
     }
     function toggleAdvanced() {
       if (dashboard.classList.contains(EXPANDED)) closeAdvanced();
@@ -218,11 +248,16 @@
     });
 
     /* ---------------- keep links accurate ---------------- */
-    window.addEventListener('resize', drawLinks);
-    window.addEventListener('orientationchange', function () { setTimeout(drawLinks, 200); });
-    var ro = window.ResizeObserver ? new ResizeObserver(drawLinks) : null;
+    var resizeTimer = null;
+    function onResize() {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(scheduleDraw, 100);
+    }
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', function () { setTimeout(scheduleDraw, 200); });
+    var ro = window.ResizeObserver ? new ResizeObserver(function () { scheduleDraw(); }) : null;
     if (ro) ro.observe(dashboard);
-    setTimeout(drawLinks, 60);
-    setTimeout(drawLinks, 400); // fonts/canvas settle late on first paint
+    setTimeout(scheduleDraw, 60);
+    setTimeout(scheduleDraw, 400); // fonts/canvas settle late on first paint
   });
 })();
