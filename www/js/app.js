@@ -2796,7 +2796,7 @@ async function runAction(a, hit) {
         } else {
           // never dump raw Android errors into chat - translate them
           const why = String(r.reason || '');
-          console.warn('[alarm] clock sync failed:', why);
+          Logger.warn('alarm', 'clock sync failed: '+(why&&why.message||why));
           reply(`Alarm set \u2014 ${rec.label} at ${when}. That's ${humanTime(next)}.`);
           if (why.includes('SET_ALARM')) {
             addMsg('ai', '\u26a0\ufe0f Your phone blocked Clock-app sync (missing alarm permission in this build). The alarm **will still ring inside FRIDAY**. Rebuild with the updated manifest to enable Clock-app alarms.');
@@ -4559,7 +4559,7 @@ async function askLocalFirst(text) {
     armTalkWait(final);   // Karen loop works on-device too
     return true;
   } catch (e) {
-    console.warn('[localbrain]', e.message || e);
+    Logger.warn('localbrain', e.message||e);
     if (!state.llmHintShown) { state.llmHintShown = true; U.toast('On-device brain hiccup — using the other engines', '🧠'); }
     return false;
   } finally {
@@ -4630,7 +4630,7 @@ async function askGroq(text) {
             msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function?.name, content: String(out) });
           }
         }
-      } catch (toolErr) { console.warn('[agent] tool pass failed, continuing plain', toolErr.message); }
+      } catch (toolErr) { Logger.warn('agent', 'tool pass failed, continuing plain: '+(toolErr.message||toolErr)); }
     }
 
     // --- pass 2: final answer, streamed ---
@@ -5220,7 +5220,7 @@ async function initNative() {
   window.__stage = 'native:done';
   } catch (e) {
     window.__stage = 'native:failed';
-    console.warn('initNative failed:', e);
+    Logger.warn('native', 'initNative failed: '+(e&&e.message||e));
   }
 
   updateBrainBadge();
@@ -5395,7 +5395,7 @@ async function execAction(a) {
       reply(bits.length ? 'For tomorrow: ' + bits.join(' and ') + '.' : 'Nothing scheduled for tomorrow.');
       break;
     }
-    default: console.warn('[exec] unknown action', a);
+    default: Logger.warn('exec', 'unknown action '+String(a&&a.type||a));
   }
 }
 
@@ -5667,7 +5667,7 @@ async function scheduleNativeReminder(item) {
       schedule: { at: new Date(item.due), allowWhileIdle: true }, smallIcon: 'ic_stat_icon'
     }]});
     return true;
-  } catch (e) { console.warn('[reminders] native schedule failed', e); return false; }
+  } catch (e) { Logger.warn('reminders', 'native schedule failed: '+(e&&e.message||e)); return false; }
 }
 
 function scheduleReminder(item) {
