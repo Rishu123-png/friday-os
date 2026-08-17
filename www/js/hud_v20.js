@@ -13,7 +13,7 @@ import * as DEVX from './devx.js';
 import * as VOX from './vox.js';
 import * as PLAN4 from './plannerx.js';
 import * as AUTO from './automation.js';
-import * as CORE from './fridaycore.js';
+import { CORE } from './fridaycore.js';
 import * as NAT from './native.js';
 import * as STORE from './store.js';
 import { agentState } from './agent/agentState.js';   // PHASE 2: agent-driven HUD
@@ -339,12 +339,24 @@ function drawGraph() {
   ctx.shadowBlur = 0;
 }
 
-/* ---- Active modules: real CORE health ---- */
+/* ---- Active modules: real CORE health (v16: cached 8s to reduce CPU) ---- */
+let _healthCache = null;
+let _healthCacheAt = 0;
 async function updateModules() {
+  if (document.hidden) return; // v16 battery save
   const items = document.querySelectorAll('.modules-list .mod-item');
   if (!items.length) return;
   let health = {};
-  try { health = await CORE.CORE.healthMap(); } catch (_) {}
+  try {
+    const now = Date.now();
+    if (_healthCache && (now - _healthCacheAt) < 8000) {
+      health = _healthCache;
+    } else {
+      health = await CORE.healthMap();
+      _healthCache = health;
+      _healthCacheAt = now;
+    }
+  } catch (_) {}
   const map = { voice: 'voice', vision: 'visionx', memory: 'cognition', automation: 'autox', notifications: 'notifications', 'ai router': 'air' };
   items.forEach(item => {
     const name = String(item.textContent || '').toUpperCase();
@@ -469,11 +481,11 @@ async function updateBattery() {
 }
 
 function updateVoice() {
+  if (document.hidden) return; // v16: save battery when hidden
   const st = VOX.vox.get();
   const coreStatus = $('#listeningText');
   // PHASE 2: while the agent is actively working, the core label shows the
-  // REAL agent state (painted by hud-agent.js), not the voice engine — so the
-  // two stay synchronized and the label is never overwritten mid-action.
+  // REAL agent state (painted by hud-agent.js), not the voice engine
   if (coreStatus && !agentState.isActive()) coreStatus.textContent = voiceStateLabel(st);
   const bars = document.querySelectorAll('#voiceWaveform .wave-bar');
   const live = st === 'LISTENING' || st === 'SPEAKING' || st === 'UNDERSTANDING' || st === 'THINKING' || st === 'EXECUTING';
@@ -513,12 +525,28 @@ async function tick() {
   updateSuggestion();
 }
 
+let _voiceTimer = null;
+let _graphTimer = null;
+let _tickTimer = null;
+
 export function initHUDV20() {
   if (_running) return; _running = true;
   tick();
-  setInterval(tick, 3000);
-  setInterval(updateVoice, 700);
-  setInterval(drawGraph, 1500);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  _tickTimer = setInterval(tick, 3000);
+  _voiceTimer = setInterval(() => { if (!document.hidden) updateVoice(); }, 700);
+  _graphTimer = setInterval(() => { if (!document.hidden) drawGraph(); }, 1500);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      tick();
+      updateVoice();
+      drawGraph();
+    }
+  });
+  return { ok: true };
+}
+
+export function stopHUDV20() {
+  _running = false;
+  clearInterval(_tickTimer); clearInterval(_voiceTimer); clearInterval(_graphTimer);
   return { ok: true };
 }
