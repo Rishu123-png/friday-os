@@ -16,6 +16,24 @@ export function isNative() {
   return !!(c && c.isNativePlatform && c.isNativePlatform());
 }
 
+/** v16 P1: wait for Capacitor bridge to be ready (cold start race). */
+export async function waitForBridge(timeoutMs = 2000, intervalMs = 100) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const c = CAP();
+    if (c && c.Plugins && c.Plugins.FridayNative) return true;
+    // also consider named plugins readiness as bridge ready signal
+    if (c && c.isNativePlatform && c.isNativePlatform()) {
+      // give it a moment for plugins to register
+      await new Promise(r => setTimeout(r, intervalMs));
+      const c2 = CAP();
+      if (c2 && c2.Plugins && c2.Plugins.FridayNative) return true;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 function plugin() {
   const c = CAP();
   return c && c.Plugins ? c.Plugins.FridayNative : null;
@@ -29,9 +47,16 @@ function pluginNamed(name) {
 
 const WEB = (reason = 'web') => ({ ok: false, reason });
 
-async function call(method, args = {}) {
-  const p = plugin();
-  if (!p || typeof p[method] !== 'function') return WEB();
+async function call(method, args = {}, { retry = true } = {}) {
+  let p = plugin();
+  if ((!p || typeof p[method] !== 'function') && retry) {
+    // P1 fix: cold start race — bridge may not be ready first 2s
+    if (isNative()) {
+      await waitForBridge(2000);
+      p = plugin();
+    }
+  }
+  if (!p || typeof p[method] !== 'function') return WEB(isNative() ? 'bridge_not_ready' : 'web');
   try {
     const res = await p[method](args);
     return { ok: true, ...res };

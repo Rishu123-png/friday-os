@@ -351,7 +351,7 @@ function hudInit() {
     HUD.renderCards($('#hudContext'), HUD.contextCards({ batteryPct: b ? b.level : null, charging: b ? b.charging : false, notifCount, reminderText }));
   };
   refreshWidgets();
-  setInterval(refreshWidgets, 30000);
+  setInterval(refreshWidgets, 60000);
 
   /* ===== v11.2 PHASE 4 (VOX): orb is driven by the FORMAL state machine now.
      No 650ms poller — the Voice Engine emits 'vox:state' on the bus and the
@@ -682,7 +682,7 @@ function startClock() {
     if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
   tick();
-  setInterval(tick, 10000);
+  setInterval(tick, 15000);
 }
 
 function updateBrainBadge() {
