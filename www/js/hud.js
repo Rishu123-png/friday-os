@@ -1,5 +1,5 @@
 /* ============================================================================
-   FRIDAY OS — HUD (v11.1.0 / Phase 3)
+   FRIDAY OS — HUD (v11.1.0 / Phase 3) v16 P2: XSS-safe
    Living command center: live ring widgets around the AI orb, service status
    lights, rolling event feed, context cards, orb state machine. Pure helpers
    are unit-tested; runtime is wired by app.js. Every widget shows REAL data
@@ -66,6 +66,10 @@ export function svcLight(ok, warnLabel = '') {
 
 /* ---------------- runtime (wired by app.js) ---------------- */
 
+function esc(s) {
+  return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
 /** Set the orb state class on the HUD wrapper. */
 export function setOrbState(wrap, state) {
   if (!wrap) return;
@@ -78,25 +82,25 @@ export function setOrbState(wrap, state) {
 export function renderFeed(el, feed) {
   if (!el) return;
   el.innerHTML = (feed || []).slice().reverse()
-    .map(f => `<div class="hud-feed-line"><b>${f.icon}</b> ${f.text}</div>`).join('');
+    .map(f => `<div class="hud-feed-line"><b>${esc(f.icon)}</b> ${esc(f.text)}</div>`).join('');
 }
 
 /** Render context cards into #hudContext. */
 export function renderCards(el, cards) {
   if (!el) return;
-  el.innerHTML = (cards || []).map(c => `<div class="hud-card" id="hc-${c.id}">${c.icon} ${c.text}</div>`).join('');
+  el.innerHTML = (cards || []).map(c => `<div class="hud-card" id="hc-${esc(c.id)}">${esc(c.icon)} ${esc(c.text)}</div>`).join('');
 }
 
 /** Render ring widgets into #hudWidgets (only non-empty values). */
 export function renderWidgets(el, widgets) {
   if (!el) return;
   el.innerHTML = (widgets || []).filter(w => w && w.value)
-    .map(w => `<div class="hud-widget ${w.cls || ''}"><span class="hw-k">${w.k}</span><span class="hw-v">${w.value}</span></div>`).join('');
+    .map(w => `<div class="hud-widget ${esc(w.cls || '')}"><span class="hw-k">${esc(w.k)}</span><span class="hw-v">${esc(w.value)}</span></div>`).join('');
 }
 
 /** Render service status lights into #hudStatus. */
 export function renderStatus(el, rows) {
   if (!el) return;
   el.innerHTML = (rows || [])
-    .map(r => `<div class="hud-svc"><span class="hud-dot ${r.cls}"></span>${r.name}<i>${r.detail || ''}</i></div>`).join('');
+    .map(r => `<div class="hud-svc"><span class="hud-dot ${esc(r.cls)}"></span>${esc(r.name)}<i>${esc(r.detail || '')}</i></div>`).join('');
 }
