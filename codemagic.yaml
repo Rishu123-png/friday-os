@@ -46,11 +46,20 @@ workflows:
 
       - name: Generate Capacitor Android project and sync Phase 3 assets
         script: |
+          echo "Capacitor CLI version:"
+          ls -la node_modules/.bin/cap* || true
+          ./node_modules/.bin/cap --version || npx --yes @capacitor/cli --version || true
           test "$(node -p "require('./capacitor.config.json').appId")" = "$PACKAGE_NAME"
-          if [ ! -d android ]; then npx cap add android; fi
+          if [ ! -d android ]; then
+            echo "Adding android project (Capacitor 7)..."
+            npx --yes @capacitor/cli add android || ./node_modules/.bin/cap add android || ./node_modules/.bin/capacitor add android
+          fi
+          mkdir -p android
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           echo "sdk.dir=$SDK" > android/local.properties
-          npx cap sync android
+          cat android/local.properties
+          echo "Syncing Capacitor assets..."
+          npx --yes @capacitor/cli sync android || ./node_modules/.bin/cap sync android || ./node_modules/.bin/capacitor sync android
 
       - name: Install native sources, resources, and build dependencies
         script: |
@@ -143,11 +152,20 @@ workflows:
 
       - name: Generate Capacitor Android project and sync Phase 3 assets
         script: |
+          echo "Capacitor CLI version:"
+          ls -la node_modules/.bin/cap* || true
+          ./node_modules/.bin/cap --version || npx --yes @capacitor/cli --version || true
           test "$(node -p "require('./capacitor.config.json').appId")" = "$PACKAGE_NAME"
-          if [ ! -d android ]; then npx cap add android; fi
+          if [ ! -d android ]; then
+            echo "Adding android project (Capacitor 7)..."
+            npx --yes @capacitor/cli add android || ./node_modules/.bin/cap add android || ./node_modules/.bin/capacitor add android
+          fi
+          mkdir -p android
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
           echo "sdk.dir=$SDK" > android/local.properties
-          npx cap sync android
+          cat android/local.properties
+          echo "Syncing Capacitor assets..."
+          npx --yes @capacitor/cli sync android || ./node_modules/.bin/cap sync android || ./node_modules/.bin/capacitor sync android
 
       - name: Install native sources, resources, and build dependencies
         script: |
