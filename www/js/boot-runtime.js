@@ -1,4 +1,4 @@
-/* FRIDAY OS — failure-tolerant boot primitives.
+/* FRIDAY OS — failure-tolerant boot primitives v16 (P0 fix: abortable + no-leak).
    This module has no DOM dependency so the same rules are unit-tested in Node. */
 
 export const BOOT_STATE = Object.freeze({
@@ -33,7 +33,10 @@ export class BootDiagnostics {
   finish() { this.online = this.canGoOnline(); return this.online; }
 }
 
-/** Resolve optional work by its deadline. Late completion is ignored, not cancelled. */
+/** Resolve optional work by its deadline. Late completion is ignored, not cancelled.
+ *  v16 P0: adds AbortController support — if work accepts {signal} or (signal) it can cooperatively abort.
+ *  Still backward-compatible with existing zero-arg workers (Groq key fetch etc).
+ */
 export async function settleOptional(name, work, {
   timeoutMs = 2500, diagnostics = null,
   readyDetail = 'ready', timeoutState = BOOT_STATE.LIMITED,
@@ -41,10 +44,35 @@ export async function settleOptional(name, work, {
   failureState = BOOT_STATE.UNAVAILABLE
 } = {}) {
   let timer;
+  const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const signal = controller ? controller.signal : null;
+  let timedOut = false;
+
+  const invokeWork = () => {
+    try {
+      // Support both function signatures: work() and work({signal}) / work(signal)
+      // Detect arity or just try object form first, fallback to zero-arg.
+      if (work.length >= 1) {
+        // Try passing signal as first arg; if it expects object, it can destructure {signal}
+        try { return Promise.resolve(work({ signal })); }
+        catch (_) { return Promise.resolve(work(signal)); }
+      }
+      return Promise.resolve(work());
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  };
+
   try {
     const outcome = await Promise.race([
-      Promise.resolve().then(work).then(value => ({ kind: 'value', value }), error => ({ kind: 'error', error })),
-      new Promise(resolve => { timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs); })
+      invokeWork().then(value => ({ kind: 'value', value }), error => ({ kind: 'error', error })),
+      new Promise(resolve => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          try { controller && controller.abort(); } catch (_) {}
+          resolve({ kind: 'timeout' });
+        }, timeoutMs);
+      })
     ]);
     clearTimeout(timer);
     if (outcome.kind === 'timeout') {
@@ -60,7 +88,13 @@ export async function settleOptional(name, work, {
     diagnostics && diagnostics.set(name, ok ? BOOT_STATE.READY : failureState,
       ok ? readyDetail : ((outcome.value && outcome.value.reason) || 'unavailable'));
     return { ok, timedOut: false, value: outcome.value };
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+    // If timedOut we already aborted; otherwise cleanup abort timer resources
+    if (!timedOut) {
+      try { controller && controller.abort(); } catch (_) {}
+    }
+  }
 }
 
 export async function runBootPlan(steps, diagnostics = new BootDiagnostics()) {
