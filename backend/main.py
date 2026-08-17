@@ -50,6 +50,24 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"],
 
 _USER_HEADER_RE = re.compile(r"^[A-Za-z0-9._:@+-]{1,128}$")
 
+# P1/P2: simple in-memory rate limiter for claim to avoid spam loop
+import time
+from collections import defaultdict, deque
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+_RATE_LIMIT = 10
+_RATE_WINDOW = 60.0
+
+def _check_rate_limit(uid: str):
+    now = time.time()
+    bucket = _rate_buckets[uid]
+    # drop old
+    while bucket and now - bucket[0] > _RATE_WINDOW:
+        bucket.popleft()
+    if len(bucket) >= _RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit: too many claim attempts")
+    bucket.append(now)
+
+
 
 def user_id(request: Request) -> str:
     """Return an opaque, server-derived database identity.
@@ -141,6 +159,7 @@ async def enqueue_action(request: Request):
 
 @app.post("/v1/actions/claim")
 async def claim_action(request: Request):
+    _check_rate_limit(user_id(request))
     try:
         body = await request.json()
         if not isinstance(body, dict) or set(body) - {"protocol_version", "device_id", "capabilities"}:
