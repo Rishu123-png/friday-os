@@ -17,18 +17,28 @@ export const buzz = () => vibrate([40, 60, 40]);
 /* ---------- Battery ---------- */
 /* navigator.getBattery is Chromium-only and deprecated; prefer the
    native FridayNative.getBatteryDetail in the APK, fall back to web. */
+let _batCache = null;
+let _batCacheAt = 0;
 export async function battery() {
+  const now = Date.now();
+  if (_batCache && now - _batCacheAt < 10000) return _batCache; // P1: 10s cache to save battery
   try {
     const c = CAP();
     if (c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.FridayNative) {
       const r = await c.Plugins.FridayNative.getBatteryDetail();
-      if (r && r.level >= 0) return { level: Math.round(r.level), charging: !!r.charging };
+      if (r && r.level >= 0) {
+        _batCache = { level: Math.round(r.level), charging: !!r.charging };
+        _batCacheAt = now;
+        return _batCache;
+      }
     }
   } catch (_) {}
   try {
     if (!navigator.getBattery) return null;
     const b = await navigator.getBattery();
-    return { level: Math.round(b.level * 100), charging: b.charging };
+    _batCache = { level: Math.round(b.level * 100), charging: b.charging };
+    _batCacheAt = now;
+    return _batCache;
   } catch (_) { return null; }
 }
 
