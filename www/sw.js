@@ -1,34 +1,36 @@
-/* FRIDAY OS — Service Worker v7.1
+/* FRIDAY OS — Service Worker v16
+   P0 FIX: offline-first HUD
+   - v15 missed css/hud-v21.css, hud-agent, hud_v20, hud-shell, agent modules → broken offline styling
+   - v16 adds self-hosted fonts (no CDN), bumps CACHE, includes all critical HUD assets.
    Resilient precache: one missing file never kills the whole cache.
-   CDN libraries (vision OCR/objects, future transformers.js) are cached
-   so on-device AI features work offline after first use. */
+   CDN libraries are cached so on-device AI features work offline after first use. */
 
-const CACHE = 'friday-os-v15';
+const CACHE = 'friday-os-v16';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
+  './css/hud-v21.css', './css/fonts-local.css',
+  './fonts/Orbitron-500.woff2', './fonts/Orbitron-700.woff2',
+  './fonts/Rajdhani-500.woff2', './fonts/Rajdhani-600.woff2',
+  './fonts/JetBrainsMono-500.woff2',
   './js/app.js', './js/store.js', './js/brain.js', './js/nlp.js',
   './js/ai.js', './js/api.js', './js/device.js', './js/voice.js', './js/ui.js',
   './js/vision.js', './js/templates.js', './js/memory.js', './js/proactive.js',
   './js/nlu.js', './js/automation.js', './js/native.js', './js/coder.js',
-  /* v10.1: the previously-missing modules — without these a fresh install
-     with no network fails to boot (app.js imports all of them) */
   './js/ambient.js', './js/clarify.js', './js/embeddings.js', './js/hacker.js',
   './js/health.js', './js/i18n.js', './js/localbrain.js', './js/semantic.js',
   './js/vault.js', './js/server.js',
-  /* v15 Phase 3: AI router + workflow engine */
   './js/airouter.js', './js/workflow.js',
-  /* v15 Phase 4: Smart Productivity */
   './js/notesx.js', './js/docai.js', './js/knowledge.js', './js/plannerx.js',
-  /* v15 Phase 5-9: Study · Guardian · Plugins · UI */
   './js/studyx.js', './js/guardian.js', './js/plugins.js', './js/uix.js',
-  /* RC1: dev console (release tool) */
   './js/devconsole.js', './js/suit.js', './js/herald.js', './js/fridaycore.js', './js/ignite.js', './js/hud.js', './js/vox.js',
   './js/memex.js', './js/visionx.js', './js/autox.js',
-  /* v12: Phases 8-10 — Planner / Intelligence / Device engines */
   './js/planx.js', './js/intelx.js', './js/devx.js',
-  /* v13: Phases 11-13 — Security / Performance / Cinematic engines */
   './js/secx.js', './js/perfx.js', './js/cinex.js',
+  /* P0 FIX: HUD real-data engine + agent HUD + shell were missing */
+  './js/hud_v20.js', './js/hud-agent.js', './js/hud-shell.js',
+  './js/agent/agentState.js', './js/agent/orchestrator.js', './js/agent/verification.js',
+  './js/action-device.js', './js/boot-runtime.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
@@ -46,7 +48,7 @@ const NO_CACHE = [
 ];
 
 /* Cross-origin hosts whose scripts/models SHOULD be cached (offline AI) */
-const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co'];  // v15: removed dead 'xenova-transformers' entry (a package path, not a host)
+const CACHEABLE_CDN = ['cdn.jsdelivr.net', 'huggingface.co'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
