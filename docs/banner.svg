@@ -1,0 +1,240 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="FRIDAY OS — Personal AI Operating System">
+  <title>FRIDAY OS — Personal AI Operating System</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#070912"/>
+      <stop offset="55%" stop-color="#0a0a1a"/>
+      <stop offset="100%" stop-color="#06080f"/>
+    </linearGradient>
+
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#00d4ff" stop-opacity="0"/>
+      <stop offset="45%"  stop-color="#00d4ff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="wordmark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#00d4ff"/>
+      <stop offset="60%"  stop-color="#3ee0ff"/>
+      <stop offset="100%" stop-color="#7c9dff"/>
+    </linearGradient>
+
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="22%"  stop-color="#5fe6ff" stop-opacity="0.85"/>
+      <stop offset="55%"  stop-color="#00a8e8" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0050a0" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#00d4ff" stop-opacity="0.30"/>
+      <stop offset="70%"  stop-color="#00d4ff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style><![CDATA[
+    /* All animation is declarative CSS, so it also animates when GitHub
+       serves this file as an image. No scripts, no external requests. */
+    .grid    { opacity:.30; animation: drift 22s linear infinite; }
+    @keyframes drift { from { transform: translateY(0); } to { transform: translateY(28px); } }
+
+    .scan    { animation: scan 6.5s cubic-bezier(.45,0,.55,1) infinite; }
+    @keyframes scan {
+      0%      { transform: translateY(-40px); opacity:0; }
+      12%     { opacity:.85; }
+      88%     { opacity:.85; }
+      100%    { transform: translateY(420px); opacity:0; }
+    }
+
+    .pulse   { animation: pulse 3.6s ease-in-out infinite; transform-origin: 1010px 210px; }
+    .pulse.d1{ animation-delay:-1.2s; }
+    .pulse.d2{ animation-delay:-2.4s; }
+    @keyframes pulse {
+      0%,100% { transform: scale(.86); opacity:.16; }
+      50%     { transform: scale(1.10); opacity:.52; }
+    }
+
+    .coreA   { animation: breathe 2.8s ease-in-out infinite; transform-origin: 1010px 210px; }
+    @keyframes breathe {
+      0%,100% { transform: scale(.94); opacity:.80; }
+      50%     { transform: scale(1.06); opacity:1; }
+    }
+
+    .spin    { animation: spin 14s linear infinite; transform-origin: 1010px 210px; }
+    .spin.r  { animation: spin-rev 20s linear infinite; }
+    @keyframes spin     { from { transform: rotate(0deg);   } to { transform: rotate(360deg);  } }
+    @keyframes spin-rev { from { transform: rotate(360deg); } to { transform: rotate(0deg);    } }
+
+    .tick    { animation: tick 14s linear infinite; transform-origin: 1010px 210px; }
+    @keyframes tick {
+      0%   { opacity:.10; }
+      50%  { opacity:.55; }
+      100% { opacity:.10; }
+    }
+
+    .word    { animation: wordglow 4.2s ease-in-out infinite; }
+    @keyframes wordglow {
+      0%,100% { opacity:.94; }
+      50%     { opacity:1; }
+    }
+
+    .rule    { stroke-dasharray: 8 14; animation: march 3.4s linear infinite; }
+    @keyframes march { to { stroke-dashoffset: -88; } }
+
+    .beam    { animation: travel 5.2s ease-in-out infinite; }
+    @keyframes travel {
+      0%   { transform: translateX(-260px); opacity:0; }
+      16%  { opacity:1; }
+      84%  { opacity:1; }
+      100% { transform: translateX(1180px); opacity:0; }
+    }
+
+    .dot     { animation: float 7s ease-in-out infinite; }
+    .dot.a   { animation-delay:-1.8s; }
+    .dot.b   { animation-delay:-3.4s; }
+    .dot.c   { animation-delay:-5.2s; }
+    @keyframes float {
+      0%,100% { opacity:.15; transform: translateY(0); }
+      50%     { opacity:.75; transform: translateY(-9px); }
+    }
+
+    .blink   { animation: blink 2.1s steps(1,end) infinite; }
+    @keyframes blink { 0%,55% { opacity:1; } 56%,100% { opacity:.25; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .grid,.scan,.pulse,.coreA,.spin,.tick,.word,.rule,.beam,.dot,.blink {
+        animation: none !important;
+      }
+    }
+  ]]></style>
+
+  <!-- background -->
+  <rect width="1280" height="420" fill="url(#bg)"/>
+
+  <!-- animated grid -->
+  <g class="grid" stroke-width="1">
+    <g stroke="#0f2d45" stroke-width="1">
+      <path d="M0 28H1280M0 56H1280M0 84H1280M0 112H1280M0 140H1280M0 168H1280M0 196H1280M0 224H1280M0 252H1280M0 280H1280M0 308H1280M0 336H1280M0 364H1280M0 392H1280M0 420H1280"/>
+      <path d="M60 0V420M180 0V420M300 0V420M420 0V420M540 0V420M660 0V420M780 0V420M900 0V420M1020 0V420M1140 0V420M1260 0V420"/>
+    </g>
+  </g>
+
+  <!-- vignette top/bottom so edges fade -->
+  <rect width="1280" height="70" fill="#070912" opacity="0.85"/>
+  <rect y="350" width="1280" height="70" fill="#06080f" opacity="0.85"/>
+
+  <!-- sweeping scanline -->
+  <g class="scan">
+    <rect x="0" y="0" width="1280" height="2.4" fill="url(#accent)" opacity="0.9"/>
+    <rect x="0" y="2.4" width="1280" height="34" fill="#00d4ff" opacity="0.030"/>
+  </g>
+
+  <!-- floating particles -->
+  <g fill="#7fe6ff">
+    <circle class="dot"   cx="150" cy="330" r="1.7"/>
+    <circle class="dot a" cx="300" cy="96"  r="1.3"/>
+    <circle class="dot b" cx="620" cy="352" r="1.5"/>
+    <circle class="dot c" cx="860" cy="80"  r="1.2"/>
+    <circle class="dot a" cx="1180" cy="330" r="1.6"/>
+    <circle class="dot b" cx="470" cy="52"  r="1.1"/>
+  </g>
+
+  <!-- ===== reactor core (right) ===== -->
+  <circle cx="1010" cy="210" r="190" fill="url(#halo)"/>
+
+  <!-- rotating ticks -->
+  <g class="tick" stroke="#0ea5d9" stroke-width="1.4">
+    <path d="M1010 22v16M1010 382v16M822 210h16M1182 210h16
+             M877 77l11 11M1132 332l11 11M1143 77l-11 11M888 332l-11 11"/>
+  </g>
+
+  <!-- pulsing rings -->
+  <g fill="none" stroke="#00d4ff">
+    <circle class="pulse"    cx="1010" cy="210" r="168" stroke-width="1.1"/>
+    <circle class="pulse d1" cx="1010" cy="210" r="140" stroke-width="1.0"/>
+    <circle class="pulse d2" cx="1010" cy="210" r="112" stroke-width="0.9"/>
+  </g>
+
+  <!-- counter-rotating arcs -->
+  <g fill="none" stroke="#7fe6ff" stroke-linecap="round">
+    <circle class="spin"   cx="1010" cy="210" r="154" stroke-width="1.6"
+            stroke-dasharray="46 26 12 26" opacity="0.65"/>
+    <circle class="spin r" cx="1010" cy="210" r="126" stroke-width="1.3"
+            stroke-dasharray="30 40 8 40" opacity="0.5"/>
+    <circle class="spin"   cx="1010" cy="210" r="98"  stroke-width="1.1"
+            stroke-dasharray="18 22" opacity="0.55"/>
+  </g>
+
+  <!-- crosshair -->
+  <g stroke="#2fd4ff" stroke-width="1" opacity="0.42">
+    <path d="M1010 100v220M900 210h220"/>
+  </g>
+
+  <!-- glowing core -->
+  <g class="coreA" filter="url(#glow)">
+    <circle cx="1010" cy="210" r="62" fill="url(#core)"/>
+    <circle cx="1010" cy="210" r="26" fill="#eafcff" opacity="0.92"/>
+    <circle cx="1010" cy="210" r="10" fill="#ffffff"/>
+  </g>
+
+  <!-- orbit markers -->
+  <g fill="#8ff0ff" filter="url(#softglow)">
+    <circle cx="1010" cy="56"  r="3.4"/>
+    <circle cx="1164" cy="210" r="2.6" class="blink"/>
+    <circle cx="1010" cy="364" r="2.2"/>
+  </g>
+
+  <!-- ===== wordmark (left) ===== -->
+  <g class="word">
+    <text x="74" y="188"
+          font-family="'Helvetica Neue',Helvetica,Arial,sans-serif"
+          font-size="82" font-weight="700" letter-spacing="7"
+          fill="url(#wordmark)" filter="url(#glow)">FRIDAY OS</text>
+  </g>
+
+  <g stroke="#00d4ff" stroke-width="2" opacity="0.85">
+    <path d="M76 206h436"/>
+  </g>
+
+  <text x="78" y="240"
+        font-family="'Helvetica Neue',Helvetica,Arial,sans-serif"
+        font-size="20" font-weight="500" letter-spacing="4.6"
+        fill="#9fb4d4">PERSONAL AI OPERATING SYSTEM</text>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+     font-size="13.5" letter-spacing="0.6" fill="#6d84a6">
+    <text x="78" y="288">&#8226; OFFLINE-FIRST &#8212; 188 LOCAL SKILLS</text>
+    <text x="78" y="311">&#8226; 15 TYPED DEVICE ACTIONS &#8212; SAFETY-TIERED</text>
+    <text x="78" y="334">&#8226; LOCAL MEMORY &#8212; ZERO TELEMETRY</text>
+  </g>
+
+  <!-- marching rule -->
+  <path class="rule" d="M78 366h430" stroke="#00d4ff" stroke-width="1.6" opacity="0.7"/>
+
+  <text x="78" y="392"
+        font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="12" letter-spacing="0.8" fill="#4c6079">github.com/Rishu123-png/friday-os</text>
+
+  <!-- travelling light beam along bottom edge -->
+  <g class="beam">
+    <rect x="0" y="416" width="260" height="2" fill="url(#accent)"/>
+  </g>
+</svg>
