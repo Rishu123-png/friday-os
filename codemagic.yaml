@@ -106,7 +106,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - adminschool8@gmail.com
+          - $FRIDAY_NOTIFY_EMAIL   # set in Codemagic → Environment variables
         notify:
           success: true
           failure: true
@@ -221,7 +221,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - adminschool8@gmail.com
+          - $FRIDAY_NOTIFY_EMAIL   # set in Codemagic → Environment variables
         notify:
           success: true
           failure: true
