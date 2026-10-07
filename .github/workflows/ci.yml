@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web-tests:
+    name: Web tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Run web test suite
+        run: npm run test:web
+
+  backend-tests:
+    name: Backend tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run backend test suite
+        run: python -m unittest discover -s backend -p 'test_*.py' -v
+
+  syntax-check:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax
+        run: python -m compileall -q backend tools native
+
+      - name: JavaScript syntax
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            node --check "$f" || fail=1
+          done < <(find www/js -name '*.js')
+          exit $fail
+
+      - name: JSON validity
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in pathlib.Path('.').rglob('*.json'):
+              if '.git' in p.parts or 'node_modules' in p.parts:
+                  continue
+              try:
+                  json.loads(p.read_text(encoding='utf-8'))
+              except Exception as e:
+                  bad.append(f"{p}: {e}")
+          if bad:
+              print('\n'.join(bad)); sys.exit(1)
+          print('all JSON valid')
+          PY
+
+      - name: SVG validity
+        run: |
+          python - <<'PY'
+          import pathlib, sys, xml.etree.ElementTree as ET
+          bad = []
+          for p in pathlib.Path('docs').rglob('*.svg') if pathlib.Path('docs').exists() else []:
+              try:
+                  ET.parse(p)
+              except Exception as e:
+                  bad.append(f"{p}: {e}")
+          if bad:
+              print('\n'.join(bad)); sys.exit(1)
+          print('all SVG valid')
+          PY
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan history for committed secrets
+        run: |
+          echo "Scanning full history for provider key patterns..."
+          if git log --all -p | grep -nE '(gsk_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{24,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'; then
+            echo "::error::Potential secret detected in git history. Rotate the key and purge it."
+            exit 1
+          fi
+          echo "No secrets detected."
+
+      - name: Verify no populated .env is tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "::error::A populated .env file is tracked. Remove it immediately."
+            exit 1
+          fi
+          echo "No .env tracked."
