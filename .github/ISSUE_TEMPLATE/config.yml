@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/Rishu123-png/friday-os/security/advisories/new
+    about: Please report security issues privately, never as a public issue.
+  - name: 💬 Ask a question / discuss design
+    url: https://github.com/Rishu123-png/friday-os/discussions
+    about: Setup help, "how does this work", and design discussions belong here.
+  - name: 📖 Read the documentation
+    url: https://github.com/Rishu123-png/friday-os#readme
+    about: Setup, configuration and architecture are all covered in the README.
