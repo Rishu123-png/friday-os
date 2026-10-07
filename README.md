@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="www/icons/icon-512.png" alt="FRIDAY OS" width="128" height="128" />
+<img src="docs/social-preview.png" alt="FRIDAY OS — Personal AI Operating System" width="100%" />
+
+<br/><br/>
 
 # FRIDAY OS
 
@@ -10,17 +12,17 @@
 
 <br/>
 
-[![Tests](https://img.shields.io/badge/tests-358%20passing-3fb950?style=flat-square)](#-testing)
+[![CI](https://github.com/Rishu123-png/friday-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Rishu123-png/friday-os/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-00d4ff?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20·%20PWA-3ddc84?style=flat-square)](#-platforms)
 [![Python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square)](#-quickstart)
-[![Offline First](https://img.shields.io/badge/offline--first-yes-8b5cf6?style=flat-square)](#-design-principles)
+[![Offline First](https://img.shields.io/badge/offline--first-188%20skills-8b5cf6?style=flat-square)](#-design-principles)
 [![Java](https://img.shields.io/badge/native-Java%2021-ed8b00?style=flat-square)](#-architecture)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff69b4?style=flat-square)](CONTRIBUTING.md)
 
 <br/>
 
-[Design Principles](#-design-principles) · [Features](#-features) · [Architecture](#-architecture) · [Quickstart](#-quickstart) · [The Action Protocol](#-the-action-protocol) · [Security](#-security-model) · [Testing](#-testing) · [Roadmap](#-roadmap)
+[Design Principles](#-design-principles) · [Screenshots](#-screenshots) · [Features](#-features) · [Architecture](#-architecture) · [Quickstart](#-quickstart) · [The Action Protocol](#-the-action-protocol) · [Security](#-security-model) · [Testing](#-testing)
 
 </div>
 
@@ -30,13 +32,60 @@
 
 FRIDAY OS is a **personal AI assistant that owns your device and your data**.
 
-Most assistants are a text box that talks. FRIDAY OS is a full stack — a sci-fi HUD frontend, a native Android layer with real system privileges, and a self-hostable backend — wired together so that "turn my torch on" actually turns the torch on, "remind me at 6" actually schedules the alarm, and "what do you remember about me" answers from a memory store that lives on *your* machine.
+Most assistants are a text box that talks. FRIDAY OS is a full stack — a sci-fi HUD frontend, a native Android layer with real system privileges, and a self-hostable backend — wired together so that *"turn my torch on"* actually turns the torch on, *"remind me at 6"* actually schedules the alarm, and *"what do you remember about me"* answers from a memory store that lives on **your** machine.
 
 It is **offline-first by design**. Every heavy capability — speech recognition, speech synthesis, wake word, embeddings, even a local LLM via llama.cpp — has an on-device path. Cloud providers are **optional accelerants**, not dependencies. Pull your network cable and it still works.
 
-And because an assistant with system privileges is a serious thing, the whole device-control surface is a **typed, versioned, safety-tiered protocol** with confirmations, leases and cryptographic bounds — not a pile of shell commands glued to an LLM.
+And because an assistant with system privileges is a serious thing, the whole device-control surface is a **typed, versioned, safety-tiered protocol** with confirmations, leases and honest status reporting — not a pile of shell commands glued to an LLM.
 
-> **642 commits. 43,000+ lines of code. 358 tests. Built by one person, in public.**
+> **188 offline skills. 650 commits. 43,000+ lines of code. Built by one person, in public.**
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+<table>
+<tr>
+<td align="center" width="25%">
+<img src="docs/screenshots/01-boot-sequence.webp" width="200" /><br/>
+<sub><b>Cinematic boot</b><br/>Real service handshake</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/02-hud-dashboard.webp" width="200" /><br/>
+<sub><b>The HUD</b><br/>Reactor + live telemetry</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/03-hud-degraded.webp" width="200" /><br/>
+<sub><b>Honest failure</b><br/>States its own faults</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/04-activity-routines.webp" width="200" /><br/>
+<sub><b>Activity</b><br/>Alarms, routines, places</sub>
+</td>
+</tr>
+<tr>
+<td align="center" width="25%">
+<img src="docs/screenshots/05-brain-offline.webp" width="200" /><br/>
+<sub><b>Brain</b><br/>Offline engine, cloud optional</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/06-voice-engine.webp" width="200" /><br/>
+<sub><b>Voice engine 2.0</b><br/>Formal state machine</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/07-call-assistant.webp" width="200" /><br/>
+<sub><b>Call Assistant</b><br/>Accept · Decline · Message</sub>
+</td>
+<td align="center" width="25%">
+<img src="docs/screenshots/08-security-privacy.webp" width="200" /><br/>
+<sub><b>Security</b><br/>App lock, consent, audit</sub>
+</td>
+</tr>
+</table>
+
+</div>
 
 ---
 
@@ -54,6 +103,8 @@ These are the rules the codebase actually follows. They explain most of the arch
 | **🔒 Your data stays yours** | No telemetry. No analytics. No phone-home. Memory lives in a SQLite file you own and can wipe with one endpoint. |
 | **📦 Self-hostable, no lock-in** | One `docker run` and you have your own backend. Bring your own keys, your own model, your own server. |
 
+> The **"Honest failure"** screenshot above is the clearest example. When voice breaks, the UI doesn't hide it — the reactor turns red, the status reads `Fault`, and the status bar says exactly what's wrong. Most apps would show a spinner forever.
+
 ---
 
 ## ⚡ Features
@@ -61,45 +112,65 @@ These are the rules the codebase actually follows. They explain most of the arch
 ### 🖥️ The HUD
 A living, cinematic interface — not a chat window with a skin.
 
-- **Cinematic boot sequence** — staged power-on with service handshake (`voice → memory → vision → automation → notifications`), tap-to-skip
-- **Reactor core visualiser** with live system telemetry
-- **35+ UI modules** driving panels for memory, vision, health, code, notes, planning, security and more
+- **Cinematic boot sequence** — real per-service check across 11 subsystems (core, bridge, memory, voice, wake word, vision, local AI, Groq, Blackbox, automation, HUD), tap-to-skip
+- **Reactor core visualiser** with live telemetry — location, weather, network, Bluetooth
+- **Localised status pings** — the assistant speaks your language, not just English
 - **Self-hosted fonts** — Orbitron, Rajdhani, JetBrains Mono (76 KB, zero CDN calls)
-- **Installable PWA** with app shortcuts (Voice · Chat · Scan QR) and a resilient service worker whose *one missing file never kills the whole cache*
+- **Cinematic mode** — holographic glow, radar, scanlines; auto-honours reduced-motion
+- **Installable PWA** with app shortcuts and a resilient service worker
 
-### 🎙️ Voice Pipeline
-- **"FRIDAY" wake word** detection, hands-free
+### 🎙️ Voice Engine 2.0
+- **Formal state machine** — `OFFLINE → READY → LISTENING → UNDERSTANDING → THINKING → EXECUTING → SPEAKING`. The orb, feed and status line follow real state; no fake animation
+- **Custom wake words** — comma-separated, with a bundled Vosk wake brain (~36 MB, offline forever)
+- **Adjustable barge-in sensitivity** — interrupt it as easily as you like
 - **On-device STT** — Vosk + Sherpa-ONNX, no audio leaves the phone
-- **Neural TTS** — `edge-tts` with an Indian-English voice by default
-- **Barge-in and continuous mode** — interrupt it mid-sentence
+- **Neural TTS** — human-like voice, with Android TTS fallback
+- **Streaming voice** — speaks while thinking, hands-free auto-mic conversation
 
-### 🧠 Memory That Persists
-- Facts, notes and semantic recall backed by SQLite
+### 🧠 Memory & Cognition
+- **Memory Dashboard** — daily conversation digests generated locally
+- Facts, notes and semantic recall backed by SQLite; pinned memories are never auto-deleted
 - Embedding-based retrieval (`sentence-transformers/all-MiniLM-L6-v2`, or on-device)
-- A compact **memory brief** is injected into every prompt, so it knows you across sessions
-- Full wipe endpoint — `DELETE /v1/memory` — because it's your data
+- A compact **memory brief** injected into every prompt, so it knows you across sessions
+- Full wipe — `DELETE /v1/memory` — because it's your data
 
 ### 📱 Real Device Control
 15 typed actions across three safety tiers — torch, volume, brightness, WiFi, Bluetooth, media, app launch, alarms, battery, storage, notifications, screen reading, screenshots, phone calls and SMS.
 
+### 📞 Call Assistant
+- Announces the caller with **Accept · Decline · Silence · Decline + message**
+- Previews the exact recipient and message text before anything sends
+- Configurable SMS / notification send path
+- Honest boundaries: **cannot** intercept cellular audio or inject an AI voice into a call
+
+### 📥 FRIDAY Inbox
+- Reads your notifications and **drafts** replies from your own memory
+- **Sends only after you say so** — nothing goes out without your explicit word
+- Smart categories (Messages, Email, Calendar), per-package and per-sender mute lists
+- Rate limited: minimum gap and hourly cap
+
+### 🛡️ Security & Privacy
+- **App lock** — PIN, never stored in plaintext
+- **Cloud AI consent** — cloud only runs when you explicitly allow it
+- **Audit trail** — permissions, automation and security events, locally recorded
+- **Keystore-backed key storage** — Groq keys are encrypted with Android Keystore, never exported, never prefilled in source
+- **Emergency SOS** — say "SOS" and it SMSes your live location after an 8-second cancel window
+- **Quiet hours**, private mode, and "keep details private while locked"
+
 ### 🛠️ Beyond the Basics
 | | |
 |---|---|
-| **Agent orchestrator** | Multi-step task decomposition with a verification pass |
+| **Agent orchestrator** | Multi-step decomposition with a verification pass |
 | **Airrouter** | Provider routing and failover across local + cloud models |
-| **Health** | Health Connect integration — steps, heart rate, sleep |
+| **Health** | Health Connect — steps, heart rate, sleep |
 | **Vault** | On-device encrypted storage for secrets |
 | **Coder** | Code generation with a built-in dev console |
 | **Vision** | Camera + screen understanding, cloud or local |
-| **Automation** | Rule-based triggers — time, location, sensor, battery |
-| **Geofencing** | Location-aware triggers via `FridayGeofenceReceiver` |
-| **Call guard** | Screen calls against your own blocklist policy |
-| **Downloads** | Background download engine with a `WorkManager` worker |
-| **Sensors** | Ambient context — light, motion, orientation |
+| **Automation** | Event-driven rules — battery guard, headphone resume, offline comfort. Risky actions still confirm |
+| **Geofencing** | Location-aware triggers ("remind me when I get home") |
 | **Guardian** | Security auditing, phishing/URL analysis |
-| **Herald** | Notification and alert routing |
-| **Translate** | On-device translation |
-| **Bridges** | Optional **Telegram** and **MQTT** channels — talk to your assistant from anywhere, or wire it into your smart home |
+| **Performance** | FPS / CPU / RAM / AI latency monitor, battery gate, response cache |
+| **Bridges** | Optional **Telegram** and **MQTT** — talk to your assistant from anywhere, or wire it into your smart home |
 
 ---
 
@@ -122,7 +193,7 @@ A living, cinematic interface — not a chat window with a skin.
    │ · Vosk / Sherpa  │   │          │          │   │  /v1/chat  /v1/stt │
    │ · Wake word      │   │          ▼          │   │  /v1/tts   /v1/web │
    │ · Embeddings     │   │  ┌───────────────┐  │   │  /v1/memory  ...   │
-   │ · WebLLM         │   │  │ NATIVE JAVA   │  │   │                    │
+   │ · 188 skills     │   │  │ NATIVE JAVA   │  │   │                    │
    └──────────────────┘   │  │  14,600 LOC   │  │   │  SQLite action     │
                           │  │  29 classes   │  │   │  queue + leases    │
                           │  └───────┬───────┘  │   └─────────┬──────────┘
@@ -148,6 +219,7 @@ A living, cinematic interface — not a chat window with a skin.
 | **`protocol/`** | `action-v1.schema.json` — the single source of truth for the device protocol, kept in sync with the backend by a test. |
 | **`tests/`** | 13 Node suites — HUD contracts, boot runtime, action protocol, proactive assistant, stress tests. |
 | **`tools/`** | `buildenv.sh` (provisions android.jar + Capacitor stubs for offline `javac`), schema generator, Java compile checker. |
+| **`docs/`** | Screenshots, hero and social-preview images. |
 | **`codemagic.yaml`** | CI/CD — two workflows producing debug and signed-release APKs. |
 
 ### Why is `native/` Java files and not an `android/` project?
@@ -160,7 +232,7 @@ The Gradle project is **generated at build time**, not committed. The pipeline r
 - `configure_release.py` — applies signing and release hardening
 - `validate_android.py` — **fail-fast gate** that aborts the build if any injection didn't land
 
-This keeps the repo small, the diff clean, and makes the native layer reproducible from source. A generated `android/` folder is 10,000+ files of noise — it's `.gitignore`d on purpose.
+This keeps the repo small, the diff clean, and makes the native layer reproducible from source.
 
 ---
 
@@ -178,7 +250,7 @@ cd friday-os
 npm run serve          # → http://localhost:8080
 ```
 
-That's it. The HUD boots fully offline with local engines. No keys, no backend, no account.
+That's it. The HUD boots fully offline with 188 local skills. No keys, no backend, no account.
 
 ### 2 · Run the backend (optional — unlocks cloud models & sync)
 
@@ -210,7 +282,7 @@ npx cap sync android
 cd android && ./gradlew assembleDebug     # → android/app/build/outputs/apk/debug/
 ```
 
-Or just push to `main` — **Codemagic builds both a debug and a signed release APK automatically.**
+Or push to `main` — **Codemagic builds a debug APK automatically.**
 
 ### Optional heavy engines
 
@@ -318,9 +390,10 @@ if not expected:
 No token configured means **the server refuses to serve** — it does not fall back to open access. Comparison uses `hmac.compare_digest`, so there's no timing oracle.
 
 **Identity is server-derived, never client-supplied.**
-Your database key is `sha256(identity)[:32]`. The `X-User-ID` header is **rejected by default** and only honoured when a trusted multi-user deployment sets `ALLOW_USER_HEADER=true` — and even then it's strict-regex validated.
+Your database key is `sha256(identity)[:32]`. The `X-User-ID` header is **rejected by default** and only honoured when a trusted multi-user deployment sets `ALLOW_USER_HEADER=true`.
 
-**Secrets live server-side only.** Provider keys never ship to the client. `www/js/ai.js` validates key *format* and nothing else.
+**Keys live in Android Keystore.** Groq keys entered on-device are encrypted with Keystore, never shown again, never included in data exports, and never prefilled in the source or APK.
+
 
 **Diagnostics redact themselves.** `FridayDiagnostics.java` scrubs anything matching `gsk_…` / `sk-…` before an export, so support bundles are safe to share.
 
@@ -335,22 +408,12 @@ Your database key is `sha256(identity)[:32]`. The `X-User-ID` header is **reject
 ## 🧪 Testing
 
 ```bash
-npm test            # everything
-npm run test:web    # 333 Node tests
-npm run test:backend # 25 Python tests
+npm test             # everything
+npm run test:web     # Node test suites
+npm run test:backend # Python test suites
 ```
 
-```
-# tests 333
-# pass 333
-# fail 0
-# duration_ms 4250
-
-Ran 25 tests in 0.205s
-OK
-```
-
-**358 tests, zero failures.** The suite is not decorative — it's the enforcement mechanism for the guarantees above. It covers the action protocol end-to-end, confirmation binding, lease expiry, idempotency, boot runtime, HUD contracts, provider failover, proactive behaviour, offline asset integrity and a stress pass.
+The suite is not decorative — it's the enforcement mechanism for the guarantees above. It covers the action protocol end-to-end, confirmation binding, lease expiry, idempotency, boot runtime, HUD contracts, provider failover, proactive behaviour, offline asset integrity and a stress pass.
 
 There's also `tools/javac-check.sh`, which compile-checks all 29 native classes against `android.jar` plus Capacitor stubs — **no Android Studio required**. Run `tools/buildenv.sh` once to provision the jar and stubs.
 
@@ -378,13 +441,11 @@ All backend config lives in `backend/.env` (gitignored). Copy `.env.example` to 
 | `CORS_ORIGINS` | `http://localhost,capacitor://localhost` | Comma-separated |
 | `ALLOW_USER_HEADER` | `false` | Multi-user only |
 | `TELEGRAM_BOT_TOKEN` | — | Optional bridge |
-| `TELEGRAM_ALLOWED_IDS` | — | Numeric IDs; keep allow-all off |
 | `MQTT_HOST` / `_PORT` / `_USER` / `_PASS` | — | Optional smart-home bridge |
 
 > ⚠️ **Never commit `backend/.env`.** It is gitignored — keep it that way. If a key ever touches a commit, rotate it immediately; deleting the file does **not** remove it from history.
 
 ---
-
 ## 📱 Platforms
 
 | Platform | Status |
@@ -398,16 +459,15 @@ All backend config lives in `backend/.env` (gitignored). Copy `.env.example` to 
 
 ## 🗺️ Roadmap
 
+- [x] Screenshots in the README
 - [ ] Finish splitting the 7,244-line `app.js` monolith into the `modules/` controllers
 - [ ] Wire the 4 abandoned `modules/` controllers into the boot path (or delete them)
-- [ ] Screenshots + screen recordings in the README
 - [ ] Onboarding flow for first-run key setup
 - [ ] iOS exploration via a Capacitor Swift shim
 - [ ] Plugin registry SDK for third-party actions
 - [ ] Expand the action protocol beyond 15
 
 ---
-
 ## 🤝 Contributing
 
 Contributions are genuinely welcome — this is a large, ambitious codebase and there's plenty of room.
@@ -419,17 +479,16 @@ npm test              # must stay green
 ```
 
 **Before you open a PR:**
-1. `npm test` passes — 358/358.
+1. `npm test` passes.
 2. Anything touching the device protocol updates `protocol/action-v1.schema.json` **and** `backend/action_protocol.py` (a test will catch you if you forget).
 3. **No new secrets.** Not in code, not in comments, not in tests, not in commit messages, and not "temporarily".
 4. New user-facing strings respect the existing i18n module.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
 
-**Great first issues:** the `modules/` split, README screenshots, i18n coverage, and new action-protocol tests.
+**Great first issues:** the `modules/` split, i18n coverage, and new action-protocol tests.
 
 ---
-
 ## 📜 License
 
 [MIT](LICENSE) — use it, fork it, ship it.
