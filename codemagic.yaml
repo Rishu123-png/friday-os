@@ -21,7 +21,6 @@ workflows:
       cache_paths:
         - $HOME/.gradle/caches
 
-
     scripts:
       - name: Install locked dependencies
         script: |
@@ -103,14 +102,6 @@ workflows:
     artifacts:
       - android/app/build/outputs/apk/debug/app-debug.apk
 
-    publishing:
-      email:
-        recipients:
-          - $FRIDAY_NOTIFY_EMAIL   # set in Codemagic → Environment variables
-        notify:
-          success: true
-          failure: true
-
   friday-release:
     name: FRIDAY OS - Signed Release APK
     max_build_duration: 60
@@ -134,7 +125,6 @@ workflows:
     cache:
       cache_paths:
         - $HOME/.gradle/caches
-
 
     scripts:
       - name: Install locked dependencies
@@ -218,10 +208,3 @@ workflows:
     artifacts:
       - android/app/build/outputs/apk/release/app-release.apk
 
-    publishing:
-      email:
-        recipients:
-          - $FRIDAY_NOTIFY_EMAIL   # set in Codemagic → Environment variables
-        notify:
-          success: true
-          failure: true
