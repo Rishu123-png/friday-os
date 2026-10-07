@@ -1,0 +1,109 @@
+name: 🐛 Bug Report
+description: Something isn't working as expected
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please fill in as much as you can —
+        a good bug report is the fastest path to a fix.
+
+        ⚠️ **Security issue?** Do not post it here. Use
+        [private security advisories](https://github.com/Rishu123-png/friday-os/security/advisories/new) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly. What went wrong?
+      placeholder: When I say "set an alarm for 6am", the HUD replies that it was queued, but no alarm is ever created.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: The alarm should be created and a confirmation shown.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Be specific — vague steps are the main reason bugs stall.
+      placeholder: |
+        1. Open the app on Android
+        2. Say "set an alarm for 6am"
+        3. Confirm the pending action
+        4. Check Android Clock — no alarm
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is affected?
+      multiple: true
+      options:
+        - HUD / frontend (www/)
+        - Native Android layer (native/)
+        - Backend API (backend/)
+        - Action protocol
+        - Voice (wake word / STT / TTS)
+        - Memory
+        - Build / CI (Codemagic, Capacitor)
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where are you running it?
+      multiple: true
+      options:
+        - Android app (APK build)
+        - Mobile browser / PWA
+        - Desktop browser
+        - Self-hosted backend
+        - Local development
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: The commit SHA or release you're on. Run `git rev-parse --short HEAD`.
+      placeholder: "6f6eda9"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: |
+        Paste any console output, backend traceback or `adb logcat` excerpt.
+        **Remove API keys and personal data before pasting.**
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I'm on the latest `main`
+          required: false
+        - label: I searched existing issues and this isn't a duplicate
+          required: true
+        - label: I've removed any secrets, API keys and personal data from this report
+          required: true
+        - label: I'm not reporting a security vulnerability here (I know to use the private advisory channel)
+          required: true
