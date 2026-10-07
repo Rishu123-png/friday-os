@@ -1,0 +1,75 @@
+name: ✨ Feature Request
+description: Suggest an idea, capability or improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape FRIDAY OS. The most useful requests explain the
+        *problem* first and the proposed solution second.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the gap or frustration, not the implementation.
+      placeholder: I can't trigger automations based on my calendar, only time/location/battery.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work? Concrete examples help a lot.
+      placeholder: Add a calendar trigger to the automation module that fires X minutes before an event starts.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      multiple: true
+      options:
+        - HUD / frontend
+        - New device action (protocol)
+        - Native Android layer
+        - Backend API
+        - Voice
+        - Memory
+        - Automation / triggers
+        - AI models / providers
+        - Performance
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds exist today? Why aren't they good enough?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: offline
+    attributes:
+      label: Does this fit the offline-first principle?
+      options:
+        - "Yes — works fully offline"
+        - "Partly — cloud is an optional enhancement"
+        - "No — requires a cloud service"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to work on this myself
+          required: false
