@@ -155,9 +155,15 @@ public final class FridayDiagnostics extends Plugin {
     }
 
     private static String sanitize(String text) {
+        /* A null line must never take the crash handler down with it — a crash
+           reporter that throws while reporting a crash is worse than useless. */
+        if (text == null) return "";
         String out = text;
         out = out.replaceAll("(?i)(authorization\\s*[:=]\\s*bearer\\s+)[^\\s]+", "$1[REDACTED]");
-        out = out.replaceAll("(?i)((?:api[_-]?key|token|secret|password)\\s*[:=]\\s*)[^\\s,;]+", "$1[REDACTED]");
+        /* `&` is excluded here on purpose: without it an assignment inside a
+           query string ("?token=x&user=42") swallowed every following
+           parameter, which destroyed the diagnostic value of the log line. */
+        out = out.replaceAll("(?i)((?:api[_-]?key|token|secret|password)\\s*[:=]\\s*)[^\\s,;&]+", "$1[REDACTED]");
         out = out.replaceAll("\\b(gsk_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,})\\b", "[REDACTED_KEY]");
         out = out.replaceAll("([?&](?:token|key|signature|sig|auth)=)[^&\\s]+", "$1[REDACTED]");
         return out;
