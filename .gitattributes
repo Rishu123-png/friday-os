@@ -1,0 +1,68 @@
+# ============================================================================
+# FRIDAY OS — repository attributes
+# ============================================================================
+
+# ---- Line endings ----------------------------------------------------------
+# Normalise everything to LF in the repository. The native build runs on
+# Linux CI and Codemagic; a CRLF checkout there breaks shell scripts in ways
+# that are painful to debug.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.java      text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.css       text eol=lf
+*.svg       text eol=lf
+
+# Windows-only helpers must keep whatever they need
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# ---- Binary files ----------------------------------------------------------
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.jar       binary
+*.aar       binary
+*.apk       binary
+*.keystore  binary
+*.jks       binary
+*.so        binary
+*.db        binary
+*.zip       binary
+*.tar       binary
+*.bz2       binary
+
+# ---- Language statistics ---------------------------------------------------
+# native/vendor/ is the vendored sherpa-onnx Java API (101 files, ~6,600 lines).
+# It is third-party code we consume, not code we maintain, so GitHub should not
+# count it towards this project's language breakdown.
+native/vendor/**            linguist-vendored
+tools/stubs/**              linguist-vendored
+**/node_modules/**          linguist-vendored
+
+# Generated at build time by tools/buildenv.sh — never hand-edited
+tools/android-*/**          linguist-generated
+**/android/app/build/**     linguist-generated
+package-lock.json           linguist-generated -diff
+docs/**                     linguist-documentation
+
+# ---- Diff behaviour --------------------------------------------------------
+# Collapse generated / lock files in diffs so real changes stay visible.
+package-lock.json           -diff
+*.min.js                    -diff
+*.min.css                   -diff
+
+# ---- CI ---------------------------------------------------------------------
+.github/workflows/**        export-ignore
+tests/**                    export-ignore
