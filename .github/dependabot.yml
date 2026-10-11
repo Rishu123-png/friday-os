@@ -1,0 +1,67 @@
+# ============================================================================
+# FRIDAY OS — automated dependency updates
+#
+# Security patches should not wait for someone to notice. Dependabot opens a
+# pull request when a dependency ships a fix; CI then has to go green before
+# anything merges, which is exactly the workflow this repository already uses.
+#
+# Weekly rather than daily on purpose: this is a solo-maintained project and a
+# flood of PRs is worse than a steady trickle.
+# ============================================================================
+
+version: 2
+updates:
+  # ---- HUD / Capacitor ----------------------------------------------------
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      # Capacitor packages must move together — a partial bump is a broken
+      # native bridge, not a smaller change.
+      capacitor:
+        patterns:
+          - "@capacitor/*"
+      dev-deps:
+        dependency-type: development
+
+  # ---- Backend ------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  # ---- GitHub Actions -----------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+      include: scope
