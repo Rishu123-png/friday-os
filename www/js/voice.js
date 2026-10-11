@@ -674,7 +674,7 @@ export function speak(text, { onStart, onEnd, _noServer } = {}) {
       text: clean,
       rate: parseFloat(getSetting('speechRate')) || 1,
       pitch: parseFloat(getSetting('speechPitch') ) || 1.1,
-      lang: getSetting('voiceLang') || 'en-US',
+      lang: getSetting('voiceLang') || 'en-IN',
       duck: getSetting('duckAudio') !== false                       // v11.2 VOX: music ducks under FRIDAY
     }).then(r => {
       if (r && r.ok !== false) {

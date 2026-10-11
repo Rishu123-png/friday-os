@@ -8,7 +8,7 @@ import * as U from './ui.js';
 import * as D from './device.js';
 import * as API from './api.js';
 import * as AI from './ai.js';
-import { resolve, intentCount } from './brain.js';
+import { resolve, intentCount, splitCompound } from './brain.js';
 import * as VIS from './vision.js';
 import * as T from './templates.js';
 import * as MEM from './memory.js';
@@ -183,6 +183,95 @@ const state = {
   listening: false, speaking: false, processing: false,
   messages: [], expect: null, lastTopic: null, lastSubject: null, booted: false,
   vaultPending: null, proactiveEvent: null, proactiveReminder: null, pendingInboxSend: null
+};
+
+/* ══ PERF (v1.0.1) ═══════════════════════════════════════════════════════
+   The mic-container glow used to be driven by a 700ms poller. It is now
+   pushed on change: every assignment site calls markSpeaking(), which sets
+   the flag AND flips the class in the same tick. Nothing to poll. The guard
+   also means repeated identical calls cost nothing.
+   ═══════════════════════════════════════════════════════════════════════ */
+function markSpeaking(v) {
+  const val = !!v;
+  if (state.speaking === val) return;
+  state.speaking = val;
+  const mc = document.getElementById('micContainer');
+  if (mc) mc.classList.toggle('speaking', val);
+}
+
+/* ══ PERFORMANCE MODE (v1.0.1) ═══════════════════════════════════════════
+   The stylesheet has always shipped `body[data-low-power="true"]` rules that
+   strip the expensive effects — but nothing in the app ever set that
+   attribute, so the whole low-power path was unreachable dead code. It is now
+   driven automatically, which is the single biggest win on a budget phone:
+
+     · weak CPU      -> navigator.hardwareConcurrency <= 4
+     · low RAM       -> navigator.deviceMemory <= 4
+     · low battery   -> under 20% and not charging
+     · user override -> Settings > Performance mode
+
+   low-power removes ambient animation, glow filters, backdrop blur, all
+   box-shadows (except the reactor core's signature glow) and the particle
+   canvas. It takes away ZERO features — every command, every panel, every
+   action still works exactly the same.
+
+   It also freezes CSS animations while the app is backgrounded rather than
+   letting the compositor keep ticking on an invisible screen.
+   ═══════════════════════════════════════════════════════════════════════ */
+const PERF = {
+  _weak: false,
+  _battLow: false,
+  _on: false,
+
+  detect() {
+    try {
+      const cores = navigator.hardwareConcurrency || 8;
+      const ram = navigator.deviceMemory || 8;   // GB, Chrome/WebView only
+      this._weak = cores <= 4 || ram <= 4;
+    } catch (_) { this._weak = false; }
+  },
+
+  apply() {
+    const mode = (S.getSetting('perfMode') || 'auto');
+    const on = mode === 'on' || (mode === 'auto' && (this._weak || this._battLow));
+    if (on === this._on && document.body.dataset.lowPower) return on;
+    this._on = on;
+    document.body.dataset.lowPower = on ? 'true' : 'false';
+    return on;
+  },
+
+  init() {
+    this.detect();
+    this.apply();
+
+    /* Re-evaluate on battery changes. D.battery() is already cached (10s) and
+       the plugin listener is cheap, so this costs nothing. */
+    try {
+      if (navigator.getBattery) {
+        navigator.getBattery().then(b => {
+          const upd = () => {
+            this._battLow = !b.charging && b.level <= 0.2;
+            this.apply();
+          };
+          b.addEventListener('levelchange', upd);
+          b.addEventListener('chargingchange', upd);
+          upd();
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
+    /* Freeze every CSS animation while backgrounded. */
+    document.addEventListener('visibilitychange', () => {
+      document.body.dataset.fxPaused = document.hidden ? 'true' : '';
+    });
+
+    return { lowPower: this._on, weak: this._weak };
+  },
+
+  isOn() { return this._on; },
+
+  /* Called when the user flips the setting. */
+  refresh() { return this.apply(); }
 };
 
 /* ================= BOOT (v11.1 IGNITION: cinematic + REAL checks) ================= */
@@ -428,7 +517,7 @@ function hudInit() {
       /* v11.2: one tap while she talks = STOP TALKING, open ears instantly */
       if (VOX.vox.get() === 'SPEAKING' || state.speaking) {
         V.cancelSpeech();
-        state.speaking = false;
+        markSpeaking(false);
         U.toast('Interrupted — bolo Boss', '✋', 1200);
         setTimeout(() => V.listen(), 220);
         return;
@@ -468,6 +557,7 @@ async function init() {
   BOOT.set('BLACKBOX', BOOT_STATE.DISABLED, 'server-controlled optional fallback');
 
   U.applyTheme(S.getSetting('uiTheme') || 'stark');
+  try { PERF.init(); } catch (e) { Logger.error('perf', 'init: ' + (e && e.message)); }
   U.initCore($('#coreCanvas'), state);
   U.initParticles($('#particleCanvas'));
   U.animateWaveform($('#voiceWaveform'), state);
@@ -597,7 +687,10 @@ async function init() {
   computeSystemsLine();
   setInterval(updateReactor, 60000);
   setInterval(computeSystemsLine, 120000);
-  setInterval(() => { const mc = $('#micContainer'); if (mc) mc.classList.toggle('speaking', !!state.speaking); }, 700);
+  /* v1.0.1 PERF: this was a 700ms poller. markSpeaking() now pushes the class
+     on change, so this is only a slow safety re-sync for anything that moved
+     the flag during boot before the DOM existed. */
+  setInterval(() => { if (document.hidden) return; const mc = $('#micContainer'); if (mc) mc.classList.toggle('speaking', !!state.speaking); }, 3000);
   /* v14.1: status banner reacts to voice/core changes instead of only the
      2-min poll — throttled so a flapping state can't thrash the DOM. */
   const systemsThrottle = PERFX.throttle(() => computeSystemsLine(), 2500);
@@ -628,11 +721,11 @@ async function init() {
       ? `${tod}, ${name}. Systems online.`
       : (learnedName ? `${tod}, ${name}. Systems online.` : p.greeting);
     addMsg('ai', greet);
-    const spoke = V.speak(greet, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    const spoke = V.speak(greet, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
     if (!spoke) {
       // TTS engine may still be warming up on first launch
       setTimeout(() => V.speak(greet, {
-        onStart: () => state.speaking = true, onEnd: () => state.speaking = false
+        onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false)
       }), 1500);
     }
   }
@@ -1177,6 +1270,46 @@ async function handleInput(text, opts = {}) {
     }
   }
 
+  /* ══ v1.0.1 COMPOUND COMMANDS ══════════════════════════════════════════
+     Until now "torch on and volume 50" ran only the FIRST half. Two causes:
+     the voice layer merges fragments within 900ms into one sentence, and
+     resolve() returns exactly one intent with no queue behind it.
+
+     We now split on real connectors ("and / then / aur / phir / ,") and, only
+     when EVERY part is a recognised command on its own, run the head through
+     the normal path and pump the remainder in spoken order. The user's full
+     sentence is already echoed above, so the chat stays honest.
+
+     splitCompound() is conservative by design — it can fail to split, but it
+     can never split something that should have stayed whole (time expressions
+     like "remind me at 5 and 6" are explicitly excluded).
+     ═══════════════════════════════════════════════════════════════════════ */
+  if (!opts._compoundPart) {
+    try {
+      const parts = splitCompound(text, { lastTopic: state.lastTopic });
+      if (parts) {
+        const queue = parts.slice(1);
+        text = parts[0];                       // resolve only the head
+        if (parts.length > 2) U.toast(`${parts.length} commands queued`, '⛓️', 1500);
+        let guard = 0;
+        const pump = () => {
+          if (!queue.length || guard++ > 12) return;
+          const blocked = !!(state.expect || state.pendingDanger);
+          setTimeout(() => {
+            /* If the head is still waiting on the user (confirm / clarify),
+               hold the queue rather than firing into a dialog. */
+            if (state.expect || state.pendingDanger) return pump();
+            const next = queue.shift();
+            try { handleInput(next, { noChain: true, silentEcho: true, _compoundPart: true }); }
+            catch (e) { Logger.error('compound', String(e && e.message)); }
+            pump();
+          }, blocked ? 2500 : 1100);
+        };
+        pump();
+      }
+    } catch (e) { Logger.error('compound', 'split failed: ' + (e && e.message)); }
+  }
+
   // 1) OFFLINE INTENT ENGINE
   let hit = resolve(text, { lastTopic: state.lastTopic });
   if (!hit) {
@@ -1377,7 +1510,7 @@ async function streamLocalChat(text) {
       addMsg('ai', out);
     }
     S.remember('ai', out);
-    V.speak(out, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    V.speak(out, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   } catch (e) {
     thinking(false);
     reply(AI.offlineReply(text));
@@ -1420,7 +1553,7 @@ async function streamServerChat(text) {
       addMsg('ai', out, { source: 'live' });
     }
     S.remember('ai', out);
-    V.speak(out, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(out); } });
+    V.speak(out, { onStart: () => markSpeaking(true), onEnd: () => { markSpeaking(false); continueConvoAfterSpeech(out); } });
     armTalkWait(out);
   } catch (e) {
     thinking(false);
@@ -1516,7 +1649,7 @@ async function runAction(a, hit) {
       }
       return true;
     }
-    case 'stop_speech': V.cancelSpeech(); state.speaking = false; setStatus('Tap to speak'); return true;
+    case 'stop_speech': V.cancelSpeech(); markSpeaking(false); setStatus('Tap to speak'); return true;
     case 'clear_chat': state.messages = []; $('#chatMessages').innerHTML = ''; S.saveList(KEYS.CHAT, []); return true;
     case 'theme': S.setSetting('uiTheme', a.theme); U.applyTheme(a.theme); syncSettingsUI(); return true;
     case 'call': {
@@ -3808,7 +3941,7 @@ async function doWiki(q) {
     thinking(false);
     const short = r.extract.length > 420 ? r.extract.slice(0, 420).replace(/\s+\S*$/, '') + '…' : r.extract;
     addMsg('ai', `**${r.title}**\n${short}`, { link: r.url });
-    V.speak(short, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    V.speak(short, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   } catch (e) {
     thinking(false);
     if (AI.hasGroq()) return askGroq(q);
@@ -4330,8 +4463,8 @@ async function doReadPage(url) {
   if (!r.ok) { reply('Could not read that page (' + r.reason + '). Some sites block extraction - try another link.'); return true; }
   addMsg('ai', `**${r.title || 'Article'}**\n${r.text.slice(0, 550).trim()}…`, { link: url });
   const feed = V.createSpeechFeed({
-    onStart: () => state.speaking = true,
-    onDone: () => { state.speaking = false; continueConvoAfterSpeech('article done'); }
+    onStart: () => markSpeaking(true),
+    onDone: () => { markSpeaking(false); continueConvoAfterSpeech('article done'); }
   });
   if (r.title) feed.push(r.title);
   const body = r.text.slice(0, 4500);
@@ -4554,7 +4687,7 @@ async function askLocalFirst(text) {
     } else {
       addMsg('ai', final, { source: 'on-device' });
     }
-    V.speak(final, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(final); } });
+    V.speak(final, { onStart: () => markSpeaking(true), onEnd: () => { markSpeaking(false); continueConvoAfterSpeech(final); } });
     S.remember('ai', final);
     armTalkWait(final);   // Karen loop works on-device too
     return true;
@@ -4601,8 +4734,8 @@ async function askGroq(text) {
   // streaming TTS: speech starts on the first complete sentence
   const useFeed = S.getSetting('streamingTts') !== false && S.getSetting('voiceOutput');
   const feed = useFeed ? V.createSpeechFeed({
-    onStart: () => { state.speaking = true; },
-    onDone: () => { state.speaking = false; continueConvoAfterSpeech(acc); }
+    onStart: () => { markSpeaking(true); },
+    onDone: () => { markSpeaking(false); continueConvoAfterSpeech(acc); }
   }) : null;
   let boundaryCursor = 0;
   const feedFrom = sofar => {
@@ -4651,7 +4784,7 @@ async function askGroq(text) {
       if (boundaryCursor < final.length) feed.push(final.slice(boundaryCursor));
       feed.markDone();
     } else {
-      V.speak(final, { onStart: () => state.speaking = true, onEnd: () => { state.speaking = false; continueConvoAfterSpeech(final); } });
+      V.speak(final, { onStart: () => markSpeaking(true), onEnd: () => { markSpeaking(false); continueConvoAfterSpeech(final); } });
     }
     if (el) {
       el.querySelector('.message-bubble').innerHTML = U.renderRich(final);
@@ -4823,7 +4956,7 @@ async function runSecurityScan() {
   V.speak(score === 0
     ? 'Security scan complete. Your phone is clean.'
     : `Security scan complete. ${danger.length} serious and ${warn.length} warning-level findings. Check the report.`,
-    { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   return true;
 }
 
@@ -4865,7 +4998,7 @@ async function finishVaultPending() {
     const r = await VAULT.vaultSave(p.service, p.password);
     if (r.ok) {
       addMsg('ai', `🔐 Saved: **${p.service}** password is now in your encrypted vault.`);
-      V.speak(`${p.service} password saved to your vault.`, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+      V.speak(`${p.service} password saved to your vault.`, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
     } else reply('Could not save that.');
     return;
   }
@@ -4916,8 +5049,8 @@ async function breachCount(password) {
 }
 
 const speakShort = (text) => V.speak(text, {
-  onStart: () => state.speaking = true,
-  onEnd: () => state.speaking = false
+  onStart: () => markSpeaking(true),
+  onEnd: () => markSpeaking(false)
 });
 
 async function auditPassword(pw) {
@@ -5250,7 +5383,7 @@ async function initNative() {
       `If that wasn't you, uninstall it now — or ask me to "scan my phone" for the full picture.`,
       { proactive: true });
     V.speak('Security alert. A new app was installed outside the Play Store.',
-      { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+      { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   });
 
   syncWidget();
@@ -5301,7 +5434,7 @@ function handleNotification(n) {
     address: S.getSetting('assistantAddress') || 'Boss', canReveal: decision.canReveal
   });
   if (!n.nativeAnnounced && !state.listening && !state.speaking) {
-    V.speak(prompt, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+    V.speak(prompt, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   }
   D.vibrate(25);
 }
@@ -5425,7 +5558,7 @@ async function runProactive() {
   const s = PRO.suggest(ctx);
   if (!s) return;
   addMsg('ai', s.text, { proactive: true });
-  V.speak(s.text, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+  V.speak(s.text, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
   if (s.action) runAction(s.action, {});
   D.vibrate(20);
 }
@@ -5492,7 +5625,7 @@ function armTalkWait(questionText) {
     const nudge = pick(TALK_NUDGES);
     addMsg('ai', nudge, { proactive: true });
     if (S.getSetting('voiceOutput')) {
-      V.speak(nudge, { onStart: () => state.speaking = true, onEnd: () => state.speaking = false });
+      V.speak(nudge, { onStart: () => markSpeaking(true), onEnd: () => markSpeaking(false) });
     }
   }, 42000);
 }
@@ -5502,8 +5635,8 @@ function reply(text, opts = {}) {
   addMsg('ai', text, opts);
   S.remember('ai', text);
   V.speak(text, {
-    onStart: () => state.speaking = true,
-    onEnd: () => { state.speaking = false; continueConvoAfterSpeech(text); }   // v8.3: keep the conversation alive
+    onStart: () => markSpeaking(true),
+    onEnd: () => { markSpeaking(false); continueConvoAfterSpeech(text); }   // v8.3: keep the conversation alive
   });
   armTalkWait(text);
 }
@@ -5970,8 +6103,8 @@ async function describeNativePhoto(dataUrl) {
       addMsg('ai', desc, { source: 'live' });
       S.remember('ai', desc);
       V.speak(desc, {
-        onStart: () => state.speaking = true,
-        onEnd: () => { state.speaking = false; continueConvoAfterSpeech(desc); }
+        onStart: () => markSpeaking(true),
+        onEnd: () => { markSpeaking(false); continueConvoAfterSpeech(desc); }
       });
     } else if (out) {
       out.textContent = 'Vision unavailable (' + ((v && v.reason) || 'error') + '). Buttons below still work offline.';
@@ -6044,7 +6177,7 @@ function offlineAgent(btnSel, input) {
 function bindEvents() {
   // Mic
   $('#micButton').addEventListener('click', () => {
-    if (state.speaking) { V.cancelSpeech(); state.speaking = false; return; }
+    if (state.speaking) { V.cancelSpeech(); markSpeaking(false); return; }
     if (state.listening) V.stopListening(); else {
       state.voiceGiveUp = false;      // v14.1: tap mic = explicit retry
       V.listen();
@@ -6361,6 +6494,14 @@ function bindEvents() {
   bind('#voiceLang', 'voiceLang');
   bind('#uiTheme', 'uiTheme');
   bind('#particleEffects', 'particleEffects', 'change', 'checked');
+  /* v1.0.1: performance mode. Re-applies immediately on change so the user
+     feels the difference without restarting. */
+  const perfSel = $('#perfMode');
+  if (perfSel) perfSel.addEventListener('change', () => {
+    S.setSetting('perfMode', perfSel.value);
+    const on = PERF.refresh();
+    U.toast(on ? 'Performance mode ON — effects trimmed, all features intact.' : 'Performance mode OFF — full effects restored.', '⚡');
+  });
   bind('#showWidgets', 'showWidgets', 'change', 'checked');
   bind('#saveMemory', 'saveMemory', 'change', 'checked');
   bind('#backgroundService', 'backgroundService', 'change', 'checked');
@@ -7047,6 +7188,7 @@ function syncSettingsUI() {
   set('#voiceLang', S.getSetting('voiceLang'));
   set('#uiTheme', S.getSetting('uiTheme'));
   set('#particleEffects', S.getSetting('particleEffects'), 'checked');
+  set('#perfMode', S.getSetting('perfMode') || 'auto');
   set('#showWidgets', S.getSetting('showWidgets'), 'checked');
   set('#saveMemory', S.getSetting('saveMemory'), 'checked');
   set('#backgroundService', S.getSetting('backgroundService'), 'checked');

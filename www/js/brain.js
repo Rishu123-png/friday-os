@@ -698,6 +698,171 @@ I('phish_sms', t =>
   () => ({ say: null, action: { type: 'phish_sms' } }), 5);
 
 /* ------------------------------------------------------------------ */
+/*  SMALL TALK (v1.0.1)                                                */
+/* ------------------------------------------------------------------ */
+/*  This section did not exist before. The engine shipped 188 intents and
+    every single one was a *command* — there was no greeting, no "how are
+    you", no "thanks", no "bye". Every social utterance therefore fell through
+    to the orchestrator's failure branch and produced the canned
+    "Systems online... I'm not sure I understand" line, which is why FRIDAY
+    felt like a script bot rather than an assistant.
+
+    Design rules for everything below:
+      · Anchored (^...$) so a greeting can never steal a real command —
+        "hello, turn on the torch" still routes to the torch.
+      · priority 0, so weighted = score x 1.0 and any genuine command
+        (priority >= 1) always outranks small talk.
+      · 100% offline. No model, no key, no network.
+      · pick() gives variety, so repeated greetings do not feel canned.
+      · Hinglish is first-class — the user speaks it daily.                */
+
+const greetLine = () => {
+  const h = new Date().getHours();
+  const part = h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 22 ? 'Good evening' : 'Burning the midnight oil';
+  return pick([
+    `${part}, ${who()}. All systems green.`,
+    `${part}, ${who()}. I'm here.`,
+    `${part}. What are we doing?`,
+    `${part}, ${who()}. Ready when you are.`
+  ]);
+};
+
+I('greet', t => /^(hi+|hey+|hello+|yo|namaste|namaskar|salaam|assalam|good (morning|afternoon|evening|night)|gm|sup|what'?s up|wassup|hola|howdy)\b[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: greetLine() }), 0);
+
+I('how_are_you', t => /^(how are you|how'?re you|how do you do|how are things|how'?s it going|kaise ho|kaisi ho|kya haal|kya haal hai|kaise hain|tum kaise ho|aap kaise hain|theek ho|sab badhiya)[!.\s]*$/.test(t) ? 1 : 0,
+  () => {
+    const lines = [
+      `Running clean, ${who()} — every subsystem nominal, battery fine, no complaints.`,
+      `I'm good. Nothing aches when you're made of code. How about you?`,
+      `All green here. 188 skills loaded, reactors steady. What do you need?`,
+      `Better now that you asked. That's the first time anyone has.`
+    ];
+    return { say: pick(lines) };
+  }, 0);
+
+I('who_are_you', t => /^(who are you|what are you|tum kaun ho|tu kaun hai|aap kaun hain|what'?s your name|what is your name|your name|tumhara naam|tera naam|introduce yourself|apna intro)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `I'm FRIDAY — your personal AI operating system. I run on this device, ${who()}, and I control it: torch, volume, alarms, calls, messages, sensors. I don't send your data anywhere.`,
+    `FRIDAY. Born on your phone, not in someone's datacenter. I handle your device, your notes, your memory — and I keep it all local.`
+  ]) }), 0);
+
+I('who_made_you', t => /^(who (made|built|created|designed) you|tumhe kisne banaya|kisne banaya|who is your (creator|maker|developer)|tumhara developer)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `One developer, building in public. Android layer in Java, HUD in vanilla JS, backend in FastAPI.`,
+    `A single person who got tired of waiting for someone else to build it. Everything is open source.`
+  ]) }), 0);
+
+I('are_you_real', t => /^(are you (real|alive|human|a robot|a bot|sentient|conscious)|are you an? (ai|bot|human)|tum insaan ho|tum robot ho|do you have feelings|do you (feel|dream|sleep))[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `I'm software, and I won't pretend otherwise. But I'm software that actually does things — that part is real.`,
+    `Not alive. Not pretending to be. Just fast, local, and genuinely useful — which I'd argue is the better deal.`
+  ]) }), 0);
+
+I('thanks', t => /^(thanks|thank you|thankyou|thnx|thx|ty|shukriya|dhanyavad|dhanyawad|bahut accha|great job|well done|nice work|good job|shabash)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `Any time, ${who()}.`,
+    `That's what I'm here for.`,
+    `Happy to help. What's next?`,
+    `Anytime. It's literally my whole purpose.`
+  ]) }), 0);
+
+I('bye', t => /^(bye+|goodbye|good ?night|see you|see ya|ttyl|talk later|chalo bye|alvida|ok bye|gn|good night|all the best)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `Take care, ${who()}. I'll keep watch.`,
+    `Later. I'll be here.`,
+    `Goodnight. Alarms and reminders stay armed.`
+  ]) }), 0);
+
+I('compliment', t => /^(you'?re (great|awesome|amazing|the best|good|smart|helpful|cool|perfect)|i love you|love you|you are the best|tum acche ho|tum bahut acche ho|maza aa gaya|you'?re my favourite)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `Careful, ${who()} — compliments go straight to my cache.`,
+    `Noted and stored permanently. Thank you.`,
+    `I'll take it. Now let's put it to work.`
+  ]) }), 0);
+
+I('insult', t => /^(you (suck|are (stupid|dumb|useless|bad))|stupid|idiot|useless|bakwas|faltu|you'?re (stupid|dumb|useless)|kuch nahi aata)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `Fair. Tell me what went wrong and I'll fix it — that's more useful than either of us sulking.`,
+    `I'll take the hit. Now give me the exact command that failed and I'll sort it.`,
+    `Noted. Frustration is usually a bug report wearing a costume — what broke?`
+  ]) }), 0);
+
+I('ok_ack', t => /^(ok+|okay|k|kk|got it|alright|fine|cool|nice|hmm+|hmm+|achha|theek hai|thik hai|chalo|sahi hai)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick(['👍', 'Understood.', 'Standing by.', 'Ready.']) }), 0);
+
+I('sorry', t => /^(sorry|my bad|my mistake|maaf karo|maaf karna|galti ho gayi)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick([`No harm done, ${who()}.`, `Forget it. What's next?`, `All forgiven. Onwards.`]) }), 0);
+
+I('laugh', t => /^(lol|lmao|haha+|hehe+|rofl|hahaha|too funny|that'?s funny|hasao|hasa diya)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: pick(['Glad that landed.', "I'll be here all week.", "I accept payment in smiles, ${who()}.".replace('${who()}', who())]) }), 0);
+
+I('bored', t => /^(i'?m? ?(am )?(so )?bored\b|bored\b|bore ho (raha|rahi|gaya|gayi)\b|kuch karo\b|entertain me\b|time ?pass\b|kya karu\b|kuch karne ka mann nahi)/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `Options: I can tell you a joke, run a mock test, show your battery health, draft a message, or scan your network. Pick one.`,
+    `Three ideas — say "joke", "mock test", or "plan my day". Or just tell me what you keep avoiding.`
+  ]) }), 0);
+
+I('motivate', t => /^(motivate me|inspire me|i'?m? ?(am )?(tired|sad|down|exhausted|not feeling)|feeling (low|down)|mann nahi lag|himmat nahi|demotivated|cheer me up|udaas)/.test(t) ? 1 : 0,
+  () => ({ say: pick([
+    `You built an entire AI operating system on a phone. Whatever this is, it's smaller than that.`,
+    `Start with the smallest possible version of the task. Momentum beats motivation every time.`,
+    `You shipped ${'over 600 commits'} alone. Today doesn't get to beat that.`
+  ]) }), 0);
+
+I('capabilities', t => /^(what can you do|what do you do|what are your (skills|features)|tum kya kar sakti ho|tum kya kar sakte ho|help me|kya kar sakti ho)[!.\s]*$/.test(t) ? 1 : 0,
+  () => ({ say: `A lot, ${who()} — and most of it works with no internet at all.\n• Device: torch, volume, brightness, WiFi, Bluetooth, media, alarms, apps\n• Voice: wake word, on-device speech, neural replies\n• Memory: I remember facts, notes and preferences across sessions\n• Study, notes, planning, health, security scanning, translation\nSay "help" for the full command list, or just talk to me normally.` }), 0);
+
+/* ------------------------------------------------------------------ */
+/*  COMPOUND COMMANDS (v1.0.1)                                         */
+/* ------------------------------------------------------------------ */
+/*  The single biggest behavioural limitation before this: "torch on and
+    volume 50" ran ONLY the first half.
+
+    Two things caused it:
+      1. app.js merges voice fragments within 900ms into one string, so two
+         spoken commands arrive as a single sentence.
+      2. resolve() returns exactly ONE intent — the highest weighted match —
+         and there is no queue anywhere in the engine.
+
+    splitCompound() fixes it at the source. It is deliberately conservative:
+    it only returns a split when EVERY resulting part resolves to a real
+    command on its own. If any part is unrecognised, it returns null and the
+    whole utterance is handled the old way — so a false split is impossible,
+    it can only ever fail to split.
+
+    Guards against the obvious traps:
+      · time expressions ("remind me at 5 and 6", "alarm 7 aur 8") — a bare
+        number is not a command, so those parts fail to resolve and the split
+        is rejected automatically.
+      · destructive verbs are never chained.
+      · 4 part maximum, and each part must be at least 4 characters.        */
+
+const COMPOUND_SPLIT = /\s*(?:;\s*|,\s*(?:and\s+|aur\s+|then\s+)?|\s+and\s+then\s+|\s+then\s+|\s+and\s+|\s+aur\s+phir\s+|\s+phir\s+|\s+aur\s+|\s+also\s+|\s+plus\s+)/i;
+const DESTRUCTIVE = /^(delete|remove|erase|wipe|clear|factory|format|uninstall|sab (delete|hatao))/i;
+
+export function splitCompound(text, ctx = {}) {
+  const raw = String(text || '').trim();
+  if (raw.length < 9 || raw.length > 200) return null;
+  if (!COMPOUND_SPLIT.test(raw)) return null;
+
+  /* Never split anything involving a time — "at 5 and 6", "7 aur 8 baje". */
+  if (/\b\d{1,2}\s*(am|pm|baje|o'?clock)|\bat\s+\d|\bin\s+\d+\s*(min|hour|sec|ghant|minute)/i.test(raw)) return null;
+
+  const parts = raw.split(COMPOUND_SPLIT).map(x => x.trim()).filter(Boolean);
+  if (parts.length < 2 || parts.length > 4) return null;
+  if (parts.some(x => x.length < 4)) return null;
+  if (parts.some(x => DESTRUCTIVE.test(x))) return null;
+
+  /* Every part must stand on its own as a real command. */
+  for (const part of parts) {
+    const r = resolve(part, ctx);
+    if (!r || !r.intent) return null;
+  }
+  return parts;
+}
+
+/* ------------------------------------------------------------------ */
 /*  ROUTER                                                             */
 /* ------------------------------------------------------------------ */
 

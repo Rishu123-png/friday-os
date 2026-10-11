@@ -29,7 +29,11 @@ export const DEFAULTS = {
   voiceOutput: true,
   speechRate: '1',
   speechPitch: '1.1',
-  voiceLang: 'en-US',
+  /* v1.0.1: was 'en-US'. Google's en-IN model handles Hindi-English
+     code-switching far better, which is how this app is actually spoken to.
+     Existing installs keep whatever they already saved — change it once in
+     Settings > Voice Language. */
+  voiceLang: 'en-IN',
   wakeWord: false,
   bargeIn: true,
   streamingTts: true,
@@ -48,6 +52,10 @@ export const DEFAULTS = {
   uiTheme: 'cyber',
   particleEffects: true,
   showWidgets: true,
+  /* v1.0.1: 'auto' = enable low-power on weak/low-RAM/low-battery devices.
+     'on' always, 'off' never. Low-power strips ambient effects only — it
+     removes no features. */
+  perfMode: 'auto',
   // Data
   saveMemory: true,
   locationAccess: false,

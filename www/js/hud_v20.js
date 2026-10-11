@@ -328,7 +328,11 @@ function drawGraph() {
   const ctx = cv.getContext('2d');
   const w = cv.width = cv.clientWidth || 200, h = cv.height = cv.clientHeight || 60;
   ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 1.5; ctx.shadowColor = '#00d4ff'; ctx.shadowBlur = 6;
+  ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 1.5;
+  /* PERF (v1.0.1): the shadowBlur that used to sit here is a per-draw blur
+     convolution — MDN explicitly recommends avoiding it. A plain 2px stroke
+     reads the same on a dark background and costs nothing. */
+  ctx.lineJoin = 'round';
   ctx.beginPath();
   _graph.forEach((v, i) => {
     const x = (i / (GRAPH_MAX - 1)) * w;
@@ -480,30 +484,51 @@ async function updateBattery() {
     }
 }
 
-function updateVoice() {
-  if (document.hidden) return; // v16: save battery when hidden
+/* ══ PERF (v1.0.1) ═══════════════════════════════════════════════════════
+   Was called twice per cycle (its own timer *and* the 3s tick) and did a full
+   querySelectorAll + canvas reallocation on every call — `wb.width = ...` on
+   an already-sized canvas frees and reallocates the whole drawing buffer.
+   Now: bars are cached, the canvas is only resized when its box really
+   changed, and the whole function exits immediately when the voice state has
+   not moved. ═══════════════════════════════════════════════════════════════ */
+let _vbars = null, _vlast = null, _vw = 0, _vh = 0, _wctx = null;
+
+function updateVoice(force) {
+  if (typeof document !== 'undefined' && document.hidden) return; // battery
   const st = VOX.vox.get();
+  const live = st === 'LISTENING' || st === 'SPEAKING' || st === 'UNDERSTANDING'
+    || st === 'THINKING' || st === 'EXECUTING';
+  const sig = st + '|' + live + '|' + (agentState.isActive() ? 1 : 0);
+  /* Skip only while idle. When live, the wake waveform is an animation and
+     must keep redrawing — so `&& !live` keeps it moving. */
+  if (!force && sig === _vlast && !live) return;
+  _vlast = sig;
+
   const coreStatus = $('#listeningText');
   // PHASE 2: while the agent is actively working, the core label shows the
   // REAL agent state (painted by hud-agent.js), not the voice engine
   if (coreStatus && !agentState.isActive()) coreStatus.textContent = voiceStateLabel(st);
-  const bars = document.querySelectorAll('#voiceWaveform .wave-bar');
-  const live = st === 'LISTENING' || st === 'SPEAKING' || st === 'UNDERSTANDING' || st === 'THINKING' || st === 'EXECUTING';
-  bars.forEach(b => b.classList.toggle('active', live));
+
+  if (!_vbars || !_vbars.length) _vbars = document.querySelectorAll('#voiceWaveform .wave-bar');
+  _vbars.forEach(b => b.classList.toggle('active', live));
+
   const wb = document.querySelector('#wakeWaveform');
-  if (wb && wb.getContext) {
-    const ctx = wb.getContext('2d');
-    const w = wb.width = wb.clientWidth || 120, h = wb.height = wb.clientHeight || 30;
-    ctx.clearRect(0, 0, w, h);
-    if (live) {
-      ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      for (let x = 0; x < w; x++) {
-        const y = h / 2 + Math.sin(x * 0.25 + Date.now() * 0.01) * 6 + (Math.random() * 4 - 2);
-        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      }
-      ctx.stroke();
+  if (!wb || !wb.getContext) return;
+  const w = wb.clientWidth || 120, h = wb.clientHeight || 30;
+  if (w !== _vw || h !== _vh) {                  // resize only on real change
+    wb.width = w; wb.height = h; _vw = w; _vh = h; _wctx = null;
+  }
+  if (!_wctx) _wctx = wb.getContext('2d');
+  const ctx = _wctx;
+  ctx.clearRect(0, 0, w, h);
+  if (live) {
+    ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+      const y = h / 2 + Math.sin(x * 0.25 + Date.now() * 0.01) * 6 + (Math.random() * 4 - 2);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
+    ctx.stroke();
   }
 }
 
@@ -517,7 +542,8 @@ async function tick() {
   updateAgenda();
   updateAlarm();
   updateWake();
-  updateVoice();
+  /* updateVoice() intentionally NOT called here — it has its own timer and
+     calling it from both places doubled its work (v1.0.1). */
   updateCompass();
   updateLocation();
   updateWeather();
@@ -532,13 +558,16 @@ let _tickTimer = null;
 export function initHUDV20() {
   if (_running) return; _running = true;
   tick();
+  /* PERF (v1.0.1): 700ms -> 1200ms and 1500ms -> 2500ms. These drive status
+     chrome, not interaction, so the slower cadence is imperceptible — but it
+     removes ~4 main-thread wakeups per second on a device that was starving. */
   _tickTimer = setInterval(tick, 3000);
-  _voiceTimer = setInterval(() => { if (!document.hidden) updateVoice(); }, 700);
-  _graphTimer = setInterval(() => { if (!document.hidden) drawGraph(); }, 1500);
+  _voiceTimer = setInterval(() => { if (!document.hidden) updateVoice(); }, 1200);
+  _graphTimer = setInterval(() => { if (!document.hidden) drawGraph(); }, 2500);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       tick();
-      updateVoice();
+      updateVoice(true);   // v1.0.1: force — the memo would otherwise skip it
       drawGraph();
     }
   });
