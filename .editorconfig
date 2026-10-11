@@ -1,0 +1,39 @@
+# ============================================================================
+# FRIDAY OS — editor configuration
+# Keeps contributor formatting consistent without a formatter dependency.
+# ============================================================================
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# The HUD source uses two-space indentation throughout.
+[*.{js,mjs,json,yml,yaml,css,html,md}]
+indent_style = space
+indent_size = 2
+
+# The native layer and tools follow Android / Python convention.
+[*.java]
+indent_style = space
+indent_size = 4
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# Markdown often relies on trailing spaces for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false
+
+# Binary-ish files we never want touched.
+[*.{png,jpg,jpeg,webp,ico,woff,woff2,ttf,jar,aar,apk,keystore,jks}]
+insert_final_newline = false
+trim_trailing_whitespace = false
