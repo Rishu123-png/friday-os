@@ -10,7 +10,8 @@ Thanks for wanting to help. This is an ambitious one-person project and contribu
 git clone https://github.com/Rishu123-png/friday-os.git
 cd friday-os
 npm ci
-npm test          # 358 tests — should be green before you change anything
+npm test          # 358 tests (333 web + 25 backend) — green before you change anything
+bash tools/javac-check.sh   # 41 more JUnit tests in the native layer
 ```
 
 To see the HUD running:
@@ -124,7 +125,7 @@ Explain **why** in the body when the reason isn't obvious.
 ## Pull Requests
 
 **Before opening:**
-- [ ] `npm test` passes — 358/358
+- [ ] `npm test` passes — 358/358, and `bash tools/javac-check.sh` reports `OK (41 tests)`
 - [ ] New features have tests; bug fixes have regression tests
 - [ ] No secrets, no real personal data
 - [ ] Protocol changes updated schema **and** backend
@@ -147,7 +148,7 @@ New here? These are genuinely tractable:
 
 | Task | Where |
 |---|---|
-| Wire up or remove the 4 orphaned `modules/` controllers | `www/js/modules/`, `www/sw.js` |
+| Lazy-load the non-critical HUD modules to cut first paint | `www/js/app.js` |
 | Continue splitting the `app.js` monolith | `www/js/app.js` |
 | Add screenshots / a demo video | `README.md` |
 | Improve i18n coverage | `www/js/i18n.js` |
