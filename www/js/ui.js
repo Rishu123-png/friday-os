@@ -110,8 +110,23 @@ export function initCore(canvas, stateRef) {
     return { r: 0, g: 212, b: 255 };
   };
 
+  /* ── PERF (v1.0.1) ───────────────────────────────────────────────────────
+     The reactor is ambient, so 30fps is visually identical to 60fps here and
+     halves main-thread wakeups. The loop also parks entirely while the WebView
+     is hidden. Three further savings:
+       · clearRect after the state read (one less full-surface op when parked)
+       · the radial gradient is cached per colour, not rebuilt every frame
+       · the core dot's 18px shadowBlur (a per-frame convolution) is replaced
+         by a plain translucent circle — near-identical on a dark background
+     ─────────────────────────────────────────────────────────────────────── */
+  let _skip = 0;
+  let _gradKey = '', _grad = null;
+
   function draw() {
-    ctx.clearRect(0, 0, SIZE, SIZE);
+    coreRAF = requestAnimationFrame(draw);
+    if (typeof document !== 'undefined' && document.hidden) return;   // parked
+    if (++_skip & 1) return;                                          // ~30fps
+
     const c = colorFor();
     const rgb = `${c.r},${c.g},${c.b}`;
 
@@ -122,6 +137,8 @@ export function initCore(canvas, stateRef) {
       if (lv) boost = (lv.reduce((s, v) => s + v, 0) / lv.length) / 255 * 8;
     }
 
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
     [[42, 0.12, 1], [32, 0.22, 1.4], [22, 0.34, 1.8]].forEach(([r, op, w]) => {
       ctx.beginPath();
       ctx.arc(C, C, r + boost * 0.4, 0, Math.PI * 2);
@@ -130,24 +147,29 @@ export function initCore(canvas, stateRef) {
       ctx.stroke();
     });
 
-    const g = ctx.createRadialGradient(C, C, 0, C, C, 20 + boost);
-    g.addColorStop(0, `rgba(${rgb},0.55)`);
-    g.addColorStop(1, 'transparent');
+    const key = rgb + '|' + Math.round(boost);
+    if (key !== _gradKey) {
+      _grad = ctx.createRadialGradient(C, C, 0, C, C, 20 + Math.round(boost));
+      _grad.addColorStop(0, `rgba(${rgb},0.55)`);
+      _grad.addColorStop(1, 'transparent');
+      _gradKey = key;
+    }
     ctx.beginPath();
     ctx.arc(C, C, 20 + boost, 0, Math.PI * 2);
-    ctx.fillStyle = g;
+    ctx.fillStyle = _grad;
     ctx.fill();
 
+    ctx.beginPath();
+    ctx.arc(C, C, 9 + boost * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${rgb},0.18)`;
+    ctx.fill();
     ctx.beginPath();
     ctx.arc(C, C, 4.5 + boost * 0.25, 0, Math.PI * 2);
     ctx.fillStyle = `rgb(${rgb})`;
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = `rgb(${rgb})`;
     ctx.fill();
-    ctx.shadowBlur = 0;
 
     a += stateRef.processing ? 0.03 : 0.008;
-    parts.forEach(p => {
+    for (const p of parts) {
       const ang = p.angle + a * p.speed;
       const x = C + Math.cos(ang) * (p.radius + boost * 0.3);
       const y = C + Math.sin(ang) * (p.radius + boost * 0.3);
@@ -155,9 +177,7 @@ export function initCore(canvas, stateRef) {
       ctx.arc(x, y, p.size, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${rgb},${p.op * 0.6})`;
       ctx.fill();
-    });
-
-    coreRAF = requestAnimationFrame(draw);
+    }
   }
 
   cancelAnimationFrame(coreRAF);
@@ -189,28 +209,57 @@ export function initParticles(canvas) {
   resize();
   addEventListener('resize', resize);
 
-  function draw() {
-    if (!getSetting('particleEffects')) {
-      ctx.clearRect(0, 0, W, H);
-      partRAF = requestAnimationFrame(draw);
-      return;
-    }
-    ctx.clearRect(0, 0, W, H);
-    const style = getComputedStyle(document.documentElement);
-    const prim = (style.getPropertyValue('--primary') || '#00d4ff').trim();
+  /* ══ PERF FIX (v1.0.1) — biggest win in the file ═══════════════════════
+     The original called getComputedStyle() *inside* this 60fps loop. That
+     forces the browser to flush pending styles and recompute the whole style
+     tree synchronously — every single frame. On Android WebView that alone can
+     eat the entire 16.6ms frame budget, which is what made the app feel like
+     it was hanging while typing.
 
-    particles.forEach(p => {
+     Now: the colour is cached and refreshed ~2×/sec instead of 60×/sec, and
+     the particleEffects setting is polled on the same throttle (getSetting()
+     reads localStorage — also synchronous). Loop parks when hidden, and
+     respects prefers-reduced-motion.
+     ═════════════════════════════════════════════════════════════════════ */
+  let prim = '#00d4ff';
+  let _pf = 0;
+  let particlesOn = true;
+  let reduced = false;
+  try { reduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+
+  function refreshColor() {
+    try {
+      const cs = getComputedStyle(document.documentElement);
+      prim = (cs.getPropertyValue('--primary') || '#00d4ff').trim() || '#00d4ff';
+    } catch (_) {}
+  }
+  refreshColor();
+
+  function draw() {
+    partRAF = requestAnimationFrame(draw);
+    if (typeof document !== 'undefined' && document.hidden) return;   // parked
+
+    if ((_pf++ & 31) === 0) {                 // ~2×/sec instead of 60×/sec
+      const on = !reduced && !!getSetting('particleEffects');
+      if (!on && particlesOn) ctx.clearRect(0, 0, W, H);
+      particlesOn = on;
+      if (on) refreshColor();
+    }
+    if (!particlesOn) return;
+
+    ctx.clearRect(0, 0, W, H);
+
+    for (const p of particles) {
       p.x += p.vx; p.y += p.vy;
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      if (p.x < 0) p.x = W; else if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; else if (p.y > H) p.y = 0;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fillStyle = prim;
       ctx.globalAlpha = p.o;
       ctx.fill();
-    });
+    }
     ctx.globalAlpha = 1;
-    partRAF = requestAnimationFrame(draw);
   }
   cancelAnimationFrame(partRAF);
   draw();
@@ -221,24 +270,43 @@ let waveRAF = null;
 export function animateWaveform(container, stateRef) {
   if (!container) return;
   const bars = Array.from(container.children);
+  /* ══ PERF FIX (v1.0.1) ═════════════════════════════════════════════════
+     There are 24 wave bars. The original wrote style.transform to all of them
+     60×/sec *even while idle* — the common case — dirtying layout for nothing
+     (~1,440 pointless style mutations per second). The idle state is now
+     written exactly once and the loop goes silent until voice state changes.
+     ═════════════════════════════════════════════════════════════════════ */
+  let lastActive = null;
+
   function frame() {
-    const active = stateRef.listening || stateRef.speaking || stateRef.processing;
+    waveRAF = requestAnimationFrame(frame);
+    if (typeof document !== 'undefined' && document.hidden) return;   // parked
+
+    const active = !!(stateRef.listening || stateRef.speaking || stateRef.processing);
+
     if (!active) {
-      bars.forEach(b => { b.style.transform = 'scaleY(0.12)'; });
-    } else if (stateRef.listening) {
+      if (lastActive !== false) {
+        for (const b of bars) b.style.transform = 'scaleY(0.12)';
+        lastActive = false;
+      }
+      return;                                   // no DOM writes while idle
+    }
+
+    if (stateRef.listening) {
       const lv = readLevels();
+      const n = lv ? lv.length : 0;
       bars.forEach((b, i) => {
-        const v = lv ? lv[Math.floor(i / bars.length * lv.length)] / 255 : Math.random() * 0.5;
+        const v = n ? lv[Math.floor(i / bars.length * n)] / 255 : Math.random() * 0.5;
         b.style.transform = `scaleY(${Math.max(0.12, Math.min(1, v * 1.6))})`;
       });
     } else {
       const t = Date.now() / 220;
+      const amp = stateRef.processing ? 0.45 : 0.7;
       bars.forEach((b, i) => {
-        const v = 0.25 + Math.abs(Math.sin(t + i * 0.4)) * (stateRef.processing ? 0.45 : 0.7);
-        b.style.transform = `scaleY(${v})`;
+        b.style.transform = `scaleY(${0.25 + Math.abs(Math.sin(t + i * 0.4)) * amp})`;
       });
     }
-    waveRAF = requestAnimationFrame(frame);
+    lastActive = true;
   }
   cancelAnimationFrame(waveRAF);
   frame();
