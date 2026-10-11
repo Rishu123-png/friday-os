@@ -3,7 +3,11 @@
    P1: includes new modular split (hud-controller, tick, voice, chat)
    Resilient precache: one missing file never kills the whole cache. */
 
-const CACHE = 'friday-os-v16-1';
+/* v1.0.1: bumped so every client discards the v16-1 shell and re-fetches.
+   Without this bump the service worker would keep serving the OLD ui.js,
+   app.js and hud-v20.js from cache and none of the performance fixes would
+   reach an existing install. */
+const CACHE = 'friday-os-v16-2';
 
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
