@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-00d4ff?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20·%20PWA-3ddc84?style=flat-square)](#-platforms)
 [![Python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square)](#-quickstart)
-[![Offline First](https://img.shields.io/badge/offline--first-188%20skills-8b5cf6?style=flat-square)](#-design-principles)
+[![Offline First](https://img.shields.io/badge/offline--first-203%20skills-8b5cf6?style=flat-square)](#-design-principles)
 [![Java](https://img.shields.io/badge/native-Java%2021-ed8b00?style=flat-square)](#-architecture)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff69b4?style=flat-square)](CONTRIBUTING.md)
 
@@ -30,7 +30,7 @@ It is **offline-first by design**. Every heavy capability — speech recognition
 
 And because an assistant with system privileges is a serious thing, the whole device-control surface is a **typed, versioned, safety-tiered protocol** with confirmations, leases and honest status reporting — not a pile of shell commands glued to an LLM.
 
-> **188 offline skills. 650 commits. 43,000+ lines of code. Built by one person, in public.**
+> **203 offline skills. 662 commits. 37,000+ lines of code. 399 tests. Built by one person, in public.**
 
 ---
 
@@ -53,8 +53,8 @@ And because an assistant with system privileges is a serious thing, the whole de
 
 | Path | What's inside |
 |---|---|
-| **`www/`** | The entire frontend — `index.html`, 67 ES modules, HUD CSS, self-hosted fonts, service worker, manifest. **25,100+ lines.** |
-| **`native/`** | 29 Java classes for the Android layer, plus `res/`, ProGuard rules, the vendored sherpa-onnx API and the build-time injection scripts. **14,600+ lines.** |
+| **`www/`** | The entire frontend — `index.html`, 62 ES modules, HUD CSS, self-hosted fonts, service worker, manifest. **25,200+ lines.** |
+| **`native/`** | 28 Java classes for the Android layer, plus `res/`, ProGuard rules, the vendored sherpa-onnx API and the build-time injection scripts. **7,800+ lines** of first-party Java (**15,000+** including the vendored sherpa-onnx API). |
 | **`backend/`** | FastAPI server — chat, STT, TTS, vision, embeddings, memory and the action queue. **3,000+ lines.** |
 | **`protocol/`** | `action-v1.schema.json` — the single source of truth for the device protocol, kept in sync with the backend by a test. |
 | **`tests/`** | 13 Node suites — HUD contracts, boot runtime, action protocol, proactive assistant, stress tests. |
@@ -149,7 +149,7 @@ cd friday-os
 npm run serve          # → http://localhost:8080
 ```
 
-That's it. The HUD boots fully offline with 188 local skills. No keys, no backend, no account.
+That's it. The HUD boots fully offline with 203 local skills. No keys, no backend, no account.
 
 ### 2 · Run the backend (optional — unlocks cloud models & sync)
 
@@ -311,9 +311,21 @@ npm run test:web     # Node test suites
 npm run test:backend # Python test suites
 ```
 
-The suite is not decorative — it's the enforcement mechanism for the guarantees above. It covers the action protocol end-to-end, confirmation binding, lease expiry, idempotency, boot runtime, HUD contracts, provider failover, proactive behaviour, offline asset integrity and a stress pass.
+**399 tests across three layers:**
 
-There's also `tools/javac-check.sh`, which compile-checks all 29 native classes against `android.jar` plus Capacitor stubs — **no Android Studio required**. Run `tools/buildenv.sh` once to provision the jar and stubs.
+| Layer | Tests | Runner |
+|---|---|---|
+| Web (Node) | 333 | `npm run test:web` |
+| Backend (Python) | 25 | `npm run test:backend` |
+| Native (JUnit) | 41 | `bash tools/javac-check.sh` |
+
+The suite is not decorative — it's the enforcement mechanism for the guarantees above. It covers the action protocol end-to-end, confirmation binding, lease expiry, idempotency, boot runtime, HUD contracts, provider failover, proactive behaviour, offline asset integrity and a stress pass. The native layer covers notification policy, download resume and archive extraction, crash-log secret redaction, and the on-disk model validation that decides whether a voice pack is usable.
+
+There's also `tools/javac-check.sh`, which compile-checks the native layer against `android.jar` plus Capacitor stubs and then runs the JUnit suites — **no Android Studio required**. Run `tools/buildenv.sh` once to provision the jar and stubs, then:
+
+```bash
+bash tools/javac-check.sh   # compile + run all native unit tests
+```
 
 ---
 
@@ -356,11 +368,44 @@ All backend config lives in `backend/.env` (gitignored). Copy `.env.example` to 
 
 ---
 
+ ## ✅ Requirements & Scope
+
+Knowing this up front saves an afternoon. None of it is a defect — it is the honest shape of the thing.
+
+**Getting the best out of it**
+
+| What | Why |
+|---|---|
+| **Android 8+** | The native layer targets SDK 26 and up. |
+| **4 GB RAM or more** | Low-power mode turns itself on automatically below that, and it is noticeable. |
+| **A second visit to Settings** | Wake word, offline speech and neural voice each need a one-time model download. Nothing downloads without you asking. |
+| **`en-IN` voice language** | Default on new installs. It handles Hindi-English code-switching far better than `en-US`. |
+| **Sideload, not Play Store** | The app needs SMS, call-log, accessibility and overlay permissions that Play policy restricts for a personal assistant. Install the APK directly. |
+
+**What works with zero setup**
+
+Command routing, all 203 offline skills, notes, memory, device control, alarms, timers, automation rules, security scanning and translation. Pull the network cable — this part does not care.
+
+**What needs a one-time download**
+
+Wake word, offline speech-to-text, neural voice and the on-device LLM. Each is optional and each is a manual action; the app never fetches them silently.
+
+**What needs the backend (and therefore a key and a connection)**
+
+Camera and screen understanding. Vision runs on a cloud model — there is no on-device vision inference path yet.
+
+**What is deliberately out of scope for v1.0.0**
+
+iOS (the 28 native classes are Android-specific, not abstracted), multi-user accounts (identity derives from a single `FRIDAY_TOKEN`), and on-device vision.
+
+---
+
 ## 🗺️ Roadmap
 
-- [ ] Finish splitting the 7,244-line `app.js` monolith into the `modules/` controllers
-- [ ] Wire the 4 abandoned `modules/` controllers into the boot path (or delete them)
+- [ ] Split the 7,244-line `app.js` monolith (the abandoned `modules/` scaffolds were removed in 1.0.1 — this is now a clean slate)
+- [ ] Lazy-load the non-critical HUD modules so first paint does not wait on ~1.2 MB of JavaScript
 - [ ] Onboarding flow for first-run key setup
+- [ ] On-device vision, so camera understanding stops needing the backend
 - [ ] iOS exploration via a Capacitor Swift shim
 - [ ] Plugin registry SDK for third-party actions
 - [ ] Expand the action protocol beyond 15
@@ -376,7 +421,6 @@ git clone https://github.com/Rishu123-png/friday-os.git
 cd friday-os && npm ci
 npm test              # must stay green
 ```
-
 **Before you open a PR:**
 1. `npm test` passes.
 2. Anything touching the device protocol updates `protocol/action-v1.schema.json` **and** `backend/action_protocol.py` (a test will catch you if you forget).
@@ -385,7 +429,7 @@ npm test              # must stay green
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
 
-**Great first issues:** the `modules/` split, i18n coverage, and new action-protocol tests.
+**Great first issues:** the `app.js` split, lazy-loading the HUD, i18n coverage, and new action-protocol tests.
 
 ---
 
