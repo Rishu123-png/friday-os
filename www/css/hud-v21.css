@@ -235,8 +235,11 @@ html[data-hud="on"] .hud-module {
     inset -5px 0 0 rgba(112, 255, 217, .86),
     inset 0 0 22px rgba(94, 226, 242, .1),
     0 0 18px rgba(70, 218, 240, .08) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* v1.0.1 PERF: backdrop-filter removed. A live backdrop blur is one of the
+     most expensive things you can ask Android WebView to do — it forces GPU
+     compositing plus a full-surface repaint every frame it is visible. This
+     element already paints its own gradient background, so the visual delta
+     is essentially nil and the saving is large. */
   overflow: hidden;
 }
 html[data-hud="on"] .hud-module::before {
@@ -638,9 +641,12 @@ html[data-hud="on"] .agent-panel {
   0%, 100% { transform: scale(.992); filter: drop-shadow(0 0 13px rgba(var(--hud-accent-rgb), .22)); }
   50% { transform: scale(1.008); filter: drop-shadow(0 0 23px rgba(var(--hud-accent-rgb), .36)); }
 }
+/* v1.0.1 PERF: drop-shadow blur radius halved (48px -> 24px) and the scale
+   delta tightened. drop-shadow is a live filter — its cost scales with the
+   blur radius and with the area being repainted, so both numbers matter. */
 @keyframes friday-active-drive {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 22px rgba(var(--hud-accent-rgb), .5)); }
-  50% { transform: scale(1.035); filter: drop-shadow(0 0 48px rgba(var(--hud-accent-rgb), .78)); }
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(var(--hud-accent-rgb), .45)); }
+  50% { transform: scale(1.02); filter: drop-shadow(0 0 24px rgba(var(--hud-accent-rgb), .7)); }
 }
 @keyframes friday-architecture-spin { to { transform: rotate(360deg); } }
 @keyframes friday-counter-spin { to { transform: rotate(-360deg); } }
@@ -648,7 +654,7 @@ html[data-hud="on"] body:not(.hud-active) .ai-core-container {
   animation: friday-idle-breathe 5.2s ease-in-out infinite;
 }
 html[data-hud="on"] body.hud-active .ai-core-container {
-  animation: friday-active-drive 1.35s ease-in-out infinite;
+  animation: friday-active-drive 2.7s ease-in-out infinite; /* v1.0.1: 1.35s -> 2.7s (halves the filter repaints) */
 }
 html[data-hud="on"] body.hud-active .friday-core-architecture::after {
   animation: friday-architecture-spin 7s linear infinite;
@@ -1023,12 +1029,54 @@ html[data-hud="on"] .dashboard.hud-expanded .hud-deck-close {
     scroll-behavior: auto !important;
   }
 }
+/* ══ v1.0.1 PERFORMANCE MODE ══════════════════════════════════════════════
+   These rules already existed in the stylesheet, but NOTHING in the app ever
+   set data-low-power / data-fx — so the entire low-power path was unreachable
+   dead code. It is now driven automatically by PERF in app.js (weak device,
+   low RAM, or battery under 20%). Every rule below removes cost, not features.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ambient animation off */
 body[data-low-power="true"] .ai-core-container,
 body[data-fx*='"motion":"low"'] .ai-core-container,
 body[data-fx*='"rings":false'] .friday-core-architecture::after,
 body[data-fx*='"rings":false'] .friday-orbit {
   animation: none !important;
 }
+
+/* the particle canvas is pure decoration — first thing to go */
+body[data-low-power="true"] #particleCanvas {
+  display: none !important;
+}
+
+/* live backdrop blur never runs in low-power mode */
+body[data-low-power="true"] .hud-module,
+body[data-low-power="true"] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* glow filters and paint-heavy shadows are dropped wholesale ... */
+body[data-low-power="true"] * {
+  box-shadow: none !important;
+}
+/* ... except the reactor core, which is the app's signature look. */
+body[data-low-power="true"] .ai-core-container {
+  filter: none !important;
+}
+body[data-low-power="true"] .ai-core-container::before {
+  box-shadow: 0 0 14px rgba(var(--hud-accent-rgb), .38) !important;
+}
+
 body[data-fx*='"glow":"low"'] .ai-core-container {
   filter: drop-shadow(0 0 10px rgba(var(--hud-accent-rgb), .18)) !important;
+}
+
+/* While the app is in the background, freeze every CSS animation instead of
+   letting the compositor keep ticking unseen. */
+body[data-fx-paused="true"],
+body[data-fx-paused="true"] *,
+body[data-fx-paused="true"] *::before,
+body[data-fx-paused="true"] *::after {
+  animation-play-state: paused !important;
 }
