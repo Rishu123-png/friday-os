@@ -1,6 +1,6 @@
 # FRIDAY OS backend — light core (server boots with ONLY these)
 fastapi>=0.110
-uvicorn[standard]>=0.29
+uvicorn[standard]>=0.54.0
 httpx>=0.27
 python-dotenv>=1.0
 python-multipart>=0.0.9   # REQUIRED — /v1/stt uses UploadFile; without it the app won't boot
