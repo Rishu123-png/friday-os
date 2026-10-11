@@ -695,9 +695,9 @@
           <div class="setting-item">
             <label>Voice Language</label>
             <select id="voiceLang">
+              <option value="en-IN">English (India) — best for Hinglish</option>
               <option value="en-US">English (US)</option>
               <option value="en-GB">English (UK)</option>
-              <option value="en-IN">English (India)</option>
               <option value="hi-IN">Hindi (India)</option>
               <option value="es-ES">Spanish</option>
               <option value="fr-FR">French</option>
@@ -729,6 +729,14 @@
           <div class="setting-item">
             <label>Particle Effects</label>
             <div class="toggle-switch"><input type="checkbox" id="particleEffects" checked><span class="toggle-slider"></span></div>
+          </div>
+          <div class="setting-item">
+            <label>Performance Mode<br><small style="opacity:.6;font-size:11px">Auto = on for weak / low-battery devices. Removes ambient effects only — no feature is lost.</small></label>
+            <select id="perfMode" style="max-width:150px">
+              <option value="auto">Auto</option>
+              <option value="on">Always on</option>
+              <option value="off">Always off</option>
+            </select>
           </div>
           <div class="setting-item">
             <label>Dashboard Widgets</label>
@@ -862,7 +870,7 @@
         </div>
         <div class="settings-group">
           <h3>📱 About</h3>
-          <div class="setting-item"><label>Version</label><span class="setting-value">11.3.0</span></div>
+          <div class="setting-item"><label>Version</label><span class="setting-value">1.0.0</span></div>
           <div class="setting-item"><label>Build</label><span class="setting-value">FRIDAY-OS-V11-3-COGNITION</span></div>
           <div class="setting-item"><label>Engine</label><span class="setting-value">Local + Groq (opt)</span></div>
         </div>
@@ -1099,5 +1107,5 @@
 </script>
 <!-- FRIDAY OS portrait HUD interactions and live service rail -->
 <script src="js/hud-shell.js"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a48f3b5a5d3b54e3',t:'MTc5MTczNjA0Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
