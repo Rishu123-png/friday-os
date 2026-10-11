@@ -71,7 +71,10 @@ class Settings:
     MQTT_PASS: str = _env("MQTT_PASS")
     MQTT_PREFIX: str = _env("MQTT_PREFIX", "friday")
 
-    VERSION: str = "1.3.0"
+    # v1.0.1: unified with package.json and the v1.0.0 release tag. Three
+    # different version numbers (11.3.0 in Settings, 1.0.0 in package.json,
+    # 1.3.0 here) made it impossible to tell what build was running.
+    VERSION: str = "1.0.0"
 
     def configuration_errors(self) -> list[str]:
         errors: list[str] = []
